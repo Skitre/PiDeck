@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, Brain, ChevronRight, Copy, LoaderCircle } from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { sanitizeAgentText } from "./markdown-utils";
@@ -6,6 +6,7 @@ import { ToolView } from "./ToolView";
 import { formatDuration } from "./ToolCard";
 import {
   buildTranscriptRows,
+  reuseStableRows,
   type TranscriptBlock,
   type TranscriptRow,
 } from "./transcript-model";
@@ -48,7 +49,13 @@ function LazyMarkdownMessage({
 export function Transcript() {
   const session = useAppStore((state) => state.session);
   const messages = session?.messages ?? [];
-  const rows = useMemo(() => buildTranscriptRows(messages), [messages]);
+  const prevRowsRef = useRef<TranscriptRow[] | null>(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const rows = useMemo(
+    () => reuseStableRows(prevRowsRef.current, buildTranscriptRows(messages)),
+    [messages],
+  );
+  prevRowsRef.current = rows;
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const rowModes = useRef(new Set<string>());
@@ -203,7 +210,9 @@ function DurationLabel({
   );
 }
 
-function TranscriptRowView({
+// Memoized: with reuseStableRows keeping row references stable, only the
+// actively streaming row re-renders per animation frame.
+const TranscriptRowView = memo(function TranscriptRowView({
   row,
   mode,
   showCaret,
@@ -300,7 +309,7 @@ function TranscriptRowView({
       </div>
     </div>
   );
-}
+});
 
 function ExecutionTrace({
   blocks,

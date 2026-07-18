@@ -373,7 +373,15 @@ export function validateRequestParams<M extends HostMethod>(
         (params.value === undefined || isJsonValue(params.value))
         ? ok(params)
         : fail("invalid extensionUi.respond params", { method });
+    default:
+      // Exhaustiveness guard: adding a HostMethod without a params validator
+      // is a compile error here, not a silently-undefined result at runtime.
+      return assertNeverMethod(method);
   }
+}
+
+function assertNeverMethod(method: never): never {
+  throw new Error(`No params validator registered for method: ${String(method)}`);
 }
 
 export type ParsedHostRequest = {

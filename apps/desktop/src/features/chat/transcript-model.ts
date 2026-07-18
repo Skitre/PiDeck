@@ -404,3 +404,84 @@ export function buildTranscriptRows(messages: SerializableAgentMessage[]): Trans
       : {}),
   }));
 }
+
+function blockEquivalent(a: TranscriptBlock, b: TranscriptBlock): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "text" && b.kind === "text") return a.text === b.text;
+  if (a.kind === "thinking" && b.kind === "thinking") {
+    return a.text === b.text && a.startedAt === b.startedAt && a.endedAt === b.endedAt;
+  }
+  if (a.kind === "tool" && b.kind === "tool") {
+    const x = a.tool;
+    const y = b.tool;
+    return (
+      x.id === y.id &&
+      x.name === y.name &&
+      x.status === y.status &&
+      x.startedAt === y.startedAt &&
+      x.endedAt === y.endedAt &&
+      x.args === y.args &&
+      x.result === y.result &&
+      x.details === y.details
+    );
+  }
+  return false;
+}
+
+function blockListEquivalent(a: TranscriptBlock[], b: TranscriptBlock[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (!blockEquivalent(a[i], b[i])) return false;
+  }
+  return true;
+}
+
+function rowEquivalent(a: TranscriptRow, b: TranscriptRow): boolean {
+  if (
+    a.key !== b.key ||
+    a.role !== b.role ||
+    a.copyText !== b.copyText ||
+    a.startedAt !== b.startedAt ||
+    a.endedAt !== b.endedAt ||
+    !blockListEquivalent(a.blocks, b.blocks)
+  ) {
+    return false;
+  }
+  if (!a.sections !== !b.sections) return false;
+  if (a.sections && b.sections) {
+    return (
+      a.sections.stepCount === b.sections.stepCount &&
+      blockListEquivalent(a.sections.initialThinking, b.sections.initialThinking) &&
+      blockListEquivalent(a.sections.intro, b.sections.intro) &&
+      blockListEquivalent(a.sections.activity, b.sections.activity) &&
+      blockListEquivalent(a.sections.final, b.sections.final)
+    );
+  }
+  return true;
+}
+
+/**
+ * Streaming hot path: the reducer rebuilds `messages` on every agent event,
+ * so every derived row is a fresh object even when its content is unchanged.
+ * Substituting the previous row object for content-equivalent rows lets a
+ * memoized row component skip re-rendering the stable transcript prefix —
+ * only the actively streaming row reconciles per frame.
+ */
+export function reuseStableRows(
+  previous: TranscriptRow[] | null,
+  next: TranscriptRow[],
+): TranscriptRow[] {
+  if (!previous || previous.length === 0) return next;
+  const byKey = new Map(previous.map((row) => [row.key, row]));
+  let reusedAll = previous.length === next.length;
+  const merged = next.map((row, index) => {
+    const prior = byKey.get(row.key);
+    if (prior && rowEquivalent(prior, row)) {
+      if (reusedAll && previous[index] !== prior) reusedAll = false;
+      return prior;
+    }
+    reusedAll = false;
+    return row;
+  });
+  return reusedAll ? previous : merged;
+}

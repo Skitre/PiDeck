@@ -1,6 +1,71 @@
 import { describe, expect, it } from "vitest";
 import type { SerializableAgentMessage } from "@pideck/protocol";
-import { buildTranscriptRows, messageText } from "./transcript-model";
+import { buildTranscriptRows, messageText, reuseStableRows } from "./transcript-model";
+
+describe("reuseStableRows", () => {
+  const history: SerializableAgentMessage[] = [
+    { role: "user", content: [{ type: "text", text: "hi" }] },
+    { role: "assistant", content: [{ type: "text", text: "hello" }] },
+    { role: "user", content: [{ type: "text", text: "go" }] },
+  ];
+
+  it("keeps previous row object identities for content-equivalent rows", () => {
+    const first = buildTranscriptRows(history);
+    const second = reuseStableRows(first, buildTranscriptRows([...history]));
+    // Same content → the exact same array/objects, so memoized rows skip render
+    expect(second).toBe(first);
+  });
+
+  it("replaces only the row whose content changed during streaming", () => {
+    const first = reuseStableRows(null, buildTranscriptRows(history));
+    const streamed: SerializableAgentMessage[] = [
+      ...history,
+      { role: "assistant", content: [{ type: "text", text: "working on i" }] },
+    ];
+    const second = reuseStableRows(first, buildTranscriptRows(streamed));
+    expect(second).not.toBe(first);
+    expect(second[0]).toBe(first[0]);
+    expect(second[1]).toBe(first[1]);
+    expect(second[2]).toBe(first[2]);
+    expect(second[3]).not.toBe(first[3]);
+
+    const grown: SerializableAgentMessage[] = [
+      ...history,
+      { role: "assistant", content: [{ type: "text", text: "working on it" }] },
+    ];
+    const third = reuseStableRows(second, buildTranscriptRows(grown));
+    expect(third[0]).toBe(first[0]);
+    expect(third[3]).not.toBe(second[3]);
+    expect(third[3]?.copyText).toContain("working on it");
+  });
+
+  it("does not reuse a row when a tool status changes", () => {
+    const withTool: SerializableAgentMessage[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Running" },
+          { type: "toolCall", id: "t1", name: "bash", status: "running" },
+        ],
+      },
+    ];
+    const first = reuseStableRows(null, buildTranscriptRows(withTool));
+    const finished: SerializableAgentMessage[] = [
+      ...withTool,
+      {
+        role: "toolResult",
+        toolCallId: "t1",
+        toolName: "bash",
+        isError: false,
+        content: [{ type: "text", text: "ok" }],
+      },
+    ];
+    const second = reuseStableRows(first, buildTranscriptRows(finished));
+    expect(second[0]).not.toBe(first[0]);
+    const tool = second[0]?.blocks.find((block) => block.kind === "tool");
+    expect(tool?.kind === "tool" && tool.tool.status).toBe("done");
+  });
+});
 
 describe("buildTranscriptRows", () => {
   it("merges historical tool results into their assistant tool calls", () => {

@@ -895,7 +895,15 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
     case "piSettings.get":
     case "piSettings.patch":
       return isPiSettingsSnapshot(result) ? null : "invalid PiSettingsSnapshot";
+    default:
+      // Exhaustiveness guard: a new HostMethod without a result validator is a
+      // compile error here — outbound validation can never be silently skipped.
+      return assertNeverShape(method, "method result");
   }
+}
+
+function assertNeverShape(value: never, kind: string): never {
+  throw new Error(`No ${kind} validator registered for: ${String(value)}`);
 }
 
 export function validateEventPayloadShape(event: HostEventName, payload: unknown): string | null {
@@ -1030,5 +1038,8 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
         isString(payload.level)
         ? null
         : "invalid extensionUi.notification payload";
+    default:
+      // Exhaustiveness guard — same contract as validateMethodResultShape.
+      return assertNeverShape(event, "event payload");
   }
 }

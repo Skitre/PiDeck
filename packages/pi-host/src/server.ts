@@ -221,7 +221,25 @@ export class PiHostServer {
       return;
     }
 
-    const parsed = parseHostRequest(raw);
+    let parsed: ReturnType<typeof parseHostRequest>;
+    try {
+      parsed = parseHostRequest(raw);
+    } catch (err) {
+      // Validator internal failure must degrade to a protocol error, never an
+      // unhandled rejection that kills the host.
+      logger.error("parseHostRequest threw", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      this.writeResponse(
+        createFailureResponse(
+          this.identity.snapshot(),
+          "unknown",
+          "unknown",
+          createHostError("INTERNAL_ERROR", "Request validation failed internally"),
+        ),
+      );
+      return;
+    }
     if (!parsed.ok) {
       const id =
         typeof raw === "object" &&
