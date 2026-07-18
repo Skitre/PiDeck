@@ -1,20 +1,20 @@
 {
-  "name": "pi-desktop",
+  "name": "pideck",
   "private": true,
   "version": "0.1.0",
-  "description": "Pi Desktop Manager — Windows-first desktop GUI for Pi Coding Agent",
+  "description": "PiDeck — Windows-first desktop GUI for Pi Coding Agent",
   "packageManager": "pnpm@9.15.0",
   "engines": {
     "node": ">=22.19.0"
   },
   "scripts": {
-    "build": "pnpm --filter @pi-desktop/protocol run build && pnpm --filter @pi-desktop/pi-host run build && pnpm --filter @pi-desktop/desktop run build",
-    "typecheck": "pnpm --filter @pi-desktop/protocol run build && pnpm --filter @pi-desktop/protocol run typecheck && pnpm --filter @pi-desktop/pi-host run typecheck && pnpm --filter @pi-desktop/desktop run typecheck",
-    "test": "pnpm --filter @pi-desktop/protocol run build && pnpm -r --filter @pi-desktop/protocol --filter @pi-desktop/pi-host --filter @pi-desktop/desktop run test",
-    "dev:host": "pnpm --filter @pi-desktop/pi-host run dev",
-    "dev:desktop": "pnpm --filter @pi-desktop/desktop run dev",
+    "build": "pnpm --filter @pideck/protocol run build && pnpm --filter @pideck/pi-host run build && pnpm --filter @pideck/desktop run build",
+    "typecheck": "pnpm --filter @pideck/protocol run build && pnpm --filter @pideck/protocol run typecheck && pnpm --filter @pideck/pi-host run typecheck && pnpm --filter @pideck/desktop run typecheck",
+    "test": "pnpm --filter @pideck/protocol run build && pnpm -r --filter @pideck/protocol --filter @pideck/pi-host --filter @pideck/desktop run test",
+    "dev:host": "pnpm --filter @pideck/pi-host run dev",
+    "dev:desktop": "pnpm --filter @pideck/desktop run dev",
     "dev:fast": "node scripts/dev-fast.mjs",
-    "spike:sidecar": "pnpm --filter @pi-desktop/pi-host run spike:sidecar",
+    "spike:sidecar": "pnpm --filter @pideck/pi-host run spike:sidecar",
     "package:sidecar": "node scripts/package-release-sidecar.mjs",
     "package:sidecar:with-node": "node scripts/package-release-sidecar.mjs --prepare-runtime",
     "prepare:runtime": "node scripts/prepare-release-runtime.mjs",
@@ -29,7 +29,7 @@
     "p0:baseline": "node scripts/p0-evidence.mjs baseline",
     "verify:p0": "pnpm verify:docs && pnpm typecheck && pnpm test",
     "verify:release": "node scripts/verify-p0.mjs",
-    "lint": "pnpm -r --filter @pi-desktop/protocol --filter @pi-desktop/pi-host --filter @pi-desktop/desktop run lint"
+    "lint": "pnpm -r --filter @pideck/protocol --filter @pideck/pi-host --filter @pideck/desktop run lint"
   },
   "devDependencies": {
     "playwright-core": "1.61.1",

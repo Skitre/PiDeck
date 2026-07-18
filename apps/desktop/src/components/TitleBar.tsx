@@ -10,7 +10,7 @@ export function TitleBar() {
     >
       <div className="flex items-center gap-2 text-sm font-medium" data-tauri-drag-region>
         <span className="text-accent">π</span>
-        <span>Pi Desktop Manager</span>
+        <span>PiDeck</span>
       </div>
       <div className="flex items-center gap-3 text-xs text-muted">
         {host ? (

@@ -5,8 +5,8 @@ import type {
   SerializableToolInfo,
   SessionSnapshot,
   ToolSnapshot,
-} from "@pi-desktop/protocol";
-import { toJsonValue } from "@pi-desktop/protocol";
+} from "@pideck/protocol";
+import { toJsonValue } from "@pideck/protocol";
 
 export function buildToolSnapshot(args: {
   session: AgentSession;

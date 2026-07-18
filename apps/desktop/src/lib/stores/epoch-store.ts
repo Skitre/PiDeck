@@ -7,7 +7,7 @@ import type {
   SessionSnapshot,
   ToolSnapshot,
   WorkspaceSnapshot,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
 export type EpochState = {
   host: HostStatusSnapshot | null;

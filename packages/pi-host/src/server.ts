@@ -14,7 +14,7 @@ import {
   type HostStatusSnapshot,
   type ModelConfigHealth,
   type HostCapabilities,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import { IdentityState } from "./identity.js";
 import { AgentOperationLock, TryMutex } from "./locks.js";
 import { logger } from "./logger.js";

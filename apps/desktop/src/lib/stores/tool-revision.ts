@@ -1,4 +1,4 @@
-import type { ToolSnapshot } from "@pi-desktop/protocol";
+import type { ToolSnapshot } from "@pideck/protocol";
 
 export type ToolSnapshotAction = "apply" | "drop" | "recover";
 

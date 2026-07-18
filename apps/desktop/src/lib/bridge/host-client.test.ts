@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HostClient } from "./host-client.js";
-import type { HostEventMessage } from "@pi-desktop/protocol";
+import type { HostEventMessage } from "@pideck/protocol";
 
 describe("HostClient.shouldAcceptEvent", () => {
   const client = new HostClient();

@@ -6,7 +6,7 @@ import {
   type PackageMutationResult,
   type PackageSnapshot,
   type PackageUpdateSummary,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraph, WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { buildPackageSnapshot, type ResourceIdMap } from "./package-snapshot.js";

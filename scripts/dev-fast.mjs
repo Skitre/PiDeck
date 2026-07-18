@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriDir = join(root, "apps", "desktop", "src-tauri");
-const desktopExe = join(tauriDir, "target", "debug", "pi-desktop.exe");
+const desktopExe = join(tauriDir, "target", "debug", "pideck.exe");
 const devUrl = "http://localhost:1420/";
 const hostSrc = join(root, "packages", "pi-host", "src");
 const hostDist = join(root, "packages", "pi-host", "dist");
@@ -111,7 +111,7 @@ function syncHostResources(destination) {
 
   for (const protocolRoot of [
     join(destination, "vendor", "protocol"),
-    join(destination, "node_modules", "@pi-desktop", "protocol"),
+    join(destination, "node_modules", "@pideck", "protocol"),
   ]) {
     copyDirectoryContents(protocolDist, join(protocolRoot, "dist"));
     cpSync(protocolPackage, join(protocolRoot, "package.json"), { force: true });
@@ -121,13 +121,13 @@ function syncHostResources(destination) {
 function prepareDevHostResources() {
   const protocolMtime = ensurePackageBuild({
     label: "protocol",
-    packageName: "@pi-desktop/protocol",
+    packageName: "@pideck/protocol",
     sourceDirectory: protocolSrc,
     entry: protocolEntry,
   });
   ensurePackageBuild({
     label: "Pi Host",
-    packageName: "@pi-desktop/pi-host",
+    packageName: "@pideck/pi-host",
     sourceDirectory: hostSrc,
     entry: hostEntry,
     dependencyMtime: protocolMtime,
@@ -141,7 +141,7 @@ async function isDesktopViteReady() {
   try {
     const response = await fetch(devUrl);
     if (!response.ok) return false;
-    return (await response.text()).includes("<title>Pi Desktop Manager</title>");
+    return (await response.text()).includes("<title>PiDeck</title>");
   } catch {
     return false;
   }
@@ -186,7 +186,7 @@ async function main() {
   }
   if (!existsSync(desktopExe)) {
     throw new Error(
-      `Debug executable not found: ${desktopExe}\nRun "pnpm --filter @pi-desktop/desktop run tauri:dev" once to compile it.`,
+      `Debug executable not found: ${desktopExe}\nRun "pnpm --filter @pideck/desktop run tauri:dev" once to compile it.`,
     );
   }
 
@@ -197,7 +197,7 @@ async function main() {
   } else {
     console.log("[dev:fast] Starting Vite...");
     ownsVite = true;
-    vite = spawnPnpm(["--filter", "@pi-desktop/desktop", "run", "dev"]);
+    vite = spawnPnpm(["--filter", "@pideck/desktop", "run", "dev"]);
     vite.once("error", (error) => {
       viteStartError = error;
     });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SerializableAgentMessage } from "@pi-desktop/protocol";
+import type { SerializableAgentMessage } from "@pideck/protocol";
 import { buildTranscriptRows, messageText } from "./transcript-model";
 
 describe("buildTranscriptRows", () => {

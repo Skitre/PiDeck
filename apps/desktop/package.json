@@ -1,5 +1,5 @@
 {
-  "name": "@pi-desktop/desktop",
+  "name": "@pideck/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,7 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@pi-desktop/protocol": "workspace:*",
+    "@pideck/protocol": "workspace:*",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
     "@tauri-apps/api": "2.5.0",

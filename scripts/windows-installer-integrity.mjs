@@ -3,7 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const EXPECTED_PRODUCT = "Pi Desktop Manager";
+const EXPECTED_PRODUCT = "PiDeck";
 const NSIS_MARKER = "Nullsoft.NSIS.exehead";
 const MAX_NSIS_MARKER_OFFSET = 256 * 1024;
 const PROBE_BYTES = 2 * 1024 * 1024;

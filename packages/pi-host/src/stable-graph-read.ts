@@ -1,7 +1,7 @@
 /**
  * withStableGraphRead — R4 stable cwd-bound read under serviceGraphLock.
  */
-import { createHostError, type HostError, type HostIdentity } from "@pi-desktop/protocol";
+import { createHostError, type HostError, type HostIdentity } from "@pideck/protocol";
 import type { TryMutex } from "./locks.js";
 import type { IdentityState } from "./identity.js";
 

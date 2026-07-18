@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
-import { createHostError, type ModelSummary } from "@pi-desktop/protocol";
+import { createHostError, type ModelSummary } from "@pideck/protocol";
 import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { buildSessionSnapshot, buildToolSnapshot } from "./session-snapshot.js";

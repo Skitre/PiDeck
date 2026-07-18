@@ -9,7 +9,7 @@ import type {
   SessionSnapshot,
   ToolSnapshot,
   WorkspaceSnapshot,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import { hostClient } from "./host-client";
 import { activeSessionContext, workspaceContext } from "./host-context";
 

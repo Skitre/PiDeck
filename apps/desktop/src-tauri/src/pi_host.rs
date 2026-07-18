@@ -532,7 +532,7 @@ impl PiHostManager {
             .map_err(|e| format!("create agentDir {}: {e}", agent_dir.display()))?;
 
         eprintln!(
-            "[pi-desktop] starting host node={} entry={} cwd={} agentDir={}",
+            "[pideck] starting host node={} entry={} cwd={} agentDir={}",
             node.display(),
             entry.display(),
             work_dir.display(),
@@ -653,7 +653,7 @@ impl PiHostManager {
                             let mut logs = stderr_buf.lock().await;
                             push_stderr_tail(&mut logs, message.clone(), 50);
                         }
-                        eprintln!("[pi-desktop] {message}");
+                        eprintln!("[pideck] {message}");
                         let _ = app_err.emit("pi-host-stderr", message);
                         break;
                     }
@@ -705,7 +705,7 @@ impl PiHostManager {
                         }
                         Err(error) => {
                             let message = format!("Pi Host stdout transport read failed: {error}");
-                            eprintln!("[pi-desktop] {message}");
+                            eprintln!("[pideck] {message}");
                             read_failure = Some(message);
                             break;
                         }
@@ -808,7 +808,7 @@ impl PiHostManager {
         }
         match done.outcome {
             StartWaitOutcome::Ready(hid) => {
-                eprintln!("[pi-desktop] host.ready received");
+                eprintln!("[pideck] host.ready received");
                 if let Some(id) = hid {
                     self.host_instance_id = Some(id);
                 }
@@ -920,7 +920,7 @@ impl PiHostManager {
             let line = build_shutdown_line(&host_id, "shutdown");
             if self.host_instance_id.is_none() {
                 eprintln!(
-                    "[pi-desktop] shutdown without hostInstanceId — sending expectedHostInstanceId=unknown then terminate"
+                    "[pideck] shutdown without hostInstanceId — sending expectedHostInstanceId=unknown then terminate"
                 );
             }
             let _ = self.send_line(line).await;

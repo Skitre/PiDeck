@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HostIdentity, HostStatusSnapshot } from "@pi-desktop/protocol";
+import type { HostIdentity, HostStatusSnapshot } from "@pideck/protocol";
 import {
   captureRequestGeneration,
   isCurrentRequestGeneration,

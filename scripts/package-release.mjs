@@ -213,7 +213,7 @@ function validatePackagedRuntime(releaseDir, expectedResourceManifest) {
   }
   if (existsSync(hostPackagePath)) {
     const name = JSON.parse(readFileSync(hostPackagePath, "utf8")).name;
-    if (name !== "pi-desktop-host-release") {
+    if (name !== "pideck-host-release") {
       errors.push(`packaged pi-host/package.json identity is ${name ?? "missing"}`);
     }
   }
@@ -277,7 +277,7 @@ for (const stalePath of [
   join(bundleRoot, "resources", "pi-host"),
   join(bundleRoot, "resources", "node"),
   join(bundleRoot, "resources", "git"),
-  join(bundleRoot, "pi-desktop.exe"),
+  join(bundleRoot, "pideck.exe"),
   join(bundleRoot, "bundle", "nsis"),
 ]) {
   rmSync(stalePath, { recursive: true, force: true });
@@ -304,13 +304,13 @@ if (tauriArgs) {
 } else {
   const r = spawnSync(
     "pnpm",
-    ["--filter", "@pi-desktop/desktop", "exec", "tauri", "build", "--bundles", "nsis"],
+    ["--filter", "@pideck/desktop", "exec", "tauri", "build", "--bundles", "nsis"],
     { cwd: root, stdio: "inherit", shell: true, env: process.env },
   );
   tauriStatus = r.status ?? 1;
 }
 
-const desktopExecutable = join(bundleRoot, "pi-desktop.exe");
+const desktopExecutable = join(bundleRoot, "pideck.exe");
 const installer = findPrimaryInstaller(bundleRoot);
 const packagedRuntimeErrors = validatePackagedRuntime(
   bundleRoot,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HostIdentity } from "@pi-desktop/protocol";
+import type { HostIdentity } from "@pideck/protocol";
 import { PiHostServer } from "./server.js";
 
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";

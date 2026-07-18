@@ -58,15 +58,15 @@ function installRoots() {
   const local = process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local");
   const pf = process.env.ProgramFiles || "C:\\Program Files";
   return [
-    join(local, "Pi Desktop Manager"),
-    join(local, "Programs", "Pi Desktop Manager"),
-    join(pf, "Pi Desktop Manager"),
+    join(local, "PiDeck"),
+    join(local, "Programs", "PiDeck"),
+    join(pf, "PiDeck"),
   ];
 }
 
 function killRunningApp() {
   // Best-effort: avoid NSIS failure when app holds files open
-  spawnSync("taskkill", ["/F", "/IM", "pi-desktop.exe", "/T"], {
+  spawnSync("taskkill", ["/F", "/IM", "pideck.exe", "/T"], {
     shell: true,
     encoding: "utf8",
     timeout: 15_000,
@@ -152,19 +152,19 @@ const installerSha = manifest.primaryInstallerSha256.toLowerCase();
 // Pre-uninstall previous install so silent reinstall is clean
 killRunningApp();
 const knownInstallRoots = installRoots();
-const preExe = findExe("pi-desktop.exe", knownInstallRoots);
+const preExe = findExe("pideck.exe", knownInstallRoots);
 let preUninstallExit = null;
 if (preExe) {
   const preUninst =
     findExe("uninstall.exe", [dirname(preExe)]) ||
-    findExe("Uninstall Pi Desktop Manager.exe", [dirname(preExe)]);
+    findExe("Uninstall PiDeck.exe", [dirname(preExe)]);
   if (preUninst && existsSync(preUninst)) {
     console.log("[smoke:release] pre-uninstall", preUninst);
     const previous = runSilentNsis(preUninst, 120_000);
     preUninstallExit = previous.status;
     spawnSync(process.execPath, ["-e", "setTimeout(()=>{},1500)"], { timeout: 5_000 });
   }
-  const remainingPreExe = findExe("pi-desktop.exe", knownInstallRoots);
+  const remainingPreExe = findExe("pideck.exe", knownInstallRoots);
   if (preUninstallExit !== 0 || remainingPreExe) {
     writeSmoke({
       status: "pre_uninstall_failed",
@@ -220,7 +220,7 @@ if (preExecutionSha256 !== installerSha || !preExecutionIntegrity.ok) {
 console.log("[smoke:release] installing", installer);
 const inst = runSilentNsis(installer, 300_000);
 
-const exe = findExe("pi-desktop.exe", installRoots()) || null;
+const exe = findExe("pideck.exe", installRoots()) || null;
 const installAccepted = inst.status === 0 && !inst.error && Boolean(exe);
 
 if (!installAccepted) {
@@ -390,8 +390,8 @@ const installedE2e = spawnSync(
       ...process.env,
       PATH: scrubbedPath,
       NODE_OPTIONS: "",
-      PI_DESKTOP_E2E_EXE: exe,
-      PI_DESKTOP_E2E_EXPECTED_SHA256: installedExeSha256,
+      PIDECK_E2E_EXE: exe,
+      PIDECK_E2E_EXPECTED_SHA256: installedExeSha256,
     },
   },
 );
@@ -404,7 +404,7 @@ spawnSync(process.execPath, ["-e", "setTimeout(()=>{},1000)"], { timeout: 3_000 
 // Uninstall
 const uninst =
   findExe("uninstall.exe", [installDir]) ||
-  findExe("Uninstall Pi Desktop Manager.exe", [installDir]);
+  findExe("Uninstall PiDeck.exe", [installDir]);
 let uninstallExit = null;
 let uninstallOk = false;
 if (uninst && existsSync(uninst)) {
@@ -416,15 +416,15 @@ if (uninst && existsSync(uninst)) {
   uninstallOk = false;
 }
 
-// Orphan audit: pi-desktop.exe should not remain running
-const tasklist = spawnSync("tasklist", ["/FI", "IMAGENAME eq pi-desktop.exe", "/NH"], {
+// Orphan audit: pideck.exe should not remain running
+const tasklist = spawnSync("tasklist", ["/FI", "IMAGENAME eq pideck.exe", "/NH"], {
   shell: true,
   encoding: "utf8",
   timeout: 10_000,
 });
 const tasklistAuditOk = tasklist.status === 0 && !tasklist.error;
 const orphanDesktop =
-  (tasklist.stdout || "").toLowerCase().includes("pi-desktop.exe") &&
+  (tasklist.stdout || "").toLowerCase().includes("pideck.exe") &&
   !(tasklist.stdout || "").toLowerCase().includes("no tasks");
 const escapedInstallDir = installDir.replace(/'/g, "''");
 const runtimeAudit = spawnSync(
@@ -432,7 +432,7 @@ const runtimeAudit = spawnSync(
   [
     "-NoProfile",
     "-Command",
-    `$p = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escapedInstallDir}*' -and $_.Name -in @('node.exe','npm.exe','git.exe','pi-desktop.exe') }; $p | Select-Object Name,ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress`,
+    `$p = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escapedInstallDir}*' -and $_.Name -in @('node.exe','npm.exe','git.exe','pideck.exe') }; $p | Select-Object Name,ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress`,
   ],
   { shell: false, encoding: "utf8", timeout: 15_000 },
 );

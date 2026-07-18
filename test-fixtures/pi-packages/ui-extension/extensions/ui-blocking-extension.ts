@@ -19,13 +19,13 @@ export default function uiBlockingExtension(pi: ExtensionAPI) {
     if (!ctx.hasUI || !ctx.ui) {
       return;
     }
-    const marker = process.env.PI_DESKTOP_UI_MARKER;
+    const marker = process.env.PIDECK_UI_MARKER;
     if (!marker) {
-      throw new Error("ui-blocking-extension: missing PI_DESKTOP_UI_MARKER");
+      throw new Error("ui-blocking-extension: missing PIDECK_UI_MARKER");
     }
-    const nonce = process.env.PI_DESKTOP_UI_NONCE;
+    const nonce = process.env.PIDECK_UI_NONCE;
     if (!nonce) {
-      throw new Error("ui-blocking-extension: missing PI_DESKTOP_UI_NONCE");
+      throw new Error("ui-blocking-extension: missing PIDECK_UI_NONCE");
     }
     invocationCount += 1;
     const runtimeActive = pi.getFlag("ui-fixture-active") === true;

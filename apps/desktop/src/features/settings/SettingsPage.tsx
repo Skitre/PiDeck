@@ -304,13 +304,13 @@ export function SettingsPage({
         </button>
         <div>
           <h1 className="text-sm font-semibold">Settings</h1>
-          <p className="text-[11px] text-muted">Configure Pi Desktop and its runtime</p>
+          <p className="text-[11px] text-muted">Configure PiDeck and its runtime</p>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
         <nav className="w-52 shrink-0 border-r border-border bg-sidebar px-3 py-4">
-          <p className="mb-2 px-2 text-[11px] font-medium text-muted">Pi Desktop</p>
+          <p className="mb-2 px-2 text-[11px] font-medium text-muted">PiDeck</p>
           {SETTINGS_NAV.map(({ id, label, icon: Icon }) => (
             <button
               key={id}

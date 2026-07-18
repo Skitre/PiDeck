@@ -35,7 +35,7 @@ function findFixtureExtension(): string {
 }
 
 async function main(): Promise<void> {
-  console.log("[spike] Pi Desktop sidecar/Extension spike starting");
+  console.log("[spike] PiDeck sidecar/Extension spike starting");
   console.log(`[spike] SDK version: ${SDK_VERSION}`);
   console.log(`[spike] Node: ${process.version}`);
   console.log(`[spike] NOT using global pi CLI import`);
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     throw new Error(`Expected SDK 0.80.7, got ${SDK_VERSION}`);
   }
 
-  const root = mkdtempSync(join(tmpdir(), "pi-desktop-spike-"));
+  const root = mkdtempSync(join(tmpdir(), "pideck-spike-"));
   const agentDir = join(root, "agent");
   const projectDir = join(root, "project");
   mkdirSync(agentDir, { recursive: true });

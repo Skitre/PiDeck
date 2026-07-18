@@ -134,8 +134,8 @@ const env = {
   ...process.env,
   PATH: childPath,
   PI_CODING_AGENT_DIR: agentDir,
-  PI_DESKTOP_SPIKE_NONCE: nonce,
-  PI_DESKTOP_SPIKE_MARKER: markerPath,
+  PIDECK_SPIKE_NONCE: nonce,
+  PIDECK_SPIKE_MARKER: markerPath,
 };
 
 const p = spawn(nodeExe, [hostEntry, `--agent-dir=${agentDir}`], {
@@ -306,9 +306,9 @@ try {
       timeout: 900_000,
       env: {
         ...process.env,
-        PI_DESKTOP_E2E_MODE: "m0",
-        PI_DESKTOP_E2E_EXE: releaseManifest.desktopExecutable,
-        PI_DESKTOP_E2E_EXPECTED_SHA256: releaseManifest.desktopExecutableSha256,
+        PIDECK_E2E_MODE: "m0",
+        PIDECK_E2E_EXE: releaseManifest.desktopExecutable,
+        PIDECK_E2E_EXPECTED_SHA256: releaseManifest.desktopExecutableSha256,
       },
     },
   );

@@ -12,7 +12,7 @@ import {
   createHostError,
   type HostEventName,
   type HostIdentity,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import type { MethodHandler as ServerMethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { logger } from "./logger.js";
@@ -138,7 +138,7 @@ function createDesktopStubTheme(): Theme {
     toolSuccessBg: "#000000",
     toolErrorBg: "#000000",
   } as const;
-  return new ThemeClass(fg, bg, "256color", { name: "pi-desktop-stub" });
+  return new ThemeClass(fg, bg, "256color", { name: "pideck-stub" });
 }
 
 /**
@@ -272,7 +272,7 @@ export function createExtensionUiContext(
     custom: async () => {
       // P0: TUI-only API — reject with explicit unsupported error (not silent cast).
       throw new Error(
-        "ExtensionUIContext.custom is TUI-only and unsupported in Pi Desktop Manager",
+        "ExtensionUIContext.custom is TUI-only and unsupported in PiDeck",
       );
     },
     pasteToEditor: () => {},
@@ -291,11 +291,11 @@ export function createExtensionUiContext(
     get theme() {
       return desktopTheme;
     },
-    getAllThemes: () => [{ name: "pi-desktop-stub", path: undefined }],
-    getTheme: (name) => (name === "pi-desktop-stub" ? desktopTheme : undefined),
+    getAllThemes: () => [{ name: "pideck-stub", path: undefined }],
+    getTheme: (name) => (name === "pideck-stub" ? desktopTheme : undefined),
     setTheme: () => ({
       success: false,
-      error: "Theme switching is unsupported in Pi Desktop Manager",
+      error: "Theme switching is unsupported in PiDeck",
     }),
     getToolsExpanded: () => false,
     setToolsExpanded: () => {},

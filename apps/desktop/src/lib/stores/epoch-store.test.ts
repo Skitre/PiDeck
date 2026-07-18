@@ -6,7 +6,7 @@ import {
   emptyEpoch,
   noteSequence,
 } from "./epoch-store.js";
-import type { HostStatusSnapshot, SessionSnapshot, WorkspaceSnapshot } from "@pi-desktop/protocol";
+import type { HostStatusSnapshot, SessionSnapshot, WorkspaceSnapshot } from "@pideck/protocol";
 
 const host = (id: string): HostStatusSnapshot =>
   ({

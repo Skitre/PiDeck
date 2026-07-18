@@ -1,4 +1,4 @@
-import { createHostError } from "@pi-desktop/protocol";
+import { createHostError } from "@pideck/protocol";
 import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 

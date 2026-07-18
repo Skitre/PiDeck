@@ -13,7 +13,7 @@ export type TempAgentLayout = {
   cleanup: () => void;
 };
 
-export function createTempAgentLayout(prefix = "pi-desktop-test-"): TempAgentLayout {
+export function createTempAgentLayout(prefix = "pideck-test-"): TempAgentLayout {
   const root = mkdtempSync(join(tmpdir(), prefix));
   const agentDir = join(root, "agent");
   const projectDir = join(root, "project");

@@ -6,7 +6,7 @@ import {
   cancelPendingForIdentity,
   cancelAllPending,
 } from "./extension-ui-bridge.js";
-import type { HostEventName, HostIdentity } from "@pi-desktop/protocol";
+import type { HostEventName, HostIdentity } from "@pideck/protocol";
 
 const id: HostIdentity = {
   hostInstanceId: "h",

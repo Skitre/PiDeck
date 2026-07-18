@@ -1,4 +1,4 @@
-import { toJsonValue, type SerializableAgentSessionEvent } from "@pi-desktop/protocol";
+import { toJsonValue, type SerializableAgentSessionEvent } from "@pideck/protocol";
 
 /**
  * Normalize AgentSession events for JSONL transport.

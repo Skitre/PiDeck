@@ -10,7 +10,7 @@ import type {
   PackageResource,
   PackageSnapshot,
   TopLevelResource,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
 export type ResourceIdMap = Map<
   string,

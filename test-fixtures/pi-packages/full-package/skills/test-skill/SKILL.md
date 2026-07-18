@@ -1,6 +1,6 @@
 ---
 name: test-skill
-description: Harmless test skill for Pi Desktop fixtures
+description: Harmless test skill for PiDeck fixtures
 ---
 
 # Test Skill

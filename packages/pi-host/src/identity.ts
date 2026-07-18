@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { HostIdentity } from "@pi-desktop/protocol";
+import type { HostIdentity } from "@pideck/protocol";
 
 export class IdentityState {
   readonly hostInstanceId: string = randomUUID();

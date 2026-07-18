@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capabilities for Pi Desktop","local":true,"windows":["main"],"permissions":["core:default","dialog:default",{"identifier":"shell:allow-open","allow":[{"url":"https://**"},{"url":"http://**"}]}]}}
+{"default":{"identifier":"default","description":"Default capabilities for PiDeck","local":true,"windows":["main"],"permissions":["core:default","dialog:default",{"identifier":"shell:allow-open","allow":[{"url":"https://**"},{"url":"http://**"}]}]}}

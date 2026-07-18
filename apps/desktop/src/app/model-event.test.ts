@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { SessionSnapshot } from "@pi-desktop/protocol";
+import type { SessionSnapshot } from "@pideck/protocol";
 import { useAppStore } from "../lib/stores/app-store";
 import { applyModelChanged } from "./App";
 

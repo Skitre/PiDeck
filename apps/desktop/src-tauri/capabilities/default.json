@@ -1,7 +1,7 @@
 {
   "$schema": "https://scala.tauri.app/config.schema.json",
   "identifier": "default",
-  "description": "Default capabilities for Pi Desktop",
+  "description": "Default capabilities for PiDeck",
   "windows": ["main"],
   "permissions": [
     "core:default",

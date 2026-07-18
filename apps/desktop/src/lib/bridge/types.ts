@@ -8,7 +8,7 @@ import type {
   DesktopSettings,
   ExtensionUiRequest,
   ToolSnapshot,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
 export type BridgeState = {
   connected: boolean;

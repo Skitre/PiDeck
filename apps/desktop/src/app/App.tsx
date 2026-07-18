@@ -22,7 +22,7 @@ import {
   persistDesktopSettings,
   persistRecentDesktopLocation,
 } from "../lib/desktop-settings";
-import type { HostEventEnvelope, HostEventPayloadMap } from "@pi-desktop/protocol";
+import type { HostEventEnvelope, HostEventPayloadMap } from "@pideck/protocol";
 
 let rehydrateInFlight: Promise<void> | null = null;
 
@@ -494,7 +494,7 @@ export function App() {
               let lastError: unknown;
               for (let attempt = 0; attempt < 5 && !cancelled; attempt += 1) {
                 try {
-                  const status = await hostClient.hello("pi-desktop", "0.1.0");
+                  const status = await hostClient.hello("pideck", "0.1.0");
                   if (expectedHostId !== "bootstrap" && status.hostInstanceId !== expectedHostId) {
                     throw new Error("Host generation changed during hello");
                   }

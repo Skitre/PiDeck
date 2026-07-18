@@ -34,7 +34,7 @@ pub fn run() {
                 // so IPC commands and app exit stay responsive during startup.
                 if let Err(e) = pi_host::start_unlocked(&state.host, pi_host::StartKind::Fresh).await
                 {
-                    eprintln!("[pi-desktop] failed to start host: {e}");
+                    eprintln!("[pideck] failed to start host: {e}");
                     // Surface to UI as host.fatal so the banner shows the real cause
                     let _ = handle.emit(
                         "pi-host-stdout",
@@ -68,12 +68,12 @@ pub fn run() {
                 let handle = handle_ar.clone();
                 tauri::async_runtime::spawn(async move {
                     let state = handle.state::<AppState>();
-                    eprintln!("[pi-desktop] auto-restarting Host once after crash");
+                    eprintln!("[pideck] auto-restarting Host once after crash");
                     if let Err(e) =
                         pi_host::start_unlocked(&state.host, pi_host::StartKind::AutoRestartAfterCrash)
                             .await
                     {
-                        eprintln!("[pi-desktop] auto-restart failed: {e}");
+                        eprintln!("[pideck] auto-restart failed: {e}");
                         let _ = handle.emit(
                             "pi-host-stdout",
                             serde_json::json!({

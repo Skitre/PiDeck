@@ -46,7 +46,7 @@ if (compacted) {
   info.layout = "expanded-node_modules";
   need(expandedSdk, "SDK package missing under pi-host/node_modules");
   need(
-    join(res, "pi-host/node_modules/@pi-desktop/protocol/package.json"),
+    join(res, "pi-host/node_modules/@pideck/protocol/package.json"),
     "protocol package missing under pi-host/node_modules",
   );
 }
@@ -67,7 +67,7 @@ if (existsSync(hostRoot)) {
 
 if (existsSync(join(res, "pi-host/package.json"))) {
   const n = JSON.parse(readFileSync(join(res, "pi-host/package.json"), "utf8")).name;
-  if (n === "@pi-desktop/protocol") {
+  if (n === "@pideck/protocol") {
     errors.push("pi-host/package.json overwritten by protocol package (flatten collision)");
   }
   info.hostPackageName = n;

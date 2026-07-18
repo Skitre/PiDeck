@@ -20,7 +20,7 @@ import {
   type ProviderSnapshot,
   type ThinkingLevel,
   type ThinkingLevelMap,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { rebindCurrentSessionModel } from "./model-thinking.js";

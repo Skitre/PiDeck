@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelSummary } from "@pi-desktop/protocol";
+import type { ModelSummary } from "@pideck/protocol";
 import { includeCurrentModel, thinkingLevelsForModel } from "./ChatHeader";
 
 const current: ModelSummary = {

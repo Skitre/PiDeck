@@ -1,4 +1,4 @@
-import type { HostEventEnvelope, SessionRuntimeState } from "@pi-desktop/protocol";
+import type { HostEventEnvelope, SessionRuntimeState } from "@pideck/protocol";
 
 export type EventIdentityState = {
   hostInstanceId: string | null;

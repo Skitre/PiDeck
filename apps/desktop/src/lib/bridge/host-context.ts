@@ -14,7 +14,7 @@ import type {
   WorkspaceContext,
   WorkspacePackageContext,
   WorkspaceSnapshot,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
 export function hostContext(host: HostStatusSnapshot): HostContext {
   return { expectedHostInstanceId: host.hostInstanceId };

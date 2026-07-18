@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn files_are_revealed_not_opened() {
-        let dir = std::env::temp_dir().join("pi-desktop-open-path-test");
+        let dir = std::env::temp_dir().join("pideck-open-path-test");
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("sample.exe");
         std::fs::write(&file, b"not really an exe").unwrap();

@@ -10,7 +10,7 @@ import {
   type HostRequestParams,
   type HostResponseEnvelope,
   type HostStatusSnapshot,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
 export type HostTransport = {
   send: (line: string) => void | Promise<void>;
@@ -206,7 +206,7 @@ export class HostClient {
     }) as Promise<HostResponseEnvelope<M>>;
   }
 
-  async hello(clientName = "pi-desktop", clientVersion = "0.1.0"): Promise<HostStatusSnapshot> {
+  async hello(clientName = "pideck", clientVersion = "0.1.0"): Promise<HostStatusSnapshot> {
     const res = await this.request(
       "system.hello",
       {} as HostContextMap["system.hello"],

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { HostEventName, HostIdentity } from "@pi-desktop/protocol";
+import type { HostEventName, HostIdentity } from "@pideck/protocol";
 import type { PiHostServer } from "./server.js";
 import { TryMutex } from "./locks.js";
 import {

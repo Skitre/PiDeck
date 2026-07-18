@@ -2184,7 +2184,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pi-desktop"
+name = "pideck"
 version = "0.1.0"
 dependencies = [
  "dirs",

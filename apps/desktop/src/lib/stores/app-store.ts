@@ -13,7 +13,7 @@ import type {
   HostEventPayloadMap,
   JsonValue,
   SessionSummary,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import {
   applyPackageSnapshot as epochApplyPackages,
   applySessionSnapshot as epochApplySession,

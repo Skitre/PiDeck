@@ -19,9 +19,9 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const resultsDir = join(root, "artifacts", "p0", "e2e-latest");
 const releaseExe = join(
   root,
-  "apps/desktop/src-tauri/target/release/pi-desktop.exe",
+  "apps/desktop/src-tauri/target/release/pideck.exe",
 );
-const exe = process.env.PI_DESKTOP_E2E_EXE || releaseExe;
+const exe = process.env.PIDECK_E2E_EXE || releaseExe;
 const releaseManifestPath = join(
   root,
   "apps/desktop/src-tauri/target/release-staging/PACKAGE_RELEASE.json",
@@ -34,7 +34,7 @@ const uiFixturePackage = join(
   root,
   "test-fixtures/pi-packages/ui-extension",
 );
-const workflowMode = process.env.PI_DESKTOP_E2E_MODE === "m0" ? "m0" : "full";
+const workflowMode = process.env.PIDECK_E2E_MODE === "m0" ? "m0" : "full";
 mkdirSync(resultsDir, { recursive: true });
 
 const steps = [];
@@ -86,8 +86,8 @@ function fileSha256(path) {
 }
 
 function expectedExecutableSha256() {
-  if (process.env.PI_DESKTOP_E2E_EXPECTED_SHA256) {
-    return process.env.PI_DESKTOP_E2E_EXPECTED_SHA256.toLowerCase();
+  if (process.env.PIDECK_E2E_EXPECTED_SHA256) {
+    return process.env.PIDECK_E2E_EXPECTED_SHA256.toLowerCase();
   }
   if (!existsSync(releaseManifestPath)) {
     throw new Error(`release candidate manifest missing: ${releaseManifestPath}`);
@@ -293,7 +293,7 @@ function auditRuntimeProcesses() {
     [
       "-NoProfile",
       "-Command",
-      `$root='${escapedRoot}'; $p=Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('node.exe','npm.exe','git.exe','pi-desktop.exe') -and $_.CommandLine -like ('*'+$root+'*') }; $p | Select-Object Name,ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress`,
+      `$root='${escapedRoot}'; $p=Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('node.exe','npm.exe','git.exe','pideck.exe') -and $_.CommandLine -like ('*'+$root+'*') }; $p | Select-Object Name,ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress`,
     ],
     { shell: false, encoding: "utf8", timeout: 15_000 },
   );
@@ -350,7 +350,7 @@ try {
   }
   record("desktop.candidate.verified", { executableSha256 });
 
-  profileRoot = mkdtempSync(join(tmpdir(), "pi-desktop-e2e-"));
+  profileRoot = mkdtempSync(join(tmpdir(), "pideck-e2e-"));
   const userProfile = join(profileRoot, "user");
   const appData = join(userProfile, "AppData", "Roaming");
   const localAppData = join(userProfile, "AppData", "Local");
@@ -391,7 +391,7 @@ try {
     mkdirSync(npmPackDir, { recursive: true });
     const npmPackageJsonPath = join(npmFixtureDir, "package.json");
     const npmPackageJson = JSON.parse(readFileSync(npmPackageJsonPath, "utf8"));
-    npmPackageJson.name = "pi-desktop-npm-fixture";
+    npmPackageJson.name = "pideck-npm-fixture";
     writeFileSync(npmPackageJsonPath, JSON.stringify(npmPackageJson, null, 2));
     const npmPack = spawnSync(
       bundledNode,
@@ -411,14 +411,14 @@ try {
     const npmTarball = join(npmPackDir, npmPackResult[0].filename);
     npmFixtureSource = `npm:file:${npmTarball.replace(/\\/g, "/")}`;
 
-    const gitWorkDir = join(profileRoot, "git-work", "pi-desktop-git-fixture");
+    const gitWorkDir = join(profileRoot, "git-work", "pideck-git-fixture");
     const gitServeRoot = join(profileRoot, "git-serve");
-    const gitBareDir = join(gitServeRoot, "owner", "pi-desktop-git-fixture.git");
+    const gitBareDir = join(gitServeRoot, "owner", "pideck-git-fixture.git");
     cpSync(fixturePackage, gitWorkDir, { recursive: true });
     mkdirSync(dirname(gitBareDir), { recursive: true });
     const gitPackageJsonPath = join(gitWorkDir, "package.json");
     const gitPackageJson = JSON.parse(readFileSync(gitPackageJsonPath, "utf8"));
-    gitPackageJson.name = "pi-desktop-git-fixture";
+    gitPackageJson.name = "pideck-git-fixture";
     writeFileSync(gitPackageJsonPath, JSON.stringify(gitPackageJson, null, 2));
     for (const args of [
       ["init"],
@@ -466,7 +466,7 @@ try {
     if (gitDaemon.exitCode !== null) {
       throw new Error(`controlled git daemon exited early with ${gitDaemon.exitCode}`);
     }
-    gitFixtureSource = `git://127.0.0.1:${gitPort}/owner/pi-desktop-git-fixture.git`;
+    gitFixtureSource = `git://127.0.0.1:${gitPort}/owner/pideck-git-fixture.git`;
     record("package.fixtures.prepared", {
       npmSource: npmFixtureSource,
       gitSource: gitFixtureSource,
@@ -484,10 +484,10 @@ try {
       HOME: userProfile,
       APPDATA: appData,
       LOCALAPPDATA: localAppData,
-      PI_DESKTOP_CONFIG_DIR: configDir,
+      PIDECK_CONFIG_DIR: configDir,
       PI_CODING_AGENT_DIR: agentDir,
-      PI_DESKTOP_UI_MARKER: uiMarkerPath,
-      PI_DESKTOP_UI_NONCE: uiNonce,
+      PIDECK_UI_MARKER: uiMarkerPath,
+      PIDECK_UI_NONCE: uiNonce,
       WEBVIEW2_USER_DATA_FOLDER: webviewData,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
     },
@@ -515,7 +515,7 @@ try {
     if (pageErrors.length > 100) pageErrors.shift();
   });
   await page.waitForLoadState("domcontentloaded");
-  await page.getByText("Pi Desktop Manager", { exact: true }).waitFor({ timeout: 30_000 });
+  await page.getByText("PiDeck", { exact: true }).waitFor({ timeout: 30_000 });
   record("desktop.window.attached", { title: await page.title() });
 
   await page.getByText(projectDir, { exact: false }).first().waitFor({ timeout: 210_000 });
@@ -574,8 +574,8 @@ try {
 
     await page.locator("select").filter({ has: page.locator('option[value="project"]') }).selectOption("user");
     for (const [kind, source, rowName] of [
-      ["npm", npmFixtureSource, /^pi-desktop-npm-fixture\b/i],
-      ["git", gitFixtureSource, /^pi-desktop-git-fixture\b/i],
+      ["npm", npmFixtureSource, /^pideck-npm-fixture\b/i],
+      ["git", gitFixtureSource, /^pideck-git-fixture\b/i],
     ]) {
       if (!source) throw new Error(`${kind} fixture source was not prepared`);
       await sourceInput.fill(source);
@@ -617,7 +617,7 @@ try {
   ) {
     throw new Error(`Extension UI marker mismatch: ${marker}`);
   }
-  const uiPackageRow = page.getByRole("button", { name: /^pi-desktop-ui-extension-fixture\b/i });
+  const uiPackageRow = page.getByRole("button", { name: /^pideck-ui-extension-fixture\b/i });
   await uiPackageRow.waitFor({ timeout: 180_000 });
   record("extension-ui.release-path", {
     source: uiFixturePackage,

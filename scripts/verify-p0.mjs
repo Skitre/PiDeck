@@ -52,8 +52,8 @@ for (const [name, cmd, args] of gates) {
   const candidateEnv =
     candidate && (name === "m0" || name === "e2e")
       ? {
-          PI_DESKTOP_E2E_EXE: candidate.desktopExecutable,
-          PI_DESKTOP_E2E_EXPECTED_SHA256: candidate.desktopExecutableSha256,
+          PIDECK_E2E_EXE: candidate.desktopExecutable,
+          PIDECK_E2E_EXPECTED_SHA256: candidate.desktopExecutableSha256,
         }
       : {};
   const r = runCaptured(

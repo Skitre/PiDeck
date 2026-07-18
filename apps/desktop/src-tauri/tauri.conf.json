@@ -1,18 +1,18 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Pi Desktop Manager",
+  "productName": "PiDeck",
   "version": "0.1.0",
-  "identifier": "com.pidesktop.manager",
+  "identifier": "com.skitre.pideck",
   "build": {
-    "beforeDevCommand": "pnpm --filter @pi-desktop/desktop dev",
+    "beforeDevCommand": "pnpm --filter @pideck/desktop dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm --filter @pi-desktop/desktop build",
+    "beforeBuildCommand": "pnpm --filter @pideck/desktop build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
-        "title": "Pi Desktop Manager",
+        "title": "PiDeck",
         "width": 1280,
         "height": 800,
         "minWidth": 960,

@@ -27,7 +27,7 @@ const uiExtensionFixture = join(
 );
 
 function createTempAgent(): { agentDir: string; projectDir: string; root: string } {
-  const root = mkdtempSync(join(tmpdir(), "pi-desktop-test-"));
+  const root = mkdtempSync(join(tmpdir(), "pideck-test-"));
   const agentDir = join(root, "agent");
   const projectDir = join(root, "project");
   mkdirSync(agentDir, { recursive: true });
@@ -264,8 +264,8 @@ describe("Pi Host integration", () => {
     const marker = join(local.root, "ui-marker.txt");
     const nonce = randomUUID();
     const uiHost = new HostProcess(local.agentDir, {
-      PI_DESKTOP_UI_MARKER: marker,
-      PI_DESKTOP_UI_NONCE: nonce,
+      PIDECK_UI_MARKER: marker,
+      PIDECK_UI_NONCE: nonce,
     });
 
     try {

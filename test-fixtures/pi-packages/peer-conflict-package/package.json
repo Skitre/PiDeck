@@ -1,5 +1,5 @@
 {
-  "name": "@pi-desktop-fixtures/peer-conflict-package",
+  "name": "@pideck-fixtures/peer-conflict-package",
   "version": "1.0.0",
   "private": true,
   "description": "Local package fixture with peerDependencies used to exercise DefaultPackageManager remove under peer conflicts (0.80.7 regression). Install/remove only via SDK; no public registry.",

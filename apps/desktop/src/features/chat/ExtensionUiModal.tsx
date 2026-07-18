@@ -1,4 +1,4 @@
-import type { JsonValue } from "@pi-desktop/protocol";
+import type { JsonValue } from "@pideck/protocol";
 import { useEffect, useId, useRef, useState } from "react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";

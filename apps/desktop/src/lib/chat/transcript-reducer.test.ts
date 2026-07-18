@@ -4,7 +4,7 @@ import {
   applyAgentEventBatch,
   type AgentEventEnvelope,
 } from "./transcript-reducer.js";
-import type { SessionSnapshot } from "@pi-desktop/protocol";
+import type { SessionSnapshot } from "@pideck/protocol";
 
 function baseSession(): SessionSnapshot {
   return {

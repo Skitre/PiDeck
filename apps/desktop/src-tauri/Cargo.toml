@@ -1,12 +1,12 @@
 [package]
-name = "pi-desktop"
+name = "pideck"
 version = "0.1.0"
-description = "Pi Desktop Manager"
-authors = ["Pi Desktop contributors"]
+description = "PiDeck"
+authors = ["PiDeck contributors"]
 edition = "2021"
 
 [lib]
-name = "pi_desktop_lib"
+name = "pideck_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

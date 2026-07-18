@@ -27,7 +27,7 @@ import {
   type TrustOption,
   type WorkspaceSnapshot,
   toJsonValue,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import type { PiHostServer } from "./server.js";
 import { logger } from "./logger.js";
 import { buildSessionSnapshot, buildToolSnapshot } from "./session-snapshot.js";

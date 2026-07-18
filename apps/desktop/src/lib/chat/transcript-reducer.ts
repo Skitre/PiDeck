@@ -2,7 +2,7 @@
  * Apply Host agent.event payloads onto the local SessionSnapshot projection.
  * Pi remains the fact source — this only streams UI until the next full snapshot.
  */
-import type { SessionSnapshot, SerializableAgentMessage } from "@pi-desktop/protocol";
+import type { SessionSnapshot, SerializableAgentMessage } from "@pideck/protocol";
 
 type ToolExecutionPart = {
   type: "toolCall";

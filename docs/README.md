@@ -1,4 +1,4 @@
-# Pi Desktop Manager — Documentation
+# PiDeck — Documentation
 
 > **Implementation status: P0 Not Complete**  
 > Source remediation for R0–R8 is advanced; real desktop E2E, installed smoke, and clean-checkout evidence remain open.  
@@ -6,7 +6,7 @@
 
 ## Scope
 
-This `docs/` tree describes the **current implementation** of Pi Desktop Manager on disk:
+This `docs/` tree describes the **current implementation** of PiDeck on disk:
 
 - Process topology (Rust desktop host, Node Pi Host, React UI)
 - Protocol methods/events and identity/revision rules

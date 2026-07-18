@@ -35,7 +35,7 @@ import {
   respondExtensionUi,
   cancelAllPending,
 } from "./extension-ui-bridge.js";
-import type { HostEventName, HostIdentity } from "@pi-desktop/protocol";
+import type { HostEventName, HostIdentity } from "@pideck/protocol";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const uiFixtureSrc = join(
@@ -55,13 +55,13 @@ describe("extension UI real loader + bindExtensions path", () => {
         /* ignore */
       }
     }
-    delete process.env.PI_DESKTOP_UI_MARKER;
-    delete process.env.PI_DESKTOP_UI_NONCE;
+    delete process.env.PIDECK_UI_MARKER;
+    delete process.env.PIDECK_UI_NONCE;
     delete process.env.PI_CODING_AGENT_DIR;
   });
 
   it("DefaultResourceLoader → AgentSession → bind → handler UI marker", async () => {
-    root = mkdtempSync(join(tmpdir(), "pi-desktop-ui-c6-"));
+    root = mkdtempSync(join(tmpdir(), "pideck-ui-c6-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "project");
     const marker = join(root, "ui-marker.txt");
@@ -77,8 +77,8 @@ describe("extension UI real loader + bindExtensions path", () => {
     cpSync(uiFixtureSrc, extDest);
     expect(existsSync(extDest)).toBe(true);
 
-    process.env.PI_DESKTOP_UI_MARKER = marker;
-    process.env.PI_DESKTOP_UI_NONCE = nonce;
+    process.env.PIDECK_UI_MARKER = marker;
+    process.env.PIDECK_UI_NONCE = nonce;
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
     // Harness must never create the success marker

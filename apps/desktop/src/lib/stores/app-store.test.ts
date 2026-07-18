@@ -7,7 +7,7 @@ import type {
   HostStatusSnapshot,
   SessionSnapshot,
   WorkspaceSnapshot,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 import { emptySessionCatalog } from "./session-catalog";
 
 function host(id: string): HostStatusSnapshot {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PackageSnapshot } from "@pi-desktop/protocol";
+import type { PackageSnapshot } from "@pideck/protocol";
 import { createPackageHandlers, mapPackageUpdates } from "./package-controller.js";
 import { buildPackageSnapshot, type ResourceIdMap } from "./package-snapshot.js";
 import { IdentityState } from "./identity.js";

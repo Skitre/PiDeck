@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Pi Desktop Host entry — owns all Pi SDK services.
+ * PiDeck Host entry — owns all Pi SDK services.
  * Transport: JSONL on stdin/stdout; logs on stderr.
  */
 import { mkdirSync } from "node:fs";
@@ -13,7 +13,7 @@ import {
   VERSION as SDK_VERSION,
   DefaultPackageManager,
 } from "@earendil-works/pi-coding-agent";
-import type { HostCapabilities } from "@pi-desktop/protocol";
+import type { HostCapabilities } from "@pideck/protocol";
 import { buildModelConfigHealth } from "./model-health.js";
 import { logger } from "./logger.js";
 import { PiHostServer } from "./server.js";

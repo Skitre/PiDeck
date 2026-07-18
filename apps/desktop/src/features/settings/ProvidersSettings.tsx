@@ -18,8 +18,8 @@ import type {
   ProviderSnapshot,
   ThinkingLevel,
   ThinkingLevelMap,
-} from "@pi-desktop/protocol";
-import { detectModelThinking, THINKING_LEVELS } from "@pi-desktop/protocol";
+} from "@pideck/protocol";
+import { detectModelThinking, THINKING_LEVELS } from "@pideck/protocol";
 import { hostClient } from "../../lib/bridge/host-client";
 import { hostContext } from "../../lib/bridge/host-context";
 import { useAppStore } from "../../lib/stores/app-store";

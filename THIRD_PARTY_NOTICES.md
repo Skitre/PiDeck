@@ -1,6 +1,6 @@
 # Third Party Notices
 
-This file records third-party software distributed with or adapted into Pi Desktop Manager.
+This file records third-party software distributed with or adapted into PiDeck.
 
 ## Bundled runtimes (shipped inside the Windows installer)
 
@@ -35,7 +35,7 @@ packaging pipeline; exact pinned versions and archive hashes live in
 - Source code availability (GPLv2 §3): the complete corresponding source is
   published by the Git for Windows project at
   <https://github.com/git-for-windows/git> for the exact tagged release pinned
-  in the lock file. Distributions of Pi Desktop Manager must keep this notice
+  in the lock file. Distributions of PiDeck must keep this notice
   and the pinned tag so recipients can obtain the source.
 
 ### Tauri

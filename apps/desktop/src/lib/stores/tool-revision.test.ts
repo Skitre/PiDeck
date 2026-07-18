@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ToolSnapshot } from "@pi-desktop/protocol";
+import type { ToolSnapshot } from "@pideck/protocol";
 import { classifyToolSnapshot } from "./tool-revision";
 
 function snapshot(revision: number, active: string[] = []): ToolSnapshot {

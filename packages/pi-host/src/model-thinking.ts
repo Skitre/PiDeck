@@ -1,5 +1,5 @@
 import type { AgentSession, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { detectModelThinking } from "@pi-desktop/protocol";
+import { detectModelThinking } from "@pideck/protocol";
 
 type MutableModelThinking = {
   id: string;

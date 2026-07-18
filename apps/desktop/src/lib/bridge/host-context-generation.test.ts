@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HostStatusSnapshot, WorkspaceSnapshot } from "@pi-desktop/protocol";
+import type { HostStatusSnapshot, WorkspaceSnapshot } from "@pideck/protocol";
 import {
   captureRequestGeneration,
   captureWorkspaceAuthorization,

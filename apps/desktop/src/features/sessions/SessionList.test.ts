@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { SessionSnapshot } from "@pi-desktop/protocol";
+import type { SessionSnapshot } from "@pideck/protocol";
 import {
   includeActiveSession,
   canReloadSession,

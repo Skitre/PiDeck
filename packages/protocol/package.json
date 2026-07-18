@@ -1,5 +1,5 @@
 {
-  "name": "@pi-desktop/protocol",
+  "name": "@pideck/protocol",
   "version": "0.1.0",
   "private": true,
   "type": "module",

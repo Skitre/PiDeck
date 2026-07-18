@@ -1,7 +1,7 @@
 import type {
   SerializableAgentContent,
   SerializableAgentMessage,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
 export type ToolTraceStatus = "waiting" | "running" | "done" | "error" | "aborted";
 

@@ -1,4 +1,4 @@
-# Pi Desktop Manager
+# PiDeck
 
 Windows-first desktop GUI for [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent).
 
@@ -6,7 +6,7 @@ Windows-first desktop GUI for [@earendil-works/pi-coding-agent](https://www.npmj
 > Evidence: [`docs/operations/remediation-report.md`](./docs/operations/remediation-report.md) · `artifacts/p0/<run-id>/verify-p0.json`.  
 > Do **not** claim P0/M0–M6/release complete until clean-checkout `pnpm verify:release` exits 0 with a real commit SHA.
 
-Pi Desktop Manager visualizes Agent sessions, thinking, tool calls, and Package management (Extensions, Skills, Prompts, Themes) using the official Pi SDK as the single source of truth.
+PiDeck visualizes Agent sessions, thinking, tool calls, and Package management (Extensions, Skills, Prompts, Themes) using the official Pi SDK as the single source of truth.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ pnpm dev:host
 pnpm dev:desktop
 
 # Full desktop (Tauri + Host)
-pnpm --filter @pi-desktop/desktop run tauri:dev
+pnpm --filter @pideck/desktop run tauri:dev
 ```
 
 ### Verify

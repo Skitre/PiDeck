@@ -1,5 +1,5 @@
 {
-  "name": "@pi-desktop-fixtures/full-package",
+  "name": "@pideck-fixtures/full-package",
   "version": "1.0.0",
   "private": true,
   "description": "Full Pi Package fixture with extension, skill, prompt, theme",

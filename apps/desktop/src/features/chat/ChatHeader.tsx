@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ModelSummary } from "@pi-desktop/protocol";
+import type { ModelSummary } from "@pideck/protocol";
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import {

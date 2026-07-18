@@ -2,9 +2,9 @@ import type {
   SessionRuntimeState,
   SessionSnapshot,
   SessionSummary,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
-export type { SessionRuntimeState } from "@pi-desktop/protocol";
+export type { SessionRuntimeState } from "@pideck/protocol";
 
 export type SessionCatalogEntry = SessionSummary & {
   runtimeState: SessionRuntimeState;

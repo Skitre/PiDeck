@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HostEventEnvelope } from "@pi-desktop/protocol";
+import type { HostEventEnvelope } from "@pideck/protocol";
 import { HostClient } from "../lib/bridge/host-client";
 import { expectedIdentityForEvent, isBackgroundExtensionUiRequest } from "./event-identity";
 

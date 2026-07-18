@@ -9,7 +9,7 @@ export default defineConfig({
   // The protocol package is rebuilt during desktop development. Serving it directly
   // prevents Vite's dependency cache from keeping stale response validators alive.
   optimizeDeps: {
-    exclude: ["@pi-desktop/protocol"],
+    exclude: ["@pideck/protocol"],
   },
   clearScreen: false,
   server: {

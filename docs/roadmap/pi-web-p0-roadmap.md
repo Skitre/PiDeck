@@ -1,8 +1,8 @@
-# Pi Desktop 与 pi-web 对照及 P0 路线图
+# PiDeck 与 pi-web 对照及 P0 路线图
 
 ## 目标
 
-Pi Desktop 已经完成 Pi SDK、模型与 thinking level、Session 恢复、流式消息、Pi Packages 和 Extension UI 的基础接入。下一阶段的目标不是复制 pi-web 的服务器界面，而是把当前的单会话桌面 GUI 升级为能够可靠监督多个 Pi Session 的本地工作台。
+PiDeck 已经完成 Pi SDK、模型与 thinking level、Session 恢复、流式消息、Pi Packages 和 Extension UI 的基础接入。下一阶段的目标不是复制 pi-web 的服务器界面，而是把当前的单会话桌面 GUI 升级为能够可靠监督多个 Pi Session 的本地工作台。
 
 调研基线：
 
@@ -168,7 +168,7 @@ WorkspaceRuntime
 
 - HTTP 网关、反向代理和浏览器上传路径白名单不是本地桌面 MVP 的前置条件。
 - 不在 P0 引入任意浏览器 JavaScript 插件加载；它扩大信任边界且与 Pi Packages 有重叠。
-- 不把 Pi Desktop 做成完整 IDE。文件预览、Git 和终端应围绕 Agent 工作流，而不是复制编辑器全部能力。
+- 不把 PiDeck 做成完整 IDE。文件预览、Git 和终端应围绕 Agent 工作流，而不是复制编辑器全部能力。
 - Pi 的 TUI-only `ExtensionUIContext.custom` 不应伪装成兼容；桌面端只实现能稳定映射的公开能力。
 
 ## 实施顺序

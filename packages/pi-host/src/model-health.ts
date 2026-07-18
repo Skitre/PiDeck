@@ -1,4 +1,4 @@
-import type { ModelConfigHealth } from "@pi-desktop/protocol";
+import type { ModelConfigHealth } from "@pideck/protocol";
 
 const MIGRATION_HINT = {
   code: "SESSION_AFFINITY_FORMAT_REQUIRED" as const,

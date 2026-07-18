@@ -18,7 +18,7 @@ import type {
   PackageRecord,
   PackageResource,
   TopLevelResource,
-} from "@pi-desktop/protocol";
+} from "@pideck/protocol";
 
 type MutationMethod =
   | "package.install"

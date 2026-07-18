@@ -36,7 +36,7 @@ Rust **debug** may fall back to monorepo `packages/pi-host/dist` and system Node
 pnpm install --frozen-lockfile
 pnpm build
 pnpm package:sidecar:with-node
-pnpm --filter @pi-desktop/desktop tauri:build
+pnpm --filter @pideck/desktop tauri:build
 ```
 
 Primary installer target is documented in R8; WiX/NSIS environment gaps must fail closed with residual risk, not claim complete.

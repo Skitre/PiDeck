@@ -1,4 +1,4 @@
-import type { DesktopSettings } from "@pi-desktop/protocol";
+import type { DesktopSettings } from "@pideck/protocol";
 import { useAppStore } from "./stores/app-store";
 
 export type DesktopSettingsUpdate = Omit<

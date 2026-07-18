@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 function createFixture() {
-  const root = mkdtempSync(join(tmpdir(), "pi-desktop-session-files-"));
+  const root = mkdtempSync(join(tmpdir(), "pideck-session-files-"));
   roots.push(root);
   const agentDir = join(root, "agent");
   const cwd = join(root, "workspace");

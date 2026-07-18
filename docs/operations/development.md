@@ -26,7 +26,7 @@ Lockfile: `pnpm-lock.yaml` (committed). SDK pin: `@earendil-works/pi-coding-agen
 | `pnpm dev:host` | Run Pi Host (JSONL on stdio) |
 | `pnpm spike:sidecar` | M0 Extension load spike |
 | `pnpm dev:desktop` | Vite UI only |
-| `pnpm --filter @pi-desktop/desktop tauri:dev` | Full desktop |
+| `pnpm --filter @pideck/desktop tauri:dev` | Full desktop |
 
 ## Temporary agent directory
 
@@ -34,7 +34,7 @@ All write tests **must** set:
 
 ```bash
 # PowerShell
-$env:PI_CODING_AGENT_DIR = "$env:TEMP\pi-desktop-test-agent"
+$env:PI_CODING_AGENT_DIR = "$env:TEMP\pideck-test-agent"
 ```
 
 Or pass `--agent-dir=<path>` to the host. Never point tests at real `~/.pi/agent` for mutations.
@@ -43,7 +43,7 @@ Or pass `--agent-dir=<path>` to the host. Never point tests at real `~/.pi/agent
 
 ```bash
 $env:PI_CODING_AGENT_DIR = "$env:TEMP\pi-host-smoke"
-pnpm --filter @pi-desktop/pi-host exec tsx src/main.ts
+pnpm --filter @pideck/pi-host exec tsx src/main.ts
 # stdin:
 # {"protocolVersion":1,"id":"1","method":"system.hello","context":{},"params":{"clientName":"cli","clientVersion":"0","protocolVersion":1}}
 ```

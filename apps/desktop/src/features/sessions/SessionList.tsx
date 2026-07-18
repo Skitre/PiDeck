@@ -22,7 +22,7 @@ import {
   nullableSessionContext,
   workspaceContext,
 } from "../../lib/bridge/host-context";
-import type { SessionSnapshot, SessionSummary } from "@pi-desktop/protocol";
+import type { SessionSnapshot, SessionSummary } from "@pideck/protocol";
 import {
   sessionCatalogItems,
   type SessionCatalogEntry,

@@ -30,7 +30,7 @@
   },
   "pnpmLock": {
     "path": "pnpm-lock.yaml",
-    "sha256": "e5e6fc9bc904485d7700da1f5a79890f35aac6ee4eae707995894d2548dd4e5f"
+    "sha256": "f9b891a1ced1645d8c8effaf359afb460e050b2cf2d95f88a2ac20bc3ac29fdb"
   },
   "hostProductionDeps": {
     "strategy": "pnpm-deploy-from-frozen-lockfile",
@@ -41,7 +41,7 @@
     "forbidProcessExecPathAsRuntime": true
   },
   "protocolPackage": {
-    "name": "@pi-desktop/protocol",
+    "name": "@pideck/protocol",
     "path": "packages/protocol"
   }
 }

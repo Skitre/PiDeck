@@ -150,7 +150,7 @@ function stageHostWithDeploy() {
     console.log("[package-sidecar] pnpm deploy --prod ->", deployedFrom);
     const deploy = spawnSync(
       "pnpm",
-      ["--filter", "@pi-desktop/pi-host", "deploy", "--prod", deployedFrom],
+      ["--filter", "@pideck/pi-host", "deploy", "--prod", deployedFrom],
       { cwd: root, encoding: "utf8", shell: true, env: process.env },
     );
     if (
@@ -314,7 +314,7 @@ writeFileSync(
   join(protocolVendor, "package.json"),
   JSON.stringify(
     {
-      name: "@pi-desktop/protocol",
+      name: "@pideck/protocol",
       version: protoMeta.version || "0.1.0",
       type: "module",
       main: "./dist/index.js",
@@ -325,21 +325,21 @@ writeFileSync(
     2,
   ),
 );
-// Force node_modules/@pi-desktop/protocol → vendor
-const protoLink = join(dest, "node_modules", "@pi-desktop", "protocol");
+// Force node_modules/@pideck/protocol → vendor
+const protoLink = join(dest, "node_modules", "@pideck", "protocol");
 mkdirSync(dirname(protoLink), { recursive: true });
 if (existsSync(protoLink)) rmSync(protoLink, { recursive: true, force: true });
 cpSync(protocolVendor, protoLink, { recursive: true });
 
 const releasePkg = {
-  name: "pi-desktop-host-release",
+  name: "pideck-host-release",
   version: "0.1.0",
   private: true,
   type: "module",
   main: "./main.js",
   dependencies: {
     "@earendil-works/pi-coding-agent": "0.80.7",
-    "@pi-desktop/protocol": "0.1.0",
+    "@pideck/protocol": "0.1.0",
   },
 };
 writeFileSync(join(dest, "package.json"), JSON.stringify(releasePkg, null, 2));
@@ -351,11 +351,11 @@ if (sdkVer !== "0.80.7") die(`SDK version ${sdkVer} !== 0.80.7`);
 
 // Layout validation — refuse flatten collision of package.json identities
 const hostPkgName = JSON.parse(readFileSync(join(dest, "package.json"), "utf8")).name;
-if (hostPkgName !== "pi-desktop-host-release") die("pi-host package.json name overwritten");
+if (hostPkgName !== "pideck-host-release") die("pi-host package.json name overwritten");
 const protocolName = JSON.parse(
-  readFileSync(join(dest, "node_modules/@pi-desktop/protocol/package.json"), "utf8"),
+  readFileSync(join(dest, "node_modules/@pideck/protocol/package.json"), "utf8"),
 ).name;
-if (protocolName !== "@pi-desktop/protocol") die("protocol package identity broken");
+if (protocolName !== "@pideck/protocol") die("protocol package identity broken");
 
 const staging = {
   status: "ok",

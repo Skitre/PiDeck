@@ -148,7 +148,7 @@ describe("trust + package + workspace integration", () => {
   let hostId: string;
 
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), "pi-desktop-trust-pkg-"));
+    root = mkdtempSync(join(tmpdir(), "pideck-trust-pkg-"));
     agentDir = join(root, "agent");
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(join(agentDir, "auth.json"), "{}");

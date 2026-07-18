@@ -7,7 +7,7 @@ import {
   ModelRegistry,
   ProjectTrustStore,
 } from "@earendil-works/pi-coding-agent";
-import type { ModelConfigHealth, ProviderDraft } from "@pi-desktop/protocol";
+import type { ModelConfigHealth, ProviderDraft } from "@pideck/protocol";
 import { createProviderHandlers } from "./provider-controller.js";
 import { PiHostServer } from "./server.js";
 import { createTempAgentLayout, type TempAgentLayout } from "./test-helpers/temp-agent.js";
@@ -78,7 +78,7 @@ function draft(models: ProviderDraft["models"]): ProviderDraft {
     baseUrl: "http://127.0.0.1:8317/v1",
     api: "openai-responses",
     authHeader: true,
-    headers: { "X-Client": "pi-desktop" },
+    headers: { "X-Client": "pideck" },
     models,
   };
 }

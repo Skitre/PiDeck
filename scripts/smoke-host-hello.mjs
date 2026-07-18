@@ -1,6 +1,6 @@
 /**
  * Host hello smoke — run from repo root:
- *   pnpm --filter @pi-desktop/pi-host exec node ../../scripts/smoke-host-hello.mjs
+ *   pnpm --filter @pideck/pi-host exec node ../../scripts/smoke-host-hello.mjs
  * or: node --import tsx/esm after ensuring tsx resolves from packages/pi-host
  */
 import { spawn } from "node:child_process";
