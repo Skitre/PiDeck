@@ -26,6 +26,17 @@ function die(msg) {
   process.exit(1);
 }
 
+// Windows ships bsdtar at System32\tar.exe (supports -a zip and drive-letter
+// paths). A bare "tar.exe" can resolve to Git for Windows' GNU tar on PATH,
+// which treats C:\ as a remote host and cannot write zip — always prefer the
+// absolute System32 binary.
+function windowsBsdTar() {
+  const systemTar = process.env.SystemRoot
+    ? join(process.env.SystemRoot, "System32", "tar.exe")
+    : null;
+  return systemTar && existsSync(systemTar) ? systemTar : "tar.exe";
+}
+
 if (!existsSync(join(hostDir, "main.js")) && !existsSync(join(hostDir, "host-main.js"))) {
   die("pi-host main.js missing — run package:sidecar first");
 }
@@ -40,7 +51,7 @@ if (!zipOk) {
   // -h / --dereference: follow junctions/symlinks so zip contains real SDK files
   // (Windows junctions from pnpm deploy are absolute and useless after extract)
   const tar = spawnSync(
-    "tar.exe",
+    windowsBsdTar(),
     ["-a", "-c", "-h", "-f", zipPath, "-C", hostDir, "node_modules"],
     { encoding: "utf8", shell: false },
   );
@@ -92,9 +103,15 @@ if (!existsSync(join(nmDir, "@earendil-works", "pi-coding-agent", "package.json"
     process.exit(1);
   }
   mkdirSync(nmDir, { recursive: true });
-  // Extract with tar (zip); -C into host dir so paths match archive root "node_modules/"
+  // Extract with Windows bsdtar (System32) — a bare "tar.exe" may resolve to
+  // GNU tar, which rejects C:\ paths as remote hosts.
+  const systemTar = process.env.SystemRoot
+    ? join(process.env.SystemRoot, "System32", "tar.exe")
+    : null;
+  const tarExe = systemTar && existsSync(systemTar) ? systemTar : "tar.exe";
+  // -C into host dir so paths match archive root "node_modules/"
   const r = spawnSync(
-    "tar.exe",
+    tarExe,
     ["-x", "-f", zip, "-C", __dirname],
     { encoding: "utf8", shell: false },
   );
