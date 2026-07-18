@@ -1,0 +1,14 @@
+{
+  "$schema": "https://scala.tauri.app/config.schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for Pi Desktop",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [{ "url": "https://**" }, { "url": "http://**" }]
+    }
+  ]
+}

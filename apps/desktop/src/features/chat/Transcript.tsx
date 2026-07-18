@@ -1,0 +1,473 @@
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Brain, ChevronRight, Copy, LoaderCircle } from "lucide-react";
+import { useAppStore } from "../../lib/stores/app-store";
+import { sanitizeAgentText } from "./markdown-utils";
+import { ToolView } from "./ToolView";
+import { formatDuration } from "./ToolCard";
+import {
+  buildTranscriptRows,
+  type TranscriptBlock,
+  type TranscriptRow,
+} from "./transcript-model";
+
+const MarkdownMessage = lazy(() =>
+  import("./MarkdownMessage").then((module) => ({ default: module.MarkdownMessage })),
+);
+
+function MarkdownFallback({ content, className = "" }: { content: string; className?: string }) {
+  return (
+    <div className={`whitespace-pre-wrap break-words text-sm leading-6 ${className}`}>
+      {sanitizeAgentText(content)}
+    </div>
+  );
+}
+
+function LazyMarkdownMessage({
+  content,
+  mode = "static",
+  showCaret = false,
+  className,
+}: {
+  content: string;
+  mode?: "streaming" | "static";
+  showCaret?: boolean;
+  className?: string;
+}) {
+  return (
+    <Suspense fallback={<MarkdownFallback content={content} className={className} />}>
+      <MarkdownMessage
+        content={content}
+        mode={mode}
+        showCaret={showCaret}
+        className={className}
+      />
+    </Suspense>
+  );
+}
+
+export function Transcript() {
+  const session = useAppStore((state) => state.session);
+  const messages = session?.messages ?? [];
+  const rows = useMemo(() => buildTranscriptRows(messages), [messages]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollFrameRef = useRef<number | null>(null);
+  const rowModes = useRef(new Set<string>());
+  const modeSessionId = useRef<string | null>(null);
+  const [following, setFollowing] = useState(true);
+
+  if (modeSessionId.current !== (session?.sessionId ?? null)) {
+    modeSessionId.current = session?.sessionId ?? null;
+    rowModes.current.clear();
+  }
+
+  const lastAssistantKey = [...rows]
+    .reverse()
+    .find((row) => row.role === "assistant")?.key;
+  if (session?.isStreaming && lastAssistantKey) rowModes.current.add(lastAssistantKey);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    setFollowing(true);
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      element.scrollTop = element.scrollHeight;
+    });
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [session?.sessionId]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !following) return;
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      element.scrollTop = element.scrollHeight;
+    });
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [following, messages]);
+
+  function scrollToBottom() {
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
+    setFollowing(true);
+  }
+
+  return (
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={scrollRef}
+        className="h-full overflow-y-auto px-6 py-5"
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
+          const shouldFollow = distance < 80;
+          if (!shouldFollow && scrollFrameRef.current !== null) {
+            cancelAnimationFrame(scrollFrameRef.current);
+            scrollFrameRef.current = null;
+          }
+          setFollowing(shouldFollow);
+        }}
+      >
+        <div className="mx-auto flex max-w-3xl flex-col gap-6">
+          {rows.length === 0 && <EmptyConversation />}
+          {rows.map((row) => {
+            const streaming = session?.isStreaming && row.key === lastAssistantKey;
+            return (
+              <TranscriptRowView
+                key={`${session?.sessionId ?? "session"}:${row.key}`}
+                row={row}
+                mode={rowModes.current.has(row.key) ? "streaming" : "static"}
+                showCaret={Boolean(streaming)}
+              />
+            );
+          })}
+          {session && !session.isIdle && !lastAssistantKey && (
+            <div className="flex items-center gap-3 text-xs text-muted">
+              <AssistantAvatar />
+              <span>Pi is working...</span>
+            </div>
+          )}
+          <div className="h-1" aria-hidden="true" />
+        </div>
+      </div>
+      {!following && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute bottom-3 left-1/2 flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface-raised text-muted shadow-md transition-colors hover:bg-surface-overlay hover:text-foreground"
+          title="Jump to latest message"
+          aria-label="Jump to latest message"
+        >
+          <ArrowDown size={15} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function EmptyConversation() {
+  return (
+    <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
+      <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-foreground text-[11px] font-semibold text-surface">
+        pi
+      </div>
+      <p className="text-sm font-medium">Start a conversation</p>
+      <p className="mt-1 text-xs text-muted">Pi is ready in this workspace.</p>
+    </div>
+  );
+}
+
+function AssistantAvatar() {
+  return (
+    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-overlay text-[10px] font-semibold">
+      pi
+    </div>
+  );
+}
+
+function DurationLabel({
+  startedAt,
+  endedAt,
+  className = "",
+}: {
+  startedAt?: number;
+  endedAt?: number;
+  className?: string;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!startedAt || endedAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [startedAt, endedAt]);
+
+  if (!startedAt) return null;
+  return (
+    <span className={`tabular-nums text-[10px] text-muted ${className}`}>
+      {formatDuration(startedAt, endedAt ?? now)}
+    </span>
+  );
+}
+
+function TranscriptRowView({
+  row,
+  mode,
+  showCaret,
+}: {
+  row: TranscriptRow;
+  mode: "streaming" | "static";
+  showCaret: boolean;
+}) {
+  if (row.role === "user") {
+    return (
+      <div className="group relative ml-auto max-w-[78%]">
+        <div className="whitespace-pre-wrap break-words rounded-xl rounded-br-md bg-surface-overlay px-3.5 py-2.5 text-sm leading-6">
+          {row.copyText}
+        </div>
+        <CopyMessageButton
+          text={row.copyText}
+          className="-left-9 top-1 group-hover:opacity-100"
+        />
+      </div>
+    );
+  }
+
+  if (row.role === "error") {
+    return (
+      <div className="flex items-start gap-3">
+        <AssistantAvatar />
+        <div className="min-w-0 flex-1 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+          {row.copyText}
+        </div>
+      </div>
+    );
+  }
+
+  const sections = row.sections;
+  if (!sections) return null;
+  const lastTextBlock = [...row.blocks]
+    .reverse()
+    .find((block): block is Extract<TranscriptBlock, { kind: "text" }> =>
+      block.kind === "text",
+    );
+
+  return (
+    <div className="group/assistant relative w-full">
+      <div className="flex h-7 items-center gap-2">
+        <AssistantAvatar />
+        <DurationLabel
+          startedAt={row.startedAt}
+          endedAt={row.endedAt}
+        />
+      </div>
+      <div className="mt-2 min-w-0 space-y-3">
+        {sections.initialThinking.length > 0 && (
+          <ThinkingBlock
+            content={sections.initialThinking.map((block) => block.text).join("\n\n")}
+            label="Thought process"
+            defaultOpen
+          />
+        )}
+        {sections.intro.map((block, index) => (
+          <AssistantBlock
+            key={`intro:${index}`}
+            block={block}
+            mode={mode}
+            showCaret={showCaret && block === lastTextBlock}
+          />
+        ))}
+        {sections.stepCount > 0 && (
+          <ExecutionTrace
+            blocks={sections.activity}
+            stepCount={sections.stepCount}
+            mode={mode}
+            showCaret={showCaret}
+            lastTextBlock={lastTextBlock}
+          />
+        )}
+        {sections.final.length > 0 && (
+          <div className={sections.stepCount > 0 ? "pt-1" : ""}>
+            {sections.final.map((block, index) => (
+              <AssistantBlock
+                key={`final:${index}`}
+                block={block}
+                mode={mode}
+                showCaret={showCaret && block === lastTextBlock}
+              />
+            ))}
+          </div>
+        )}
+        {row.copyText && (
+          <CopyMessageButton
+            text={row.copyText}
+            className="right-0 top-0 group-hover/assistant:opacity-100"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ExecutionTrace({
+  blocks,
+  stepCount,
+  mode,
+  showCaret,
+  lastTextBlock,
+}: {
+  blocks: TranscriptBlock[];
+  stepCount: number;
+  mode: "streaming" | "static";
+  showCaret: boolean;
+  lastTextBlock?: Extract<TranscriptBlock, { kind: "text" }>;
+}) {
+  const [open, setOpen] = useState(true);
+  const tools = blocks.filter(
+    (block): block is Extract<TranscriptBlock, { kind: "tool" }> => block.kind === "tool",
+  );
+  const running = tools.some(
+    (block) => block.tool.status === "running" || block.tool.status === "waiting",
+  );
+  const failed = tools.filter((block) => block.tool.status === "error").length;
+  const aborted = tools.filter((block) => block.tool.status === "aborted").length;
+  const traceLabel = running
+    ? `Running ${stepCount} ${stepCount === 1 ? "step" : "steps"}`
+    : failed > 0
+      ? `Executed ${stepCount} steps · ${failed} failed`
+      : aborted > 0
+        ? `Stopped after ${stepCount} ${stepCount === 1 ? "step" : "steps"}`
+        : `Executed ${stepCount} ${stepCount === 1 ? "step" : "steps"}`;
+  const TraceIcon = running ? LoaderCircle : Brain;
+
+  return (
+    <div className="execution-trace">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-8 w-full items-center gap-2 rounded-md text-left text-xs font-medium text-foreground/80 transition-colors hover:text-foreground"
+        aria-expanded={open}
+      >
+        <TraceIcon size={14} className={`text-muted ${running ? "animate-spin" : ""}`} />
+        <span>{traceLabel}</span>
+        <ChevronRight
+          size={13}
+          className={`ml-auto transition-transform ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="ml-2 mt-1 space-y-1 border-l border-border py-1 pl-4">
+          {blocks.map((block, index) =>
+            block.kind === "thinking" ? (
+              <ThinkingBlock
+                key={`activity:${block.kind}:${index}`}
+                content={block.text}
+              />
+            ) : block.kind === "text" ? (
+              <div key={`activity:${block.kind}:${index}`} className="py-1 text-foreground/85">
+                <AssistantBlock
+                  block={block}
+                  mode={mode}
+                  showCaret={showCaret && block === lastTextBlock}
+                />
+              </div>
+            ) : (
+              <AssistantBlock
+                key={`activity:${block.kind}:${index}`}
+                block={block}
+                mode={mode}
+                showCaret={false}
+              />
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssistantBlock({
+  block,
+  mode,
+  showCaret,
+}: {
+  block: TranscriptBlock;
+  mode: "streaming" | "static";
+  showCaret: boolean;
+}) {
+  if (block.kind === "text") {
+    return <LazyMarkdownMessage content={block.text} mode={mode} showCaret={showCaret} />;
+  }
+  if (block.kind === "thinking") {
+    return <ThinkingBlock content={block.text} />;
+  }
+  return (
+    <ToolView
+      name={block.tool.name}
+      args={block.tool.args}
+      result={block.tool.result}
+      details={block.tool.details}
+      status={block.tool.status}
+    />
+  );
+}
+
+function ThinkingBlock({
+  content,
+  label = "Thinking",
+  defaultOpen = false,
+}: {
+  content: string;
+  label?: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const text = sanitizeAgentText(content);
+  if (!text.trim()) return null;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-8 w-full items-center gap-2 rounded-md text-left text-xs text-muted transition-colors hover:text-foreground"
+        aria-expanded={open}
+      >
+        <Brain size={14} />
+        <span>{label}</span>
+        <ChevronRight
+          size={13}
+          className={`ml-auto transition-transform ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="ml-[22px] border-l border-border pl-3">
+          <LazyMarkdownMessage content={text} className="thinking-markdown" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CopyMessageButton({
+  text,
+  className,
+}: {
+  text: string;
+  className: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  return (
+    <button
+      type="button"
+      title={copied ? "Copied" : "Copy message"}
+      aria-label={copied ? "Copied" : "Copy message"}
+      className={`absolute flex size-7 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-surface-overlay hover:text-foreground ${className}`}
+      onClick={() => {
+        void navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1400);
+          })
+          .catch(() => undefined);
+      }}
+    >
+      <Copy size={13} />
+    </button>
+  );
+}

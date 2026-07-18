@@ -1,0 +1,39 @@
+{
+  "name": "pi-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pi Desktop Manager — Windows-first desktop GUI for Pi Coding Agent",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @pi-desktop/protocol run build && pnpm --filter @pi-desktop/pi-host run build && pnpm --filter @pi-desktop/desktop run build",
+    "typecheck": "pnpm --filter @pi-desktop/protocol run build && pnpm --filter @pi-desktop/protocol run typecheck && pnpm --filter @pi-desktop/pi-host run typecheck && pnpm --filter @pi-desktop/desktop run typecheck",
+    "test": "pnpm --filter @pi-desktop/protocol run build && pnpm -r --filter @pi-desktop/protocol --filter @pi-desktop/pi-host --filter @pi-desktop/desktop run test",
+    "dev:host": "pnpm --filter @pi-desktop/pi-host run dev",
+    "dev:desktop": "pnpm --filter @pi-desktop/desktop run dev",
+    "dev:fast": "node scripts/dev-fast.mjs",
+    "spike:sidecar": "pnpm --filter @pi-desktop/pi-host run spike:sidecar",
+    "package:sidecar": "node scripts/package-release-sidecar.mjs",
+    "package:sidecar:with-node": "node scripts/package-release-sidecar.mjs --prepare-runtime",
+    "prepare:runtime": "node scripts/prepare-release-runtime.mjs",
+    "validate:resources": "node scripts/validate-resource-layout.mjs",
+    "smoke:release-host": "node scripts/smoke-release-host.mjs",
+    "verify:docs": "node scripts/verify-doc-links.mjs",
+    "verify:m0-release-extension": "node scripts/verify-m0-release-extension.mjs",
+    "test:rust": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml",
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "package:release": "node scripts/package-release.mjs",
+    "smoke:release": "node scripts/smoke-release.mjs",
+    "p0:baseline": "node scripts/p0-evidence.mjs baseline",
+    "verify:p0": "pnpm verify:docs && pnpm typecheck && pnpm test",
+    "verify:release": "node scripts/verify-p0.mjs",
+    "lint": "pnpm -r --filter @pi-desktop/protocol --filter @pi-desktop/pi-host --filter @pi-desktop/desktop run lint"
+  },
+  "devDependencies": {
+    "playwright-core": "1.61.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}

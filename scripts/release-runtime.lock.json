@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "platform": "win32",
+  "arch": "x64",
+  "sdk": "0.80.7",
+  "node": {
+    "version": "24.18.0",
+    "arch": "x64",
+    "os": "win",
+    "archive": "node-v24.18.0-win-x64.zip",
+    "url": "https://nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip",
+    "sha256": "0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821",
+    "expectedFiles": ["node.exe", "npm.cmd", "npx.cmd"]
+  },
+  "npm": {
+    "bundledWithNode": true,
+    "minVersion": "10.0.0",
+    "entry": "npm.cmd"
+  },
+  "git": {
+    "strategy": "pinned-portable-required",
+    "portable": {
+      "version": "2.55.0.3",
+      "tag": "v2.55.0.windows.3",
+      "archive": "PortableGit-2.55.0.3-64-bit.7z.exe",
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe",
+      "sha256": "ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d",
+      "expectedFiles": ["cmd/git.exe", "bin/git.exe"]
+    }
+  },
+  "pnpmLock": {
+    "path": "pnpm-lock.yaml",
+    "sha256": "e5e6fc9bc904485d7700da1f5a79890f35aac6ee4eae707995894d2548dd4e5f"
+  },
+  "hostProductionDeps": {
+    "strategy": "pnpm-deploy-from-frozen-lockfile",
+    "sdkPackage": "@earendil-works/pi-coding-agent",
+    "sdkVersion": "0.80.7",
+    "forbidUnlockedNpmInstall": true,
+    "forbidGlobalNpmFallback": true,
+    "forbidProcessExecPathAsRuntime": true
+  },
+  "protocolPackage": {
+    "name": "@pi-desktop/protocol",
+    "path": "packages/protocol"
+  }
+}

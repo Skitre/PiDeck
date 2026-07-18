@@ -1,0 +1,9 @@
+# Normalize line endings: text files are stored with LF in the repository.
+* text=auto
+
+# Explicit binaries (never normalize)
+*.png binary
+*.ico binary
+*.exe binary
+*.zip binary
+*.7z binary

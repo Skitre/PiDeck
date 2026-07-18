@@ -1,0 +1,162 @@
+import type {
+  SessionRuntimeState,
+  SessionSnapshot,
+  SessionSummary,
+} from "@pi-desktop/protocol";
+
+export type { SessionRuntimeState } from "@pi-desktop/protocol";
+
+export type SessionCatalogEntry = SessionSummary & {
+  runtimeState: SessionRuntimeState;
+  lastError?: string;
+};
+
+export type SessionCatalogState = {
+  workspaceId: string | null;
+  entries: Record<string, SessionCatalogEntry>;
+  order: string[];
+  loaded: boolean;
+};
+
+export function emptySessionCatalog(): SessionCatalogState {
+  return {
+    workspaceId: null,
+    entries: {},
+    order: [],
+    loaded: false,
+  };
+}
+
+export function replaceSessionCatalog(
+  current: SessionCatalogState,
+  workspaceId: string,
+  items: SessionSummary[],
+): SessionCatalogState {
+  const sameWorkspace = current.workspaceId === workspaceId;
+  const entries: Record<string, SessionCatalogEntry> = {};
+
+  for (const item of items) {
+    const previous = sameWorkspace ? current.entries[item.sessionId] : undefined;
+    entries[item.sessionId] = {
+      ...item,
+      runtimeState: item.runtimeState ?? previous?.runtimeState ?? "inactive",
+      ...(previous?.lastError ? { lastError: previous.lastError } : {}),
+    };
+  }
+
+  if (sameWorkspace) {
+    for (const id of current.order) {
+      if (!entries[id] && current.entries[id]?.runtimeState !== "inactive") {
+        entries[id] = current.entries[id];
+      }
+    }
+  }
+
+  return {
+    workspaceId,
+    entries,
+    order: sortSessionIds(entries),
+    loaded: true,
+  };
+}
+
+export function upsertSessionSnapshot(
+  current: SessionCatalogState,
+  workspaceId: string,
+  snapshot: SessionSnapshot,
+  now = Date.now(),
+): SessionCatalogState {
+  const base = current.workspaceId === workspaceId ? current : emptySessionCatalog();
+  const previous = base.entries[snapshot.sessionId];
+  const entry: SessionCatalogEntry = {
+    sessionId: snapshot.sessionId,
+    sessionPath: snapshot.sessionPath ?? previous?.sessionPath ?? "",
+    name: snapshot.name,
+    cwd: snapshot.cwd,
+    updatedAt: now,
+    messageCount: snapshot.messages.length,
+    sessionRevision: snapshot.revision,
+    runtimeState: runtimeStateFromSnapshot(snapshot),
+  };
+  const entries = { ...base.entries, [snapshot.sessionId]: entry };
+  return {
+    workspaceId,
+    entries,
+    order: sortSessionIds(entries),
+    loaded: base.loaded,
+  };
+}
+
+export function updateSessionCatalogInfo(
+  current: SessionCatalogState,
+  sessionId: string,
+  name: string | undefined,
+): SessionCatalogState {
+  const entry = current.entries[sessionId];
+  if (!entry) return current;
+  return {
+    ...current,
+    entries: {
+      ...current.entries,
+      [sessionId]: { ...entry, name },
+    },
+  };
+}
+
+export function setSessionRuntimeState(
+  current: SessionCatalogState,
+  sessionId: string,
+  runtimeState: SessionRuntimeState,
+  lastError?: string,
+  updatedAt = Date.now(),
+): SessionCatalogState {
+  const entry = current.entries[sessionId];
+  if (!entry) return current;
+  const entries = {
+    ...current.entries,
+    [sessionId]: {
+      ...entry,
+      runtimeState,
+      updatedAt,
+      ...(lastError ? { lastError } : { lastError: undefined }),
+    },
+  };
+  return {
+    ...current,
+    entries,
+    order: sortSessionIds(entries),
+  };
+}
+
+export function runtimeStateFromSnapshot(
+  snapshot: Pick<
+    SessionSnapshot,
+    "isIdle" | "isStreaming" | "isCompacting" | "isRetrying" | "pending"
+  >,
+): SessionRuntimeState {
+  if (
+    snapshot.isStreaming ||
+    snapshot.isCompacting ||
+    snapshot.isRetrying ||
+    !snapshot.isIdle
+  ) {
+    return "running";
+  }
+  if (snapshot.pending.steering.length > 0 || snapshot.pending.followUp.length > 0) {
+    return "queued";
+  }
+  return "idle";
+}
+
+export function sessionCatalogItems(catalog: SessionCatalogState): SessionCatalogEntry[] {
+  return catalog.order.flatMap((id) => {
+    const entry = catalog.entries[id];
+    return entry ? [entry] : [];
+  });
+}
+
+function sortSessionIds(entries: Record<string, SessionCatalogEntry>): string[] {
+  return Object.values(entries)
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId))
+    .map((entry) => entry.sessionId);
+}

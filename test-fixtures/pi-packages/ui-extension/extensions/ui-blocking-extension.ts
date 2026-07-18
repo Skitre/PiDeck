@@ -1,0 +1,54 @@
+/**
+ * C6 Extension UI fixture — blocking UI only when hasUI (after bindExtensions).
+ * Marker written ONLY inside the Extension handler, never by harness.
+ */
+import { writeFileSync } from "node:fs";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+let invocationCount = 0;
+
+export default function uiBlockingExtension(pi: ExtensionAPI) {
+  pi.registerFlag("ui-fixture-active", {
+    description: "Verifies the extension runtime remains active across session replacement",
+    type: "boolean",
+    default: true,
+  });
+
+  pi.on("session_start", async (_event, ctx) => {
+    // During createAgentSession, UI may not be bound yet — skip blocking path
+    if (!ctx.hasUI || !ctx.ui) {
+      return;
+    }
+    const marker = process.env.PI_DESKTOP_UI_MARKER;
+    if (!marker) {
+      throw new Error("ui-blocking-extension: missing PI_DESKTOP_UI_MARKER");
+    }
+    const nonce = process.env.PI_DESKTOP_UI_NONCE;
+    if (!nonce) {
+      throw new Error("ui-blocking-extension: missing PI_DESKTOP_UI_NONCE");
+    }
+    invocationCount += 1;
+    const runtimeActive = pi.getFlag("ui-fixture-active") === true;
+    const ui = ctx.ui;
+    ui.setStatus("ui-fixture", "running");
+    ui.notify("ui-fixture-start", "info");
+
+    const selected = await ui.select("Pick fixture option", ["alpha", "beta", "gamma"]);
+    const confirmed = await ui.confirm("Confirm fixture", "Proceed with beta?");
+    const typed = await ui.input("Fixture input", "type here");
+
+    const body = [
+      `selected=${selected ?? ""}`,
+      `confirmed=${String(confirmed)}`,
+      `typed=${typed ?? ""}`,
+      `handler=session_start`,
+      `hasUI=true`,
+      `nonce=${nonce}`,
+      `invocationCount=${invocationCount}`,
+      `runtimeActive=${String(runtimeActive)}`,
+      `ts=${new Date().toISOString()}`,
+    ].join("\n");
+    writeFileSync(marker, body + "\n", "utf8");
+    ui.setStatus("ui-fixture", undefined);
+  });
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@pi-desktop-fixtures/extension-only",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal TypeScript Extension fixture for Pi Desktop spike and tests",
+  "pi": {
+    "extensions": ["./extensions/spike-extension.ts"]
+  }
+}
