@@ -34,7 +34,10 @@ When a workspace is trusted (or trust is not required), Host creates a **cwd-bou
 - `SessionManager`
 - `AgentSession` (via `createAgentSession`)
 
-Switching workspace or changing active trust **disposes and rebuilds** the entire graph under `serviceGraphLock`.
+Switching workspace **retains** the outgoing idle graph in an LRU pool (max 3)
+and reactivates it in milliseconds on return (stable workspace id, advancing
+revisions); graphs that cannot be safely parked, trust changes, and LRU
+eviction dispose and rebuild the graph under `serviceGraphLock`.
 
 ## Fact sources
 

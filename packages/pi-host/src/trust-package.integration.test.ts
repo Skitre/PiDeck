@@ -487,12 +487,39 @@ describe("trust + package + workspace integration", () => {
     );
     expect(setA2.ok).toBe(true);
     const wsA2 = (setA2.result as { workspace: { id: string; revision: number } }).workspace;
-    // New generation — different workspace id and higher revision than original A
-    expect(wsA2.id).not.toBe(wsA.id);
-    expect(wsA2.revision).toBeGreaterThan(wsA.revision);
+    // Retained-graph reactivation: A keeps its stable workspace id (like a
+    // session id), but the revision advances past both A and B generations,
+    // so every old context stays invalid.
+    expect(wsA2.id).toBe(wsA.id);
+    expect(wsA2.revision).toBeGreaterThan(wsB.revision);
     // Old session identity from first A must not match
     expect(setA2.sessionId === sessionA && setA2.sessionRevision === sessionRevA).toBe(false);
     expect(setA2.packageRevision).not.toBe(pkgRevA);
+
+    // The original A context (id + old revision) is still stale after return.
+    const staleAfterReturn = await host.request(
+      "package.list",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: wsA.id,
+        expectedWorkspaceRevision: wsA.revision,
+      },
+      { scope: "all" },
+    );
+    expect(staleAfterReturn.ok).toBe(false);
+    expect((staleAfterReturn.error as { code: string }).code).toBe("STALE_REVISION");
+
+    // The reactivated context is fully usable.
+    const freshList = await host.request(
+      "package.list",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: wsA2.id,
+        expectedWorkspaceRevision: wsA2.revision,
+      },
+      { scope: "all" },
+    );
+    expect(freshList.ok).toBe(true);
   }, 180_000);
 
   it("session.create + agent.prompt + agent.abort on real Host entry", async () => {

@@ -104,6 +104,7 @@ async function main(): Promise<void> {
       if (g) {
         await graphFactory.disposeGraph(g);
       }
+      await graphFactory.disposeRetainedGraphs();
     },
   });
 

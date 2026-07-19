@@ -510,6 +510,227 @@ export class WorkspaceGraphFactory {
     g.servicesReady = false;
   }
 
+  /**
+   * Workspace graphs are expensive to build (settings, packages, resource
+   * reload, agent session, extension bind), so switching away parks the idle
+   * graph here instead of disposing it; switching back reactivates it in
+   * milliseconds. Keyed by case-folded canonical cwd, LRU-bounded.
+   */
+  private retainedGraphs = new Map<string, WorkspaceGraph>();
+  private static readonly MAX_RETAINED_GRAPHS = 3;
+
+  private retainedGraphKey(canonicalCwd: string): string {
+    return canonicalCwd.toLocaleLowerCase();
+  }
+
+  /**
+   * Quiesce an idle graph and park it for instant reactivation. Retained
+   * graphs must not emit anything: emitForIdentity throws for a non-current
+   * workspace identity, so agent subscription and Extension UI are unbound
+   * here and re-bound on reactivation. Graphs that cannot be safely retained
+   * (not ready, busy, or with background runtimes) are disposed instead.
+   */
+  private async retainGraph(g: WorkspaceGraph): Promise<void> {
+    if (
+      !g.servicesReady ||
+      !g.agentSession ||
+      !g.agentSession.isIdle ||
+      g.backgroundSessions.size > 0
+    ) {
+      await this.disposeGraph(g);
+      return;
+    }
+    g.unsubscribeAgent?.();
+    g.unsubscribeAgent = null;
+    g.extensionUiActivate = null;
+    try {
+      g.extensionUiCleanup?.();
+    } catch {
+      /* ignore */
+    }
+    g.extensionUiCleanup = null;
+    g.extensionUiUpdateIdentity = null;
+
+    const key = this.retainedGraphKey(g.canonicalCwd);
+    const existing = this.retainedGraphs.get(key);
+    this.retainedGraphs.delete(key);
+    if (existing && existing !== g) {
+      await this.disposeGraph(existing);
+    }
+    this.retainedGraphs.set(key, g);
+    while (this.retainedGraphs.size > WorkspaceGraphFactory.MAX_RETAINED_GRAPHS) {
+      const oldestKey = this.retainedGraphs.keys().next().value;
+      if (oldestKey === undefined) break;
+      const evicted = this.retainedGraphs.get(oldestKey);
+      this.retainedGraphs.delete(oldestKey);
+      if (evicted) await this.disposeGraph(evicted);
+    }
+  }
+
+  private takeRetainedGraph(canonicalCwd: string): WorkspaceGraph | null {
+    const key = this.retainedGraphKey(canonicalCwd);
+    const g = this.retainedGraphs.get(key) ?? null;
+    this.retainedGraphs.delete(key);
+    return g;
+  }
+
+  async disposeRetainedGraphs(): Promise<void> {
+    const graphs = [...this.retainedGraphs.values()];
+    this.retainedGraphs.clear();
+    for (const g of graphs) {
+      await this.disposeGraph(g);
+    }
+  }
+
+  /**
+   * Fast workspace switch: reactivate a retained graph under the caller's
+   * already-held serviceGraphLock. Returns null when no retained graph is
+   * usable (caller falls through to the full rebuild). Mirrors the commit
+   * tail of setCurrentWorkspace: rebind Extension UI against the candidate
+   * identity, commit identity, rebuild snapshots with the new revisions,
+   * then emit the authoritative snapshots.
+   */
+  private async tryReactivateRetainedGraph(args: {
+    canonical: string;
+    requiresTrust: boolean;
+    stored: boolean | null | undefined;
+    previousGraph: WorkspaceGraph | null;
+    revision: number;
+    sessionRevision: number;
+    packageRevision: number;
+  }): Promise<
+    | { workspace: WorkspaceSnapshot; session?: SessionSnapshot }
+    | null
+  > {
+    const server = this.server;
+    if (!server) return null;
+    const g = this.takeRetainedGraph(args.canonical);
+    if (!g) return null;
+
+    // Re-evaluate trust against the store; a retained trust-once ("session")
+    // grant remains valid for this host instance. Anything else mismatched
+    // (revoked, denied, not ready) discards the retained graph.
+    let trustDecision: TrustDecisionUi | null = null;
+    if (g.servicesReady && g.agentSession && args.stored !== false) {
+      if (!args.requiresTrust) trustDecision = "notRequired";
+      else if (args.stored === true) trustDecision = "trusted";
+      else if (g.trustDecision === "session" && g.projectTrusted) trustDecision = "session";
+    }
+    if (!trustDecision) {
+      await this.disposeGraph(g);
+      return null;
+    }
+
+    const session = g.agentSession;
+    const sessionManager = g.sessionManager;
+    if (!session || !sessionManager) {
+      await this.disposeGraph(g);
+      return null;
+    }
+    const sessionId =
+      g.sessionSnapshot?.sessionId || sessionManager.getSessionId() || session.sessionId;
+    if (!sessionId) {
+      await this.disposeGraph(g);
+      return null;
+    }
+
+    const candidateIdentity: HostIdentity = {
+      hostInstanceId: server.identity.hostInstanceId,
+      workspaceId: g.workspaceId,
+      workspaceRevision: args.revision,
+      sessionId,
+      sessionRevision: args.sessionRevision,
+      packageRevision: args.packageRevision,
+    };
+
+    try {
+      const binding = await bindExtensionUi(session, g.extensionsResult, {
+        emit: (event, payload) => server.emitForIdentity(candidateIdentity, event, payload),
+        emitForIdentity: (identity, event, payload) =>
+          server.emitForIdentity(identity, event, payload),
+        getIdentity: () => candidateIdentity,
+      });
+      g.extensionUiActivate = binding.activate;
+      g.extensionUiCleanup = binding.cleanup;
+      g.extensionUiUpdateIdentity = binding.updateIdentity;
+    } catch (err) {
+      logger.warn("retained graph Extension rebind failed; rebuilding workspace", {
+        cwd: args.canonical,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.disposeGraph(g);
+      return null;
+    }
+
+    g.unsubscribeAgent = session.subscribe((event) => {
+      this.handleAgentEvent(g, session, event);
+    });
+
+    // Commit: park the outgoing graph, promote the retained one.
+    if (args.previousGraph) {
+      await this.retainGraph(args.previousGraph);
+    }
+    g.revision = args.revision;
+    g.trustDecision = trustDecision;
+    g.projectTrusted = true;
+    this.graph = g;
+    server.identity.workspaceId = g.workspaceId;
+    server.identity.workspaceRevision = args.revision;
+    server.identity.sessionId = sessionId;
+    server.identity.sessionRevision = args.sessionRevision;
+    server.identity.packageRevision = args.packageRevision;
+
+    g.packageSnapshot = await buildPackageSnapshot({
+      revision: args.packageRevision,
+      workspaceId: g.workspaceId,
+      scope: "all",
+      packageManager: g.packageManager!,
+      settingsManager: g.settingsManager!,
+      packageUpdateCheck: this.deps.packageUpdateCheck,
+      resourceIdMap: g.resourceIdMap,
+      resourceReloadRequired: g.resourceReloadRequired,
+    });
+    g.sessionSnapshot = buildSessionSnapshot({
+      session,
+      sessionManager,
+      cwd: args.canonical,
+      sessionId,
+      revision: args.sessionRevision,
+      workspaceId: g.workspaceId,
+      toolRevision: g.toolRevision,
+    });
+
+    let publishExtensionUi = () => {};
+    try {
+      publishExtensionUi = await this.activateExtensionUi(g);
+    } catch (err) {
+      logger.warn("retained graph Extension activate failed", {
+        cwd: args.canonical,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    server.setPhase("ready");
+    server.setLastError(undefined);
+    const workspace = this.buildWorkspaceSnapshot(g);
+    workspace.trust.required = args.requiresTrust;
+
+    server.emit("workspace.changed", workspace);
+    if (g.packageSnapshot) {
+      server.emit("package.snapshot", g.packageSnapshot);
+    }
+    if (g.sessionSnapshot) {
+      server.emit("session.snapshot", g.sessionSnapshot);
+      server.emit("agent.toolsChanged", g.sessionSnapshot.tools);
+    }
+    publishExtensionUi();
+
+    return {
+      workspace,
+      ...(g.sessionSnapshot ? { session: g.sessionSnapshot } : {}),
+    };
+  }
+
   private async activateExtensionUi(g: WorkspaceGraph): Promise<() => void> {
     const activate = g.extensionUiActivate;
     g.extensionUiActivate = null;
@@ -541,7 +762,7 @@ export class WorkspaceGraphFactory {
   }): Promise<WorkspaceSnapshot> {
     const server = this.server!;
     if (args.previousGraph) {
-      await this.disposeGraph(args.previousGraph);
+      await this.retainGraph(args.previousGraph);
     }
     const failedGraph: WorkspaceGraph = {
       workspaceId: args.workspaceId,
@@ -640,6 +861,21 @@ export class WorkspaceGraphFactory {
       const requiresTrust = hasTrustRequiringProjectResources(canonical);
       const stored = this.deps.trustStore.get(canonical);
 
+      // Fast path: a graph retained from an earlier visit reactivates in
+      // milliseconds instead of a full rebuild. Trust is re-evaluated against
+      // the store; a retained "session" (trust-once) grant stays valid for
+      // the lifetime of this host instance.
+      const reactivated = await this.tryReactivateRetainedGraph({
+        canonical,
+        requiresTrust,
+        stored,
+        previousGraph,
+        revision,
+        sessionRevision: candidateSessionRevision,
+        packageRevision: candidatePackageRevision,
+      });
+      if (reactivated) return reactivated;
+
       let trustDecision: TrustDecisionUi;
       let projectTrusted: boolean;
 
@@ -680,7 +916,7 @@ export class WorkspaceGraphFactory {
           backgroundSessions: new Map(),
         };
         if (previousGraph) {
-          await this.disposeGraph(previousGraph);
+          await this.retainGraph(previousGraph);
         }
         this.graph = candidateGraph;
         server.identity.workspaceId = workspaceId;
@@ -727,7 +963,7 @@ export class WorkspaceGraphFactory {
       }
 
       if (previousGraph) {
-        await this.disposeGraph(previousGraph);
+        await this.retainGraph(previousGraph);
       }
       this.graph = built.graph;
       server.identity.workspaceId = workspaceId;
