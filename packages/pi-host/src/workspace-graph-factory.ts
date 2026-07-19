@@ -1196,6 +1196,14 @@ export class WorkspaceGraphFactory {
     let candidateSession: AgentSession | null = null;
     let candidateExtensionUiCleanup: (() => void) | null = null;
     let candidateUnsubscribeAgent: (() => void) | null = null;
+    const buildStartedAt = Date.now();
+    const stepTimings: Record<string, number> = {};
+    let lastStepAt = buildStartedAt;
+    const markStep = (name: string) => {
+      const now = Date.now();
+      stepTimings[name] = now - lastStepAt;
+      lastStepAt = now;
+    };
 
     try {
       // Explicit projectTrusted — never rely on SDK default true
@@ -1215,12 +1223,14 @@ export class WorkspaceGraphFactory {
         settingsManager,
       });
       await resourceLoader.reload();
+      markStep("resourceLoader.reload");
 
       // Create a new session for this workspace
       const sessionManager = SessionManager.create(args.canonicalCwd);
 
       await Promise.resolve(this.deps.refreshModelHealth());
       this.onModelHealthChanged?.();
+      markStep("refreshModelHealth");
 
       const { session, extensionsResult } = await createAgentSession({
         cwd: args.canonicalCwd,
@@ -1232,6 +1242,7 @@ export class WorkspaceGraphFactory {
         sessionManager,
       });
       candidateSession = session;
+      markStep("createAgentSession");
 
       const sessionId = sessionManager.getSessionId() || session.sessionId || randomUUID();
 
@@ -1286,6 +1297,7 @@ export class WorkspaceGraphFactory {
         this.handleAgentEvent(graph, session, event);
       });
       candidateUnsubscribeAgent = graph.unsubscribeAgent;
+      markStep("bindExtensionUi");
 
       graph.packageSnapshot = await buildPackageSnapshot({
         revision: args.packageRevision,
@@ -1297,6 +1309,7 @@ export class WorkspaceGraphFactory {
         resourceIdMap: graph.resourceIdMap,
         resourceReloadRequired: graph.resourceReloadRequired,
       });
+      markStep("buildPackageSnapshot");
 
       graph.sessionSnapshot = buildSessionSnapshot({
         session,
@@ -1308,6 +1321,12 @@ export class WorkspaceGraphFactory {
         toolRevision: 1,
       });
       graph.toolRevision = 1;
+
+      logger.info("workspace graph built", {
+        cwd: args.canonicalCwd,
+        totalMs: Date.now() - buildStartedAt,
+        stepsMs: stepTimings,
+      });
 
       return { graph };
     } catch (err) {
