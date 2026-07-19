@@ -17,6 +17,8 @@ pub struct DesktopSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_dir: Option<String>,
     pub auto_restart_host_once: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known_workspaces: Vec<String>,
 }
 
 impl Default for DesktopSettings {
@@ -29,6 +31,7 @@ impl Default for DesktopSettings {
             last_session_path: None,
             agent_dir: None,
             auto_restart_host_once: true,
+            known_workspaces: Vec::new(),
         }
     }
 }

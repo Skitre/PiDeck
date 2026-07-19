@@ -384,6 +384,8 @@ export type DesktopSettings = {
   lastSessionPath?: string;
   agentDir?: string;
   autoRestartHostOnce: boolean;
+  /** Persistent list of workspace folders shown in the sidebar. */
+  knownWorkspaces?: string[];
 };
 
 export type DesktopSettingsPatch = Partial<DesktopSettings>;
