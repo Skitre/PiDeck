@@ -27,7 +27,7 @@ pnpm verify:release
 
 ## 3. 发布前必须关闭的安全项
 
-以下项在 [review remediation TODO](../reviews/2026-07-18-remediation-todo.md) 中跟踪：
+以下项在 [review remediation TODO](../history/2026-07-18-remediation-todo.md) 中跟踪：
 
 - [x] 生产构建启用严格 CSP（2026-07-18 已完成；dev 模式 `devCsp: null` 保持 HMR 可用）
 - [x] `desktop_open_path` 已收敛（仅存在的本地目录/文件；文件只定位不执行；拒绝 UNC）；`shell:allow-open` 已限定为 http(s) URL

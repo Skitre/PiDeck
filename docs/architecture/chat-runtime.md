@@ -14,7 +14,7 @@
 - Host exposes one foreground AgentSession plus retained background runtimes. Switching away from a running Session keeps it alive; switching away from an idle Session disposes it.
 - Background runtimes publish Session status but not Transcript deltas into the foreground projection. They are disposed after settling and can then be reopened from Pi's Session file.
 - Opening a still-running background Session promotes the existing Runtime, assigns a new Session revision, rebuilds the foreground snapshot, and migrates Extension UI identity without restarting the turn.
-- Reconnect-time discovery of retained runtimes remains P0.2 work in the [pi-web comparison and P0 roadmap](../roadmap/pi-web-p0-roadmap.md).
+- Reconnect-time discovery of retained runtimes remains P0.2 work in the [pi-web comparison and P0 roadmap](../history/pi-web-p0-roadmap.md).
 
 ## Agent commands
 
