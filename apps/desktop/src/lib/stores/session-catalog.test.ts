@@ -117,4 +117,26 @@ describe("session catalog", () => {
       ),
     ).toBe("queued");
   });
+
+  it("does not treat opening an existing idle session as activity", () => {
+    let catalog = replaceSessionCatalog(emptySessionCatalog(), "w1", [
+      { sessionId: "top", sessionPath: "C:/sessions/top.jsonl", cwd: "C:/w", updatedAt: 30 },
+      { sessionId: "s1", sessionPath: "C:/sessions/s1.jsonl", cwd: "C:/w", updatedAt: 10 },
+    ]);
+    // session.open applies an idle snapshot — the entry must keep its listed
+    // timestamp instead of jumping to the top of the recency sort.
+    catalog = upsertSessionSnapshot(catalog, "w1", snapshot(), 40);
+    expect(catalog.entries.s1?.updatedAt).toBe(10);
+    expect(catalog.order).toEqual(["top", "s1"]);
+
+    // Real activity (streaming) still bumps recency.
+    catalog = upsertSessionSnapshot(
+      catalog,
+      "w1",
+      snapshot({ isIdle: false, isStreaming: true }),
+      50,
+    );
+    expect(catalog.entries.s1?.updatedAt).toBe(50);
+    expect(catalog.order).toEqual(["s1", "top"]);
+  });
 });

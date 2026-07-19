@@ -68,15 +68,19 @@ export function upsertSessionSnapshot(
 ): SessionCatalogState {
   const base = current.workspaceId === workspaceId ? current : emptySessionCatalog();
   const previous = base.entries[snapshot.sessionId];
+  const runtimeState = runtimeStateFromSnapshot(snapshot);
   const entry: SessionCatalogEntry = {
     sessionId: snapshot.sessionId,
     sessionPath: snapshot.sessionPath ?? previous?.sessionPath ?? "",
     name: snapshot.name,
     cwd: snapshot.cwd,
-    updatedAt: now,
+    // Merely opening/rehydrating a session yields an idle snapshot and is not
+    // activity: keep the listed timestamp so the entry does not jump to the
+    // top of the recency sort and then snap back on the next session.list.
+    updatedAt: runtimeState === "idle" && previous ? previous.updatedAt : now,
     messageCount: snapshot.messages.length,
     sessionRevision: snapshot.revision,
-    runtimeState: runtimeStateFromSnapshot(snapshot),
+    runtimeState,
   };
   const entries = { ...base.entries, [snapshot.sessionId]: entry };
   return {
