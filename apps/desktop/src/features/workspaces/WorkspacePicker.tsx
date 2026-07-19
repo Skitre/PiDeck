@@ -1,8 +1,9 @@
-import { Folder, FolderPlus, Plus, X } from "lucide-react";
+import { ChevronDown, Folder, FolderPlus, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import { persistDesktopSettings } from "../../lib/desktop-settings";
+import { sidebarPref, setSidebarPref } from "../../lib/sidebar-prefs";
 import {
   captureRequestGeneration,
   isCurrentRequestGeneration,
@@ -39,7 +40,17 @@ export function WorkspacePicker() {
   const setTrustOptions = useAppStore((s) => s.setTrustOptions);
   const pushNotification = useAppStore((s) => s.pushNotification);
   const [pending, setPending] = useState(false);
+  const [collapsed, setCollapsed] = useState(() =>
+    sidebarPref("pideck.sidebar.workspacesCollapsed"),
+  );
   const requestRef = useRef(0);
+
+  function toggleCollapsed() {
+    setCollapsed((current) => {
+      setSidebarPref("pideck.sidebar.workspacesCollapsed", !current);
+      return !current;
+    });
+  }
 
   const currentCwd = workspace?.canonicalCwd ?? null;
 
@@ -136,18 +147,33 @@ export function WorkspacePicker() {
     <section>
       <div className="mb-1 flex h-7 items-center justify-between px-2">
         <span className="text-[11px] font-medium text-muted">Workspaces</span>
-        <button
-          type="button"
-          onClick={() => void pickAndAdd()}
-          disabled={!host || pending}
-          className="flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
-          title="Add workspace"
-          aria-label="Add workspace"
-        >
-          <Plus size={15} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => void pickAndAdd()}
+            disabled={!host || pending}
+            className="flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
+            title="Add workspace"
+            aria-label="Add workspace"
+          >
+            <Plus size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-expanded={!collapsed}
+            className="flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground"
+            title={collapsed ? "Expand workspaces" : "Collapse workspaces"}
+            aria-label={collapsed ? "Expand workspaces" : "Collapse workspaces"}
+          >
+            <ChevronDown
+              size={14}
+              className={`transition-transform ${collapsed ? "-rotate-90" : ""}`}
+            />
+          </button>
+        </div>
       </div>
-      {listed.length === 0 ? (
+      {collapsed ? null : listed.length === 0 ? (
         <button
           type="button"
           onClick={() => void pickAndAdd()}

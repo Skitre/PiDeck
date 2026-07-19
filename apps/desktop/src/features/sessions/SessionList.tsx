@@ -2,6 +2,7 @@ import {
   Archive,
   ArchiveRestore,
   Check,
+  ChevronDown,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -128,7 +129,15 @@ export async function requestSessionListWithRetry<
   }
 }
 
-export function SessionList({ showCreateAction = true }: { showCreateAction?: boolean }) {
+export function SessionList({
+  showCreateAction = true,
+  collapsed = false,
+  onToggleCollapsed,
+}: {
+  showCreateAction?: boolean;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+}) {
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
   const session = useAppStore((s) => s.session);
@@ -551,8 +560,25 @@ export function SessionList({ showCreateAction = true }: { showCreateAction?: bo
           >
             <Plus size={14} />
           </button>}
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              title={collapsed ? "Expand conversations" : "Collapse conversations"}
+              aria-label={collapsed ? "Expand conversations" : "Collapse conversations"}
+              aria-expanded={!collapsed}
+              className="rounded p-1 text-muted hover:bg-surface-overlay hover:text-foreground"
+              onClick={onToggleCollapsed}
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${collapsed ? "rotate-180" : ""}`}
+              />
+            </button>
+          )}
         </div>
       </div>
+      {collapsed ? null : (
+        <>
       {!workspace?.servicesReady && (
         <p className="px-1 text-xs text-muted">Select and trust a workspace first.</p>
       )}
@@ -830,6 +856,8 @@ export function SessionList({ showCreateAction = true }: { showCreateAction?: bo
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );
