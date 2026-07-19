@@ -19,6 +19,7 @@ export type ToolTrace = {
 export type TranscriptBlock =
   | { kind: "text"; text: string }
   | { kind: "thinking"; text: string; startedAt?: number; endedAt?: number }
+  | { kind: "image"; data: string; mimeType: string }
   | { kind: "tool"; tool: ToolTrace };
 
 export type AssistantTurnSections = {
@@ -149,6 +150,22 @@ function blocksForMessage(
           text,
           startedAt: numberField(part, "startedAt"),
           endedAt: numberField(part, "endedAt"),
+        });
+      }
+      continue;
+    }
+    if (part.type === "image") {
+      const record = asRecord(part);
+      if (typeof record.data === "string" && record.data) {
+        blocks.push({
+          kind: "image",
+          data: record.data,
+          mimeType:
+            typeof record.mimeType === "string" && record.mimeType
+              ? record.mimeType
+              : typeof record.mediaType === "string" && record.mediaType
+                ? record.mediaType
+                : "image/png",
         });
       }
       continue;
@@ -408,6 +425,9 @@ export function buildTranscriptRows(messages: SerializableAgentMessage[]): Trans
 function blockEquivalent(a: TranscriptBlock, b: TranscriptBlock): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "text" && b.kind === "text") return a.text === b.text;
+  if (a.kind === "image" && b.kind === "image") {
+    return a.mimeType === b.mimeType && a.data === b.data;
+  }
   if (a.kind === "thinking" && b.kind === "thinking") {
     return a.text === b.text && a.startedAt === b.startedAt && a.endedAt === b.endedAt;
   }

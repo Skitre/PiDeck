@@ -241,6 +241,29 @@ describe("buildTranscriptRows", () => {
   });
 });
 
+describe("buildTranscriptRows image parts", () => {
+  it("renders user image parts as image blocks and reuses them stably", () => {
+    const messages: SerializableAgentMessage[] = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "look at this" },
+          { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+        ],
+      },
+    ];
+    const first = buildTranscriptRows(messages);
+    expect(first[0]?.blocks.map((block) => block.kind)).toEqual(["text", "image"]);
+    const image = first[0]?.blocks[1];
+    if (image?.kind === "image") {
+      expect(image.data).toBe("aGVsbG8=");
+      expect(image.mimeType).toBe("image/png");
+    }
+    const second = reuseStableRows(first, buildTranscriptRows([...messages]));
+    expect(second).toBe(first);
+  });
+});
+
 describe("messageText", () => {
   it("joins text parts without exposing tool or thinking payloads", () => {
     expect(

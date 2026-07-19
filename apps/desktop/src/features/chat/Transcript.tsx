@@ -222,11 +222,29 @@ const TranscriptRowView = memo(function TranscriptRowView({
   showCaret: boolean;
 }) {
   if (row.role === "user") {
+    const images = row.blocks.filter(
+      (block): block is Extract<TranscriptBlock, { kind: "image" }> =>
+        block.kind === "image",
+    );
     return (
       <div className="group relative ml-auto max-w-[78%]">
-        <div className="whitespace-pre-wrap break-words rounded-xl rounded-br-md bg-surface-overlay px-3.5 py-2.5 text-sm leading-6">
-          {row.copyText}
-        </div>
+        {images.length > 0 && (
+          <div className="mb-1 flex flex-wrap justify-end gap-1.5">
+            {images.map((image, index) => (
+              <img
+                key={`img:${index}`}
+                src={`data:${image.mimeType};base64,${image.data}`}
+                alt="attachment"
+                className="max-h-48 max-w-full rounded-lg border border-border object-contain"
+              />
+            ))}
+          </div>
+        )}
+        {row.copyText && (
+          <div className="whitespace-pre-wrap break-words rounded-xl rounded-br-md bg-surface-overlay px-3.5 py-2.5 text-sm leading-6">
+            {row.copyText}
+          </div>
+        )}
         <CopyMessageButton
           text={row.copyText}
           className="-left-9 top-1 group-hover:opacity-100"
@@ -402,6 +420,15 @@ function AssistantBlock({
   }
   if (block.kind === "thinking") {
     return <ThinkingBlock content={block.text} />;
+  }
+  if (block.kind === "image") {
+    return (
+      <img
+        src={`data:${block.mimeType};base64,${block.data}`}
+        alt="attachment"
+        className="max-h-48 max-w-full rounded-lg border border-border object-contain"
+      />
+    );
   }
   return (
     <ToolView

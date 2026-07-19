@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
-import { createHostError, type ModelSummary } from "@pideck/protocol";
+import {
+  getSupportedThinkingLevels,
+  type ImageContent,
+  type Model,
+} from "@earendil-works/pi-ai";
+import {
+  createHostError,
+  type ModelSummary,
+  type SerializableImage,
+} from "@pideck/protocol";
 import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { buildSessionSnapshot, buildToolSnapshot } from "./session-snapshot.js";
@@ -8,6 +16,16 @@ import { rebindCurrentSessionModel } from "./model-thinking.js";
 import { createProvisionalSessionTitle } from "./session-title.js";
 import { withStableGraphRead } from "./stable-graph-read.js";
 import { logger } from "./logger.js";
+
+/** Protocol images ({mediaType,data}) → SDK ImageContent ({type,mimeType,data}). */
+function toSdkImages(images: SerializableImage[] | undefined): ImageContent[] | undefined {
+  if (!images?.length) return undefined;
+  return images.map((image) => ({
+    type: "image" as const,
+    data: image.data,
+    mimeType: image.mediaType,
+  }));
+}
 
 export function summarizeModel(model: Model<any>): ModelSummary {
   return {
@@ -98,16 +116,19 @@ export function createAgentHandlers(
 
       const params = ctx.params as {
         text: string;
+        images?: SerializableImage[];
         streamingBehavior?: "steer" | "followUp";
       };
+      const promptImages = toSdkImages(params.images);
       const runId = randomUUID();
       const runIdentity = server.getIdentity();
       factory.currentRunId = runId;
       factory.setSessionRunId(g.agentSession, runId);
       server.setPhase("agentBusy");
-      const provisionalTitle = g.agentSession.sessionName?.trim()
-        ? null
-        : createProvisionalSessionTitle(params.text);
+      const provisionalTitle =
+        g.agentSession.sessionName?.trim() || !params.text.trim()
+          ? null
+          : createProvisionalSessionTitle(params.text);
       const titleSession = g.agentSession;
       const titleSessionId = server.identity.sessionId;
       if (provisionalTitle) {
@@ -120,6 +141,7 @@ export function createAgentHandlers(
         try {
           await g.agentSession!.prompt(params.text, {
             streamingBehavior: params.streamingBehavior,
+            ...(promptImages ? { images: promptImages } : {}),
           });
           completed = true;
         } catch (err) {
@@ -168,7 +190,7 @@ export function createAgentHandlers(
       if (!server) {
         return { error: createHostError("AGENT_NOT_READY", "No active session") };
       }
-      const params = ctx.params as { text: string };
+      const params = ctx.params as { text: string; images?: SerializableImage[] };
       const out = await withStableGraphRead({
         requestId: ctx.id,
         identity: server.identity,
@@ -181,7 +203,7 @@ export function createAgentHandlers(
         run: async () => {
           const session = factory.getGraph()?.agentSession;
           if (!session) throw new Error("No active session");
-          await session.steer(params.text);
+          await session.steer(params.text, toSdkImages(params.images));
           server.emit("agent.queueChanged", {
             steering: [...session.getSteeringMessages()],
             followUp: [...session.getFollowUpMessages()],
@@ -199,7 +221,7 @@ export function createAgentHandlers(
       if (!server) {
         return { error: createHostError("AGENT_NOT_READY", "No active session") };
       }
-      const params = ctx.params as { text: string };
+      const params = ctx.params as { text: string; images?: SerializableImage[] };
       const out = await withStableGraphRead({
         requestId: ctx.id,
         identity: server.identity,
@@ -212,7 +234,7 @@ export function createAgentHandlers(
         run: async () => {
           const session = factory.getGraph()?.agentSession;
           if (!session) throw new Error("No active session");
-          await session.followUp(params.text);
+          await session.followUp(params.text, toSdkImages(params.images));
           server.emit("agent.queueChanged", {
             steering: [...session.getSteeringMessages()],
             followUp: [...session.getFollowUpMessages()],
