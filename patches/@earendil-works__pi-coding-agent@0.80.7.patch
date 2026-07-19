@@ -1,0 +1,19 @@
+diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
+index 575a208f581631bd98561b36ada62e31c235eb56..be5e786751d3fe636bfc4b32d73e839316293917 100644
+--- a/dist/core/extensions/loader.js
++++ b/dist/core/extensions/loader.js
+@@ -112,9 +112,11 @@ export function clearExtensionCache() {
+ }
+ function useExtensionCacheCwd(cwd) {
+     const resolvedCwd = resolvePath(cwd);
+-    if (extensionCacheCwd !== undefined && extensionCacheCwd !== resolvedCwd) {
+-        clearExtensionCache();
+-    }
++    // PiDeck patch: keep the extension module cache across cwd changes.
++    // Cache keys are absolute extension paths and factories receive cwd at
++    // invocation time, so user-scope package modules (identical for every
++    // workspace) load once per process instead of once per workspace switch.
++    // Package install/update still calls clearExtensionCache() explicitly.
+     extensionCacheCwd = resolvedCwd;
+     return { cwd: resolvedCwd, generation: extensionCacheGeneration };
+ }

@@ -16,6 +16,17 @@ pnpm install
 
 Lockfile: `pnpm-lock.yaml` (committed). SDK pin: `@earendil-works/pi-coding-agent@0.80.7`.
 
+## SDK patch (pnpm patch)
+
+`patches/@earendil-works__pi-coding-agent@0.80.7.patch` keeps the SDK's
+extension module cache across cwd changes (upstream clears it on every
+workspace switch). User-scope packages are identical for every workspace, so
+their modules now load once per host process; with ~13 user packages this
+takes a cold workspace build from ~2.5-3.2 s down to ~0.2 s. Extension
+factories receive cwd at invocation, and package install/update still clears
+the cache explicitly. Re-evaluate the patch on every SDK upgrade; consider
+proposing it upstream.
+
 ## Commands
 
 | Command | Purpose |

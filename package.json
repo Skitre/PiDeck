@@ -35,5 +35,10 @@
     "playwright-core": "1.61.1",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@earendil-works/pi-coding-agent@0.80.7": "patches/@earendil-works__pi-coding-agent@0.80.7.patch"
+    }
   }
 }

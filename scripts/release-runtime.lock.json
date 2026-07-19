@@ -10,7 +10,11 @@
     "archive": "node-v24.18.0-win-x64.zip",
     "url": "https://nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip",
     "sha256": "0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821",
-    "expectedFiles": ["node.exe", "npm.cmd", "npx.cmd"]
+    "expectedFiles": [
+      "node.exe",
+      "npm.cmd",
+      "npx.cmd"
+    ]
   },
   "npm": {
     "bundledWithNode": true,
@@ -25,12 +29,15 @@
       "archive": "PortableGit-2.55.0.3-64-bit.7z.exe",
       "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe",
       "sha256": "ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d",
-      "expectedFiles": ["cmd/git.exe", "bin/git.exe"]
+      "expectedFiles": [
+        "cmd/git.exe",
+        "bin/git.exe"
+      ]
     }
   },
   "pnpmLock": {
     "path": "pnpm-lock.yaml",
-    "sha256": "f9b891a1ced1645d8c8effaf359afb460e050b2cf2d95f88a2ac20bc3ac29fdb"
+    "sha256": "f34e71d2f14eee3af9766cb02ed22a05fee05056a90e58d5cd7217763c53ec01"
   },
   "hostProductionDeps": {
     "strategy": "pnpm-deploy-from-frozen-lockfile",
