@@ -135,9 +135,9 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     if (command) {
       void loadCommandItems().then((all) => {
         const query = command.query.toLocaleLowerCase();
-        const items = all
-          .filter((item) => item.label.toLocaleLowerCase().startsWith(`/${query}`))
-          .slice(0, 8);
+        const items = all.filter((item) =>
+          item.label.toLocaleLowerCase().startsWith(`/${query}`),
+        );
         setCompletion(
           items.length > 0
             ? { kind: "command", tokenStart: command.start, query: command.query, items, selected: 0 }
@@ -420,6 +420,11 @@ export function Composer({ disabled }: { disabled?: boolean }) {
                 <button
                   key={`${item.label}:${index}`}
                   type="button"
+                  ref={(node) => {
+                    if (node && index === completion.selected) {
+                      node.scrollIntoView({ block: "nearest" });
+                    }
+                  }}
                   className={`flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-xs ${
                     index === completion.selected
                       ? "bg-surface-overlay text-foreground"
