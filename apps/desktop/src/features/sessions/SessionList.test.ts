@@ -127,20 +127,14 @@ describe("filterSessionItems", () => {
   ];
 
   it("searches names, fallback labels, cwd, and ids", () => {
-    expect(filterSessionItems(items, "reconnect", "all")).toEqual([items[0]]);
-    expect(filterSessionItems(items, "beta", "all")).toEqual([items[1]]);
-    expect(filterSessionItems(items, "tests-session", "all")).toEqual([items[1]]);
-    expect(filterSessionItems(items, "新会话", "all")).toEqual([items[1]]);
+    expect(filterSessionItems(items, "reconnect", "active")).toEqual([items[0]]);
+    expect(filterSessionItems(items, "beta", "active")).toEqual([items[1]]);
+    expect(filterSessionItems(items, "tests-session", "active")).toEqual([items[1]]);
+    expect(filterSessionItems(items, "新会话", "active")).toEqual([items[1]]);
   });
 
-  it("combines text search with runtime filtering", () => {
-    expect(filterSessionItems(items, "workspace", "running")).toEqual([items[0]]);
-    expect(filterSessionItems(items, "repair", "inactive")).toEqual([]);
-  });
-
-  it("keeps archived Sessions out of normal filters", () => {
-    expect(filterSessionItems(items, "", "all")).toEqual(items.slice(0, 2));
-    expect(filterSessionItems(items, "", "inactive")).toEqual([items[1]]);
+  it("keeps archived Sessions out of the active view", () => {
+    expect(filterSessionItems(items, "", "active")).toEqual(items.slice(0, 2));
     expect(filterSessionItems(items, "investigation", "archived")).toEqual([
       items[2],
     ]);

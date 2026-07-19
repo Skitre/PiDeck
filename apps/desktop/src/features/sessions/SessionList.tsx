@@ -29,7 +29,7 @@ import {
   type SessionRuntimeState,
 } from "../../lib/stores/session-catalog";
 
-export type SessionFilter = "all" | "archived" | SessionRuntimeState;
+export type SessionFilter = "active" | "archived";
 
 type SessionConfirmAction =
   | { kind: "delete"; item: SessionCatalogEntry }
@@ -68,9 +68,6 @@ export function filterSessionItems(
   const normalizedQuery = query.trim().toLocaleLowerCase();
   return items.filter((item) => {
     if (filter === "archived" ? !item.archived : item.archived) return false;
-    if (filter !== "all" && filter !== "archived" && item.runtimeState !== filter) {
-      return false;
-    }
     if (!normalizedQuery) return true;
     return [sessionDisplayName(item), item.cwd, item.sessionId]
       .join("\n")
@@ -131,7 +128,7 @@ export function SessionList({ showCreateAction = true }: { showCreateAction?: bo
   const pushNotification = useAppStore((s) => s.pushNotification);
   const [sessionMutationPending, setSessionMutationPending] = useState(false);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<SessionFilter>("all");
+  const [filter, setFilter] = useState<SessionFilter>("active");
   const [controlsOpen, setControlsOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
@@ -544,7 +541,7 @@ export function SessionList({ showCreateAction = true }: { showCreateAction?: bo
       {!workspace?.servicesReady && (
         <p className="px-1 text-xs text-muted">Select and trust a workspace first.</p>
       )}
-      {workspace?.servicesReady && (controlsOpen || Boolean(query) || filter !== "all") && (
+      {workspace?.servicesReady && (controlsOpen || Boolean(query) || filter !== "active") && (
         <div className="flex gap-1 px-1">
           <label className="relative min-w-0 flex-1">
             <Search
@@ -560,22 +557,36 @@ export function SessionList({ showCreateAction = true }: { showCreateAction?: bo
               className="h-7 w-full rounded-md border border-border bg-surface pl-7 pr-2 text-xs outline-none focus:border-accent"
             />
           </label>
-          <select
-            aria-label="Filter sessions by status"
-            title="Filter by status"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value as SessionFilter)}
-            className="h-7 w-[82px] rounded-md border border-border bg-surface px-1 text-xs outline-none focus:border-accent"
+          <div
+            role="group"
+            aria-label="Filter sessions"
+            className="flex h-7 shrink-0 overflow-hidden rounded-md border border-border text-xs"
           >
-            <option value="all">All</option>
-            <option value="archived">Archived</option>
-            <option value="running">Running</option>
-            <option value="queued">Queued</option>
-            <option value="idle">Idle</option>
-            <option value="error">Error</option>
-            <option value="inactive">Inactive</option>
-            <option value="starting">Starting</option>
-          </select>
+            <button
+              type="button"
+              onClick={() => setFilter("active")}
+              aria-pressed={filter === "active"}
+              className={`px-2 transition-colors ${
+                filter === "active"
+                  ? "bg-surface-overlay text-foreground"
+                  : "bg-surface text-muted hover:text-foreground"
+              }`}
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilter("archived")}
+              aria-pressed={filter === "archived"}
+              className={`border-l border-border px-2 transition-colors ${
+                filter === "archived"
+                  ? "bg-surface-overlay text-foreground"
+                  : "bg-surface text-muted hover:text-foreground"
+              }`}
+            >
+              {archivedCount > 0 ? `Archived (${archivedCount})` : "Archived"}
+            </button>
+          </div>
         </div>
       )}
       <ul className="flex flex-col gap-0.5">
