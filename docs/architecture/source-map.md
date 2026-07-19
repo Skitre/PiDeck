@@ -14,6 +14,8 @@ Layers map to implementation paths. P0 Windows completion is recorded in `docs/o
 | Pi Host entry | `packages/pi-host/src/main.ts` | `host.integration.test.ts`, `trust-package.integration.test.ts` |
 | Protocol server | `packages/pi-host/src/server.ts` | integration (shutdown after cleanup) |
 | Workspace graph factory | `packages/pi-host/src/workspace-graph-factory.ts` | integration (candidate-commit) |
+| Workspace graph types | `packages/pi-host/src/workspace-graph-types.ts` | via factory tests |
+| Session lifecycle ops | `packages/pi-host/src/session-lifecycle.ts` | `session-file-lifecycle`, session-controller integration |
 | Package filters | `packages/pi-host/src/package-filters.ts` | `package-filters.test.ts` |
 | Package controller | `packages/pi-host/src/package-controller.ts` | integration + disk fingerprint + resource-reload-required |
 | Agent controller | `packages/pi-host/src/agent-controller.ts` | integration |
