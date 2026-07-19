@@ -146,32 +146,31 @@ export function WorkspacePicker() {
   return (
     <section>
       <div className="mb-1 flex h-7 items-center justify-between px-2">
-        <span className="text-[11px] font-medium text-muted">Workspaces</span>
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => void pickAndAdd()}
-            disabled={!host || pending}
-            className="flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
-            title="Add workspace"
-            aria-label="Add workspace"
-          >
-            <Plus size={15} />
-          </button>
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-expanded={!collapsed}
-            className="flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground"
-            title={collapsed ? "Expand workspaces" : "Collapse workspaces"}
-            aria-label={collapsed ? "Expand workspaces" : "Collapse workspaces"}
-          >
-            <ChevronDown
-              size={14}
-              className={`transition-transform ${collapsed ? "-rotate-90" : ""}`}
-            />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Expand workspaces" : "Collapse workspaces"}
+          className="group flex min-w-0 items-center gap-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground"
+        >
+          <span>Workspaces</span>
+          <ChevronDown
+            size={12}
+            className={`opacity-0 transition-all group-hover:opacity-100 ${
+              collapsed ? "-rotate-90" : ""
+            }`}
+          />
+        </button>
+        <button
+          type="button"
+          onClick={() => void pickAndAdd()}
+          disabled={!host || pending}
+          className="flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
+          title="Add workspace"
+          aria-label="Add workspace"
+        >
+          <Plus size={15} />
+        </button>
       </div>
       {collapsed ? null : listed.length === 0 ? (
         <button

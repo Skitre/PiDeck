@@ -528,7 +528,25 @@ export function SessionList({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex h-8 items-center justify-between px-2">
-        <span className="text-[11px] font-medium text-muted">Recent conversations</span>
+        {onToggleCollapsed ? (
+          <button
+            type="button"
+            onClick={onToggleCollapsed}
+            aria-expanded={!collapsed}
+            title={collapsed ? "Expand conversations" : "Collapse conversations"}
+            className="group flex min-w-0 items-center gap-1 text-[11px] font-medium text-muted transition-colors hover:text-foreground"
+          >
+            <span>Recent conversations</span>
+            <ChevronDown
+              size={12}
+              className={`opacity-0 transition-all group-hover:opacity-100 ${
+                collapsed ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+        ) : (
+          <span className="text-[11px] font-medium text-muted">Recent conversations</span>
+        )}
         <div className="flex items-center gap-0.5">
           {archivedCount > 0 && (
             <button
@@ -560,21 +578,6 @@ export function SessionList({
           >
             <Plus size={14} />
           </button>}
-          {onToggleCollapsed && (
-            <button
-              type="button"
-              title={collapsed ? "Expand conversations" : "Collapse conversations"}
-              aria-label={collapsed ? "Expand conversations" : "Collapse conversations"}
-              aria-expanded={!collapsed}
-              className="rounded p-1 text-muted hover:bg-surface-overlay hover:text-foreground"
-              onClick={onToggleCollapsed}
-            >
-              <ChevronDown
-                size={14}
-                className={`transition-transform ${collapsed ? "rotate-180" : ""}`}
-              />
-            </button>
-          )}
         </div>
       </div>
       {collapsed ? null : (
