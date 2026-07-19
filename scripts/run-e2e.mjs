@@ -515,7 +515,9 @@ try {
     if (pageErrors.length > 100) pageErrors.shift();
   });
   await page.waitForLoadState("domcontentloaded");
-  await page.getByText("PiDeck", { exact: true }).waitFor({ timeout: 30_000 });
+  // Sidebar brand is always rendered; "PiDeck" only appears once Settings is
+  // open (TitleBar.tsx is not mounted), so it is timing-dependent.
+  await page.getByText("Pi Agent", { exact: true }).waitFor({ timeout: 30_000 });
   record("desktop.window.attached", { title: await page.title() });
 
   await page.getByText(projectDir, { exact: false }).first().waitFor({ timeout: 210_000 });
