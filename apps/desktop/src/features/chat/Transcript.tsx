@@ -1,11 +1,12 @@
 import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Brain, ChevronRight, Copy, LoaderCircle } from "lucide-react";
+import { ArrowDown, Brain, ChevronRight, Copy, FileText, LoaderCircle } from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { sanitizeAgentText } from "./markdown-utils";
 import { ToolView } from "./ToolView";
 import { formatDuration } from "./ToolCard";
 import {
   buildTranscriptRows,
+  parseUserAttachments,
   reuseStableRows,
   type TranscriptBlock,
   type TranscriptRow,
@@ -226,6 +227,7 @@ const TranscriptRowView = memo(function TranscriptRowView({
       (block): block is Extract<TranscriptBlock, { kind: "image" }> =>
         block.kind === "image",
     );
+    const parsed = parseUserAttachments(row.copyText);
     return (
       <div className="group relative ml-auto max-w-[78%]">
         {images.length > 0 && (
@@ -240,9 +242,27 @@ const TranscriptRowView = memo(function TranscriptRowView({
             ))}
           </div>
         )}
-        {row.copyText && (
+        {parsed.files.length > 0 && (
+          <div className="mb-1 flex flex-wrap justify-end gap-1.5">
+            {parsed.files.map((file, index) => (
+              <details
+                key={`file:${index}`}
+                className="max-w-full rounded-md border border-border bg-surface text-xs"
+              >
+                <summary className="flex h-7 cursor-pointer list-none items-center gap-1.5 px-2 text-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+                  <FileText size={12} className="shrink-0" />
+                  <span className="max-w-48 truncate">{file.name}</span>
+                </summary>
+                <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-border px-2 py-1.5 text-[11px] leading-5">
+                  {file.content}
+                </pre>
+              </details>
+            ))}
+          </div>
+        )}
+        {parsed.text && (
           <div className="whitespace-pre-wrap break-words rounded-xl rounded-br-md bg-surface-overlay px-3.5 py-2.5 text-sm leading-6">
-            {row.copyText}
+            {parsed.text}
           </div>
         )}
         <CopyMessageButton

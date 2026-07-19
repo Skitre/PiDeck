@@ -1,6 +1,33 @@
 import { describe, expect, it } from "vitest";
 import type { SerializableAgentMessage } from "@pideck/protocol";
-import { buildTranscriptRows, messageText, reuseStableRows } from "./transcript-model";
+import {
+  buildAttachedFileBlock,
+  buildTranscriptRows,
+  messageText,
+  parseUserAttachments,
+  reuseStableRows,
+} from "./transcript-model";
+
+describe("attached file blocks", () => {
+  it("round-trips build and parse", () => {
+    const raw = [
+      "please review",
+      buildAttachedFileBlock("main.rs", "fn main() {}\n"),
+      buildAttachedFileBlock('we"ird.txt', "content"),
+    ].join("\n\n");
+    const parsed = parseUserAttachments(raw);
+    expect(parsed.text).toBe("please review");
+    expect(parsed.files).toEqual([
+      { name: "main.rs", content: "fn main() {}" },
+      { name: "we'ird.txt", content: "content" },
+    ]);
+  });
+
+  it("passes through plain text untouched", () => {
+    const parsed = parseUserAttachments("just a message");
+    expect(parsed).toEqual({ text: "just a message", files: [] });
+  });
+});
 
 describe("reuseStableRows", () => {
   const history: SerializableAgentMessage[] = [

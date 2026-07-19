@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Send, Square, X } from "lucide-react";
+import { FileText, ImagePlus, Send, Square, X } from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import type { SerializableImage } from "@pideck/protocol";
+import { buildAttachedFileBlock } from "./transcript-model";
 import {
   activeSessionContext,
   captureRequestGeneration,
@@ -11,8 +12,11 @@ import {
 
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_FILES = 4;
+const MAX_FILE_BYTES = 256 * 1024;
 
 type PendingImage = SerializableImage & { id: string };
+type PendingFile = { id: string; name: string; size: number; text: string };
 
 function fileToImage(file: File): Promise<PendingImage | null> {
   return new Promise((resolve) => {
@@ -32,6 +36,17 @@ function fileToImage(file: File): Promise<PendingImage | null> {
   });
 }
 
+/** UTF-8 decoded content that still contains NULs or a high density of
+ * replacement chars is binary, not text. */
+function looksBinary(text: string): boolean {
+  if (text.includes("\u0000")) return true;
+  let bad = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 0xfffd) bad += 1;
+  }
+  return text.length > 0 && bad / text.length > 0.02;
+}
+
 export function Composer({ disabled }: { disabled?: boolean }) {
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
@@ -44,6 +59,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
   const pushNotification = useAppStore((s) => s.pushNotification);
   const [streamMode, setStreamMode] = useState<"steer" | "followUp">("followUp");
   const [images, setImages] = useState<PendingImage[]>([]);
+  const [files, setFiles] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const busy = session ? !session.isIdle : false;
@@ -52,44 +68,96 @@ export function Composer({ disabled }: { disabled?: boolean }) {
   // Attachments are per-conversation; drop them when the session changes.
   useEffect(() => {
     setImages([]);
+    setFiles([]);
     setDragOver(false);
   }, [sessionId]);
 
-  async function addFiles(files: Iterable<File>) {
-    const accepted: File[] = [];
-    for (const file of files) {
-      if (!file.type.startsWith("image/")) continue;
-      if (file.size > MAX_IMAGE_BYTES) {
+  async function addFiles(incoming: Iterable<File>) {
+    const imageFiles: File[] = [];
+    const textFiles: File[] = [];
+    for (const file of incoming) {
+      if (file.type.startsWith("image/")) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          pushNotification(
+            `Image too large (max ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB)`,
+            "warning",
+          );
+          continue;
+        }
+        imageFiles.push(file);
+        continue;
+      }
+      if (file.size > MAX_FILE_BYTES) {
         pushNotification(
-          `Image too large (max ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB)`,
+          `${file.name}: file too large (max ${Math.round(MAX_FILE_BYTES / 1024)} KB)`,
           "warning",
         );
         continue;
       }
-      accepted.push(file);
+      textFiles.push(file);
     }
-    if (accepted.length === 0) return;
-    const loaded = (await Promise.all(accepted.map(fileToImage))).filter(
-      (image): image is PendingImage => image !== null,
-    );
-    setImages((current) => {
-      const next = [...current, ...loaded];
-      if (next.length > MAX_IMAGES) {
-        pushNotification(`Up to ${MAX_IMAGES} images per message`, "warning");
+
+    if (imageFiles.length > 0) {
+      const loaded = (await Promise.all(imageFiles.map(fileToImage))).filter(
+        (image): image is PendingImage => image !== null,
+      );
+      setImages((current) => {
+        const next = [...current, ...loaded];
+        if (next.length > MAX_IMAGES) {
+          pushNotification(`Up to ${MAX_IMAGES} images per message`, "warning");
+        }
+        return next.slice(0, MAX_IMAGES);
+      });
+    }
+
+    if (textFiles.length > 0) {
+      const loaded: PendingFile[] = [];
+      for (const file of textFiles) {
+        try {
+          const text = await file.text();
+          if (looksBinary(text)) {
+            pushNotification(`${file.name}: binary files are not supported`, "warning");
+            continue;
+          }
+          loaded.push({
+            id: crypto.randomUUID(),
+            name: file.name,
+            size: file.size,
+            text,
+          });
+        } catch {
+          pushNotification(`${file.name}: could not read file`, "warning");
+        }
       }
-      return next.slice(0, MAX_IMAGES);
-    });
+      if (loaded.length > 0) {
+        setFiles((current) => {
+          const next = [...current, ...loaded];
+          if (next.length > MAX_FILES) {
+            pushNotification(`Up to ${MAX_FILES} files per message`, "warning");
+          }
+          return next.slice(0, MAX_FILES);
+        });
+      }
+    }
   }
 
   async function send() {
     if (!host || !workspace || !session || disabled) return;
-    if (!text.trim() && images.length === 0) return;
+    if (!text.trim() && images.length === 0 && files.length === 0) return;
     const value = text;
     const sentImages = images;
+    const sentFiles = files;
     const targetSessionId = session.sessionId;
     setSessionDraft(targetSessionId, "");
     setImages([]);
+    setFiles([]);
     const context = activeSessionContext(host, workspace, session);
+    const outgoingText =
+      sentFiles.length > 0
+        ? [value.trimEnd(), ...sentFiles.map((f) => buildAttachedFileBlock(f.name, f.text))]
+            .filter(Boolean)
+            .join("\n\n")
+        : value;
     const imageParams =
       sentImages.length > 0
         ? { images: sentImages.map(({ mediaType, data }) => ({ mediaType, data })) }
@@ -97,15 +165,19 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     const restoreDraft = () => {
       setSessionDraft(targetSessionId, value);
       setImages(sentImages);
+      setFiles(sentFiles);
     };
 
     try {
       if (busy) {
         const res =
           streamMode === "steer"
-            ? await hostClient.request("agent.steer", context, { text: value, ...imageParams })
+            ? await hostClient.request("agent.steer", context, {
+                text: outgoingText,
+                ...imageParams,
+              })
             : await hostClient.request("agent.followUp", context, {
-                text: value,
+                text: outgoingText,
                 ...imageParams,
               });
         if (!res.ok) {
@@ -118,7 +190,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
       const res = await hostClient.request(
         "agent.prompt",
         context,
-        { text: value, ...imageParams },
+        { text: outgoingText, ...imageParams },
         null,
       );
       if (!res.ok) {
@@ -149,7 +221,8 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     if (res.ok) setSession(res.result.session);
   }
 
-  const canSend = !disabled && (Boolean(text.trim()) || images.length > 0);
+  const canSend =
+    !disabled && (Boolean(text.trim()) || images.length > 0 || files.length > 0);
 
   return (
     <div className="shrink-0 px-5 pb-5 pt-2">
@@ -172,6 +245,31 @@ export function Composer({ disabled }: { disabled?: boolean }) {
           void addFiles(event.dataTransfer.files);
         }}
       >
+        {files.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-2 pt-1.5">
+            {files.map((file) => (
+              <div
+                key={file.id}
+                className="group flex h-7 items-center gap-1.5 rounded-md border border-border bg-surface px-2 text-xs"
+                title={`${file.name} · ${Math.max(1, Math.round(file.size / 1024))} KB`}
+              >
+                <FileText size={12} className="shrink-0 text-muted" />
+                <span className="max-w-40 truncate">{file.name}</span>
+                <button
+                  type="button"
+                  title="Remove file"
+                  aria-label={`Remove ${file.name}`}
+                  className="text-muted hover:text-danger"
+                  onClick={() =>
+                    setFiles((current) => current.filter((it) => it.id !== file.id))
+                  }
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 px-2 pt-1.5">
             {images.map((image) => (
@@ -225,7 +323,6 @@ export function Composer({ disabled }: { disabled?: boolean }) {
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
             multiple
             className="hidden"
             onChange={(event) => {
@@ -235,10 +332,10 @@ export function Composer({ disabled }: { disabled?: boolean }) {
           />
           <button
             type="button"
-            title="Attach image"
-            aria-label="Attach image"
+            title="Attach image or text file"
+            aria-label="Attach image or text file"
             className="flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
-            disabled={disabled || images.length >= MAX_IMAGES}
+            disabled={disabled || (images.length >= MAX_IMAGES && files.length >= MAX_FILES)}
             onClick={() => fileInputRef.current?.click()}
           >
             <ImagePlus size={15} />

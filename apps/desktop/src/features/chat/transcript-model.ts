@@ -481,6 +481,33 @@ function rowEquivalent(a: TranscriptRow, b: TranscriptRow): boolean {
 }
 
 /**
+ * Text-file attachments travel inside the prompt text as tagged blocks so any
+ * model (and the CLI) sees them; the transcript folds them back into chips.
+ */
+export function buildAttachedFileBlock(name: string, content: string): string {
+  const safeName = name.replace(/"/g, "'");
+  const body = content.endsWith("\n") ? content.slice(0, -1) : content;
+  return `<attached-file name="${safeName}">\n${body}\n</attached-file>`;
+}
+
+export type ParsedUserText = {
+  text: string;
+  files: { name: string; content: string }[];
+};
+
+export function parseUserAttachments(raw: string): ParsedUserText {
+  const files: ParsedUserText["files"] = [];
+  const pattern = /<attached-file name="([^"]*)">\n?([\s\S]*?)\n?<\/attached-file>/g;
+  const text = raw
+    .replace(pattern, (_match, name: string, content: string) => {
+      files.push({ name, content });
+      return "";
+    })
+    .trim();
+  return { text, files };
+}
+
+/**
  * Streaming hot path: the reducer rebuilds `messages` on every agent event,
  * so every derived row is a fresh object even when its content is unchanged.
  * Substituting the previous row object for content-equivalent rows lets a
