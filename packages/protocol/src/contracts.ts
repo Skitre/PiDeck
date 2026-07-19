@@ -41,6 +41,7 @@ import type {
   ProviderDraft,
   ProviderSnapshot,
   DiscoveredProviderModel,
+  PromptTemplateSummary,
 } from "./types.js";
 
 export type HostContextMap = {
@@ -50,6 +51,7 @@ export type HostContextMap = {
   "workspace.setCurrent": WorkspaceContext;
   "workspace.getCurrent": WorkspaceContext;
   "workspace.getTrust": WorkspaceContext;
+  "workspace.searchFiles": WorkspaceContext;
   "workspace.setTrust": WorkspaceContext;
   "session.list": WorkspaceContext;
   "session.create": NullableSessionContext;
@@ -64,6 +66,7 @@ export type HostContextMap = {
   "session.getEntries": ActiveSessionContext;
   "session.getTree": ActiveSessionContext;
   "session.getStats": ActiveSessionContext;
+  "session.getPromptTemplates": ActiveSessionContext;
   "agent.prompt": ActiveSessionContext;
   "agent.steer": ActiveSessionContext;
   "agent.followUp": ActiveSessionContext;
@@ -106,6 +109,7 @@ export type HostRequestParams = {
   "workspace.setCurrent": { cwd: string };
   "workspace.getCurrent": null;
   "workspace.getTrust": { cwd: string };
+  "workspace.searchFiles": { query: string; limit?: number };
   "workspace.setTrust": { decision: "trustOnce" | "trust" | "deny" };
   "session.list": null;
   "session.create": { name?: string };
@@ -120,6 +124,7 @@ export type HostRequestParams = {
   "session.getEntries": { sinceEntryId?: string } | null;
   "session.getTree": null;
   "session.getStats": null;
+  "session.getPromptTemplates": null;
   "agent.prompt": {
     text: string;
     images?: SerializableImage[];
@@ -187,6 +192,7 @@ export type HostResultMap = {
   };
   "workspace.getCurrent": WorkspaceSnapshot | null;
   "workspace.getTrust": { workspace: WorkspaceSnapshot; options: TrustOption[] };
+  "workspace.searchFiles": { files: string[] };
   "workspace.setTrust": { workspace: WorkspaceSnapshot; session?: SessionSnapshot };
   "session.list": { workspaceId: string; items: SessionSummary[] };
   "session.create": SessionSnapshot;
@@ -207,6 +213,7 @@ export type HostResultMap = {
     leafId: string | null;
   };
   "session.getStats": SessionStatsSnapshot;
+  "session.getPromptTemplates": { templates: PromptTemplateSummary[] };
   "agent.prompt": { accepted: true; runId: string };
   "agent.steer": { accepted: true };
   "agent.followUp": { accepted: true };

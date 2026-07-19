@@ -766,6 +766,27 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         (result.leafId === null || isString(result.leafId))
         ? null
         : "invalid session tree";
+    case "workspace.searchFiles":
+      return isPlainObject(result) &&
+        hasExactKeys(result, ["files"]) &&
+        Array.isArray(result.files) &&
+        result.files.every(isString)
+        ? null
+        : "invalid workspace.searchFiles result";
+    case "session.getPromptTemplates":
+      return isPlainObject(result) &&
+        hasExactKeys(result, ["templates"]) &&
+        Array.isArray(result.templates) &&
+        result.templates.every(
+          (t) =>
+            isPlainObject(t) &&
+            hasExactKeys(t, ["name", "description"], ["argumentHint"]) &&
+            isString(t.name) &&
+            isString(t.description) &&
+            (t.argumentHint === undefined || isString(t.argumentHint)),
+        )
+        ? null
+        : "invalid session.getPromptTemplates result";
     case "session.getStats":
       return isPlainObject(result) &&
         hasExactKeys(result, ["messageCount"], ["toolCallCount", "tokenUsage"]) &&

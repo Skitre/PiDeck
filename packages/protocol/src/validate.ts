@@ -186,6 +186,7 @@ export function validateRequestParams<M extends HostMethod>(
     case "session.getSnapshot":
     case "session.getTree":
     case "session.getStats":
+    case "session.getPromptTemplates":
     case "agent.abort":
     case "agent.clearQueue":
     case "agent.abortCompaction":
@@ -196,6 +197,16 @@ export function validateRequestParams<M extends HostMethod>(
     case "package.reloadResources":
     case "piSettings.get":
       return params === null ? ok(null) : fail("params must be null", { method });
+    case "workspace.searchFiles":
+      return exactObject(params, ["query"], ["limit"]) &&
+        isString(params.query) &&
+        (params.limit === undefined ||
+          (typeof params.limit === "number" &&
+            Number.isInteger(params.limit) &&
+            params.limit >= 1 &&
+            params.limit <= 200))
+        ? ok(params)
+        : fail("invalid workspace.searchFiles params", { method });
     case "workspace.setCurrent":
     case "workspace.getTrust":
       return exactObject(params, ["cwd"]) && isNonEmptyString(params.cwd)

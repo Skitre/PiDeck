@@ -267,5 +267,36 @@ export function createSessionHandlers(
       if (!out.ok) return { error: out.error, identity: out.identity };
       return { result: out.result, identity: out.identity };
     },
+
+    "session.getPromptTemplates": async (ctx) => {
+      const server = factory.getServer();
+      if (!server) {
+        return { error: createHostError("HOST_NOT_READY", "Server not bound") };
+      }
+      const { withStableGraphRead } = await import("./stable-graph-read.js");
+      const out = await withStableGraphRead({
+        requestId: ctx.id,
+        identity: server.identity,
+        serviceGraphLock: server.serviceGraphLock,
+        precheck: () =>
+          factory.checkIdentity(ctx.context, {
+            requireWorkspace: true,
+            requireSession: true,
+          }),
+        run: async () => {
+          const g = factory.getGraph();
+          if (!g?.agentSession) throw new Error("No active session");
+          return {
+            templates: g.agentSession.promptTemplates.map((template) => ({
+              name: template.name,
+              description: template.description,
+              ...(template.argumentHint ? { argumentHint: template.argumentHint } : {}),
+            })),
+          };
+        },
+      });
+      if (!out.ok) return { error: out.error, identity: out.identity };
+      return { result: out.result, identity: out.identity };
+    },
   };
 }

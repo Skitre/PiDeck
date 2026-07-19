@@ -80,6 +80,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "workspace.setCurrent": { cwd: "C:/tmp" },
   "workspace.getCurrent": null,
   "workspace.getTrust": { cwd: "C:/tmp" },
+  "workspace.searchFiles": { query: "src" },
   "workspace.setTrust": { decision: "trust" },
   "session.list": null,
   "session.create": {},
@@ -94,6 +95,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "session.getEntries": null,
   "session.getTree": null,
   "session.getStats": null,
+  "session.getPromptTemplates": null,
   "agent.prompt": { text: "hi" },
   "agent.steer": { text: "hi" },
   "agent.followUp": { text: "hi" },
@@ -207,6 +209,8 @@ function invalidParams(method: HostMethod): unknown {
     case "workspace.setCurrent":
     case "workspace.getTrust":
       return { path: "x" }; // missing cwd
+    case "workspace.searchFiles":
+      return { query: 1 };
     case "workspace.setTrust":
       return { decision: "maybe" };
     case "session.create":

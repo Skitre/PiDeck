@@ -359,6 +359,12 @@ export type SessionStatsSnapshot = {
   tokenUsage?: JsonValue;
 };
 
+export type PromptTemplateSummary = {
+  name: string;
+  description: string;
+  argumentHint?: string;
+};
+
 export type SerializableImage = {
   mediaType: string;
   data: string;

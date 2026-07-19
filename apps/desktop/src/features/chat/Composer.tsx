@@ -47,6 +47,37 @@ function looksBinary(text: string): boolean {
   return text.length > 0 && bad / text.length > 0.02;
 }
 
+type CompletionItem = { insert: string; label: string; detail?: string };
+type CompletionState = {
+  kind: "command" | "file";
+  /** Index in the draft where the trigger token (incl. `/` or `@`) starts. */
+  tokenStart: number;
+  query: string;
+  items: CompletionItem[];
+  selected: number;
+};
+
+/** `/name` at the very start of the draft, token touching the caret. */
+export function commandTokenAt(
+  text: string,
+  caret: number,
+): { start: number; query: string } | null {
+  const before = text.slice(0, caret);
+  const match = /^\/([\w:-]*)$/.exec(before);
+  return match ? { start: 0, query: match[1] } : null;
+}
+
+/** `@token` preceded by whitespace/start, token touching the caret. */
+export function fileTokenAt(
+  text: string,
+  caret: number,
+): { start: number; query: string } | null {
+  const before = text.slice(0, caret);
+  const match = /(^|\s)@([^\s@]*)$/.exec(before);
+  if (!match) return null;
+  return { start: before.length - match[2].length - 1, query: match[2] };
+}
+
 export function Composer({ disabled }: { disabled?: boolean }) {
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
@@ -61,7 +92,11 @@ export function Composer({ disabled }: { disabled?: boolean }) {
   const [images, setImages] = useState<PendingImage[]>([]);
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [completion, setCompletion] = useState<CompletionState | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const templatesRef = useRef<{ key: string; items: CompletionItem[] } | null>(null);
+  const fileSearchSeq = useRef(0);
   const busy = session ? !session.isIdle : false;
   const sessionId = session?.sessionId ?? null;
 
@@ -70,7 +105,88 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     setImages([]);
     setFiles([]);
     setDragOver(false);
+    setCompletion(null);
   }, [sessionId]);
+
+  async function loadCommandItems(): Promise<CompletionItem[]> {
+    if (!host || !workspace || !session) return [];
+    const key = `${session.sessionId}:${session.revision}`;
+    if (templatesRef.current?.key === key) return templatesRef.current.items;
+    const res = await hostClient.request(
+      "session.getPromptTemplates",
+      activeSessionContext(host, workspace, session),
+      null,
+    );
+    if (!res.ok) return [];
+    const items = res.result.templates.map((template) => ({
+      insert: `/${template.name} `,
+      label: `/${template.name}`,
+      detail: [template.argumentHint, template.description].filter(Boolean).join(" — "),
+    }));
+    templatesRef.current = { key, items };
+    return items;
+  }
+
+  function updateCompletion(nextText: string, caret: number) {
+    const command = commandTokenAt(nextText, caret);
+    if (command) {
+      void loadCommandItems().then((all) => {
+        const query = command.query.toLocaleLowerCase();
+        const items = all
+          .filter((item) => item.label.toLocaleLowerCase().startsWith(`/${query}`))
+          .slice(0, 8);
+        setCompletion(
+          items.length > 0
+            ? { kind: "command", tokenStart: command.start, query: command.query, items, selected: 0 }
+            : null,
+        );
+      });
+      return;
+    }
+    const file = fileTokenAt(nextText, caret);
+    if (file && host && workspace) {
+      const seq = ++fileSearchSeq.current;
+      const context = {
+        expectedHostInstanceId: host.hostInstanceId,
+        expectedWorkspaceId: host.workspaceId,
+        expectedWorkspaceRevision: host.workspaceRevision,
+      };
+      window.setTimeout(() => {
+        if (seq !== fileSearchSeq.current) return;
+        void hostClient
+          .request("workspace.searchFiles", context, { query: file.query, limit: 20 })
+          .then((res) => {
+            if (seq !== fileSearchSeq.current || !res.ok) return;
+            const items = res.result.files.map((path) => ({
+              insert: `${path} `,
+              label: path,
+            }));
+            setCompletion(
+              items.length > 0
+                ? { kind: "file", tokenStart: file.start, query: file.query, items, selected: 0 }
+                : null,
+            );
+          })
+          .catch(() => undefined);
+      }, 120);
+      return;
+    }
+    setCompletion(null);
+  }
+
+  function acceptCompletion(state: CompletionState, index: number) {
+    const item = state.items[index];
+    if (!item || !session) return;
+    const caret = textareaRef.current?.selectionStart ?? text.length;
+    const nextText = text.slice(0, state.tokenStart) + item.insert + text.slice(caret);
+    setSessionDraft(session.sessionId, nextText);
+    setCompletion(null);
+    const nextCaret = state.tokenStart + item.insert.length;
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(nextCaret, nextCaret);
+    });
+  }
 
   async function addFiles(incoming: Iterable<File>) {
     const imageFiles: File[] = [];
@@ -294,31 +410,91 @@ export function Composer({ disabled }: { disabled?: boolean }) {
             ))}
           </div>
         )}
-        <textarea
-          className="min-h-[76px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted"
-          placeholder={disabled ? "Chat unavailable" : "Message Pi"}
-          value={text}
-          disabled={disabled}
-          onChange={(event) => {
-            if (session) setSessionDraft(session.sessionId, event.target.value);
-          }}
-          onPaste={(event) => {
-            const files = [...event.clipboardData.items]
-              .filter((item) => item.kind === "file")
-              .map((item) => item.getAsFile())
-              .filter((file): file is File => file !== null);
-            if (files.length > 0) {
-              event.preventDefault();
-              void addFiles(files);
-            }
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              void send();
-            }
-          }}
-        />
+        <div className="relative">
+          {completion && (
+            <div className="absolute bottom-full left-2 z-30 mb-1 max-h-64 w-[420px] max-w-[90%] overflow-y-auto rounded-md border border-border bg-surface-raised py-1 shadow-lg">
+              {completion.items.map((item, index) => (
+                <button
+                  key={`${item.label}:${index}`}
+                  type="button"
+                  className={`flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left text-xs ${
+                    index === completion.selected
+                      ? "bg-surface-overlay text-foreground"
+                      : "text-foreground/85 hover:bg-surface-overlay/60"
+                  }`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    acceptCompletion(completion, index);
+                  }}
+                >
+                  <span className="shrink-0 font-medium">{item.label}</span>
+                  {item.detail && (
+                    <span className="min-w-0 truncate text-muted">{item.detail}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            className="min-h-[76px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted"
+            placeholder={disabled ? "Chat unavailable" : "Message Pi  ( / commands · @ files )"}
+            value={text}
+            disabled={disabled}
+            onChange={(event) => {
+              if (!session) return;
+              setSessionDraft(session.sessionId, event.target.value);
+              updateCompletion(
+                event.target.value,
+                event.target.selectionStart ?? event.target.value.length,
+              );
+            }}
+            onBlur={() => setCompletion(null)}
+            onPaste={(event) => {
+              const pasted = [...event.clipboardData.items]
+                .filter((item) => item.kind === "file")
+                .map((item) => item.getAsFile())
+                .filter((file): file is File => file !== null);
+              if (pasted.length > 0) {
+                event.preventDefault();
+                void addFiles(pasted);
+              }
+            }}
+            onKeyDown={(event) => {
+              if (completion) {
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  const delta = event.key === "ArrowDown" ? 1 : -1;
+                  setCompletion((current) =>
+                    current
+                      ? {
+                          ...current,
+                          selected:
+                            (current.selected + delta + current.items.length) %
+                            current.items.length,
+                        }
+                      : null,
+                  );
+                  return;
+                }
+                if (event.key === "Enter" || event.key === "Tab") {
+                  event.preventDefault();
+                  acceptCompletion(completion, completion.selected);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setCompletion(null);
+                  return;
+                }
+              }
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void send();
+              }
+            }}
+          />
+        </div>
         <div className="flex h-8 items-center gap-2 px-1">
           <input
             ref={fileInputRef}

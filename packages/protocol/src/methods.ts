@@ -6,6 +6,7 @@ export const HOST_METHODS = [
   "workspace.setCurrent",
   "workspace.getCurrent",
   "workspace.getTrust",
+  "workspace.searchFiles",
   "workspace.setTrust",
   "session.list",
   "session.create",
@@ -20,6 +21,7 @@ export const HOST_METHODS = [
   "session.getEntries",
   "session.getTree",
   "session.getStats",
+  "session.getPromptTemplates",
   "agent.prompt",
   "agent.steer",
   "agent.followUp",
@@ -105,6 +107,7 @@ export type WorkspaceOnlyMethod =
   | "workspace.setCurrent"
   | "workspace.getCurrent"
   | "workspace.getTrust"
+  | "workspace.searchFiles"
   | "workspace.setTrust"
   | "session.list"
   | "session.archive"
@@ -122,6 +125,7 @@ export type ActiveSessionMethod =
   | "session.getEntries"
   | "session.getTree"
   | "session.getStats"
+  | "session.getPromptTemplates"
   | "agent.prompt"
   | "agent.steer"
   | "agent.followUp"
@@ -184,6 +188,7 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "workspace.setCurrent": "workspace",
   "workspace.getCurrent": "workspace",
   "workspace.getTrust": "workspace",
+  "workspace.searchFiles": "workspace",
   "workspace.setTrust": "workspace",
   "session.list": "workspace",
   "session.create": "nullableSession",
@@ -198,6 +203,7 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "session.getEntries": "activeSession",
   "session.getTree": "activeSession",
   "session.getStats": "activeSession",
+  "session.getPromptTemplates": "activeSession",
   "agent.prompt": "activeSession",
   "agent.steer": "activeSession",
   "agent.followUp": "activeSession",
