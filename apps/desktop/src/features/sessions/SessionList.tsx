@@ -60,6 +60,21 @@ export function sessionRuntimeLabel(state: SessionRuntimeState): string {
   return state;
 }
 
+/** Dot color class for states worth surfacing; quiet states render nothing. */
+export function sessionStatusDotClass(state: SessionRuntimeState): string | null {
+  switch (state) {
+    case "running":
+    case "starting":
+      return "bg-success animate-pulse";
+    case "queued":
+      return "bg-warning";
+    case "error":
+      return "bg-danger";
+    default:
+      return null;
+  }
+}
+
 export function filterSessionItems(
   items: SessionCatalogEntry[],
   query: string,
@@ -648,15 +663,27 @@ export function SessionList({ showCreateAction = true }: { showCreateAction?: bo
                     onClick={() => void openSession(item.sessionPath)}
                     disabled={sessionMutationPending || !item.sessionPath || item.archived}
                     className="min-w-0 flex-1 px-2.5 py-2 text-left disabled:opacity-50"
-                    title={sessionDisplayName(item)}
+                    title={
+                      item.runtimeState === "error" && item.lastError
+                        ? `${sessionDisplayName(item)} — ${item.lastError}`
+                        : sessionDisplayName(item)
+                    }
                   >
-                    <div className={`truncate ${active ? "font-medium" : ""}`}>
-                      {sessionDisplayName(item)}
-                    </div>
-                    <div className="hidden truncate text-[10px] text-muted">
-                      {item.messageCount ?? 0} messages · {item.archived
-                        ? "archived"
-                        : sessionRuntimeLabel(item.runtimeState)}
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      {(() => {
+                        const dot = item.archived
+                          ? null
+                          : sessionStatusDotClass(item.runtimeState);
+                        return dot ? (
+                          <span
+                            aria-label={sessionRuntimeLabel(item.runtimeState)}
+                            className={`size-1.5 shrink-0 rounded-full ${dot}`}
+                          />
+                        ) : null;
+                      })()}
+                      <span className={`truncate ${active ? "font-medium" : ""}`}>
+                        {sessionDisplayName(item)}
+                      </span>
                     </div>
                   </button>
                   {active && (
