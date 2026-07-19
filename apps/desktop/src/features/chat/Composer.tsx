@@ -420,6 +420,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
                 <button
                   key={`${item.label}:${index}`}
                   type="button"
+                  title={item.detail ? `${item.label}\n${item.detail}` : item.label}
                   ref={(node) => {
                     if (node && index === completion.selected) {
                       node.scrollIntoView({ block: "nearest" });
