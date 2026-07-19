@@ -25,11 +25,14 @@ export function removeKnownWorkspace(list: string[], path: string): string[] {
   return list.filter((entry) => !samePath(entry, path));
 }
 
+// Stable fallback: a fresh [] per render makes the zustand selector loop.
+const NO_WORKSPACES: string[] = [];
+
 export function WorkspacePicker() {
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
   const knownWorkspaces = useAppStore(
-    (s) => s.desktopSettings?.knownWorkspaces ?? [],
+    (s) => s.desktopSettings?.knownWorkspaces ?? NO_WORKSPACES,
   );
   const setWorkspace = useAppStore((s) => s.setWorkspace);
   const setSession = useAppStore((s) => s.setSession);
