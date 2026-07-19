@@ -112,7 +112,7 @@ export function setSessionRuntimeState(
   sessionId: string,
   runtimeState: SessionRuntimeState,
   lastError?: string,
-  updatedAt = Date.now(),
+  updatedAt?: number,
 ): SessionCatalogState {
   const entry = current.entries[sessionId];
   if (!entry) return current;
@@ -121,7 +121,15 @@ export function setSessionRuntimeState(
     [sessionId]: {
       ...entry,
       runtimeState,
-      updatedAt,
+      // Recency policy (matches upsertSessionSnapshot): only genuine activity
+      // reorders the list. The host stamps idle announcements with Date.now()
+      // right after session.open, and local optimistic transitions
+      // (starting/inactive/error rollback) carry no timestamp — neither may
+      // jump the entry to the top of the recency sort.
+      updatedAt:
+        updatedAt !== undefined && (runtimeState === "running" || runtimeState === "queued")
+          ? updatedAt
+          : entry.updatedAt,
       ...(lastError ? { lastError } : { lastError: undefined }),
     },
   };

@@ -139,4 +139,21 @@ describe("session catalog", () => {
     expect(catalog.entries.s1?.updatedAt).toBe(50);
     expect(catalog.order).toEqual(["s1", "top"]);
   });
+
+  it("reorders on runtime state changes only for genuine activity", () => {
+    let catalog = replaceSessionCatalog(emptySessionCatalog(), "w1", [
+      { sessionId: "top", sessionPath: "C:/sessions/top.jsonl", cwd: "C:/w", updatedAt: 30 },
+      { sessionId: "s1", sessionPath: "C:/sessions/s1.jsonl", cwd: "C:/w", updatedAt: 10 },
+    ]);
+    // Host stamps idle announcements with Date.now() after session.open —
+    // must not reorder. Local optimistic "starting" has no timestamp — same.
+    catalog = setSessionRuntimeState(catalog, "s1", "starting");
+    catalog = setSessionRuntimeState(catalog, "s1", "idle", undefined, 99);
+    expect(catalog.entries.s1?.updatedAt).toBe(10);
+    expect(catalog.order).toEqual(["top", "s1"]);
+
+    catalog = setSessionRuntimeState(catalog, "s1", "running", undefined, 100);
+    expect(catalog.entries.s1?.updatedAt).toBe(100);
+    expect(catalog.order).toEqual(["s1", "top"]);
+  });
 });
