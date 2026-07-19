@@ -286,7 +286,9 @@ const nodeProbe = spawnSync(nodeExe, ["--version"], {
   timeout: 15_000,
   env: runtimeEnv,
 });
-const npmProbe = spawnSync(npmCmd, ["--version"], {
+// npm.cmd is a batch file: Node rejects spawning .cmd with shell:false
+// (EINVAL, DEP0190 hardening) — invoke through cmd.exe explicitly.
+const npmProbe = spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", npmCmd, "--version"], {
   shell: false,
   encoding: "utf8",
   timeout: 30_000,
@@ -471,9 +473,9 @@ writeSmoke({
   resourceManifestFilesOk,
   resourceManifestHashOk,
   resourceManifestChecks,
-  nodeProbe: { status: nodeProbe.status, stdout: nodeProbe.stdout.trim(), error: nodeProbe.error?.message ?? null },
-  npmProbe: { status: npmProbe.status, stdout: npmProbe.stdout.trim(), error: npmProbe.error?.message ?? null },
-  gitProbe: { status: gitProbe.status, stdout: gitProbe.stdout.trim(), error: gitProbe.error?.message ?? null },
+  nodeProbe: { status: nodeProbe.status, stdout: (nodeProbe.stdout ?? "").trim(), error: nodeProbe.error?.message ?? null },
+  npmProbe: { status: npmProbe.status, stdout: (npmProbe.stdout ?? "").trim(), error: npmProbe.error?.message ?? null },
+  gitProbe: { status: gitProbe.status, stdout: (gitProbe.stdout ?? "").trim(), error: gitProbe.error?.message ?? null },
   installedE2eExitCode: installedE2e.status,
   installedE2eError: installedE2e.error?.code ?? null,
   installedE2eStdoutTail: (installedE2e.stdout || "").slice(-4000),

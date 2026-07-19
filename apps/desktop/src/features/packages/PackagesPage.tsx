@@ -149,14 +149,36 @@ export function PackagesPage() {
   }, [projectGate, projectGateBusy]);
 
   useEffect(() => {
+    if (!projectGate) return;
     if (
-      projectGate &&
-      !isCurrentWorkspaceAuthorization(host, workspace, projectGate.authorization, {
+      isCurrentWorkspaceAuthorization(host, workspace, projectGate.authorization, {
         requireTrusted: projectGate.step === "confirm",
       })
     ) {
-      setProjectGate(null);
+      return;
     }
+    // A trust transition rebuilds the workspace service graph, so revisions
+    // advance right after the setTrust reply. Re-bind the gate to the moved
+    // revisions while workspace identity and the trust decision are unchanged
+    // (confirm still requires an active trust grant); only a real identity or
+    // trust flip closes the dialog. confirmProjectMutation re-validates the
+    // captured authorization at click time.
+    const trustActive =
+      workspace?.trust.decision === "trusted" || workspace?.trust.decision === "session";
+    if (
+      host &&
+      workspace &&
+      workspace.id === projectGate.authorization.workspaceId &&
+      workspace.trust.decision === projectGate.authorization.trustDecision &&
+      (projectGate.step !== "confirm" || trustActive)
+    ) {
+      setProjectGate({
+        ...projectGate,
+        authorization: captureWorkspaceAuthorization(host, workspace),
+      });
+      return;
+    }
+    setProjectGate(null);
   }, [host, workspace, projectGate]);
 
   const selected: PackageRecord | undefined = packages?.configured.find(
