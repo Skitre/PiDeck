@@ -21,6 +21,7 @@ pub async fn desktop_settings_patch(
     let mut host = state.host.lock().await;
     host.set_agent_dir(store.resolved_agent_dir());
     host.set_auto_restart_once(store.settings.auto_restart_host_once);
+    host.set_initial_workspace(&store);
     Ok(next)
 }
 

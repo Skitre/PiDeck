@@ -4,6 +4,7 @@
  * Transport: JSONL on stdin/stdout; logs on stderr.
  */
 import { mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -33,6 +34,12 @@ function resolveAgentDir(): string {
   const arg = process.argv.find((a) => a.startsWith("--agent-dir="));
   if (arg) return arg.slice("--agent-dir=".length);
   return join(homedir(), ".pi", "agent");
+}
+
+function resolveInitialCwd(): string | null {
+  const arg = process.argv.find((a) => a.startsWith("--initial-cwd="));
+  const value = arg?.slice("--initial-cwd=".length).trim();
+  return value ? value : null;
 }
 
 async function main(): Promise<void> {
@@ -136,6 +143,35 @@ async function main(): Promise<void> {
   process.once("SIGTERM", () => {
     void server.requestShutdown("SIGTERM");
   });
+
+  // Preload the last-used workspace BEFORE the server starts reading stdin
+  // and announces ready: the expensive first graph build (user packages,
+  // extensions) overlaps WebView/frontend startup, and early client requests
+  // simply wait in the stdin buffer — no identity races. Failures are
+  // non-fatal: the frontend falls back to its own workspace.setCurrent.
+  const initialCwd = resolveInitialCwd();
+  if (initialCwd) {
+    const preloadStarted = Date.now();
+    try {
+      const preload = await graphFactory.setCurrent(initialCwd, randomUUID());
+      if ("error" in preload) {
+        logger.warn("initial workspace preload failed", {
+          cwd: initialCwd,
+          error: preload.error.message,
+        });
+      } else {
+        logger.info("initial workspace preloaded", {
+          cwd: initialCwd,
+          ms: Date.now() - preloadStarted,
+        });
+      }
+    } catch (err) {
+      logger.warn("initial workspace preload crashed", {
+        cwd: initialCwd,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   await server.start();
 }

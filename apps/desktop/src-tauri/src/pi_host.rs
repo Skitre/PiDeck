@@ -96,6 +96,9 @@ pub struct PiHostManager {
     child: Option<Child>,
     stdin: Option<Arc<Mutex<ChildStdin>>>,
     agent_dir: PathBuf,
+    /// Workspace the Host preloads before announcing ready, so the expensive
+    /// first graph build overlaps WebView/frontend startup.
+    initial_workspace: Option<PathBuf>,
     /// Restarts performed for the current host epoch (reset after stable ready).
     restart_count: Arc<AtomicU32>,
     auto_restart_once: bool,
@@ -354,6 +357,7 @@ impl PiHostManager {
             child: None,
             stdin: None,
             agent_dir: settings.resolved_agent_dir(),
+            initial_workspace: Self::initial_workspace_from(settings),
             restart_count: Arc::new(AtomicU32::new(0)),
             auto_restart_once: settings.settings.auto_restart_host_once,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -370,6 +374,19 @@ impl PiHostManager {
 
     pub fn set_agent_dir(&mut self, dir: PathBuf) {
         self.agent_dir = dir;
+    }
+
+    fn initial_workspace_from(settings: &DesktopSettingsStore) -> Option<PathBuf> {
+        settings
+            .settings
+            .default_workspace
+            .clone()
+            .or_else(|| settings.settings.last_workspace.clone())
+            .map(PathBuf::from)
+    }
+
+    pub fn set_initial_workspace(&mut self, settings: &DesktopSettingsStore) {
+        self.initial_workspace = Self::initial_workspace_from(settings);
     }
 
     pub fn set_auto_restart_once(&mut self, v: bool) {
@@ -556,6 +573,11 @@ impl PiHostManager {
             cmd.current_dir(&work_dir);
         }
         cmd.arg(format!("--agent-dir={}", agent_dir.display()));
+        if let Some(ws) = self.initial_workspace.as_ref() {
+            if ws.is_dir() {
+                cmd.arg(format!("--initial-cwd={}", ws.display()));
+            }
+        }
         cmd.env("PI_CODING_AGENT_DIR", &agent_dir);
 
         let mut controlled_path = Vec::<PathBuf>::new();
