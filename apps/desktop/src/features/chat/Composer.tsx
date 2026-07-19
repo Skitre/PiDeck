@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, ImagePlus, Send, Square, X } from "lucide-react";
+import { FileText, Plus, Send, Square, X } from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import type { SerializableImage } from "@pideck/protocol";
@@ -338,7 +338,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
             disabled={disabled || (images.length >= MAX_IMAGES && files.length >= MAX_FILES)}
             onClick={() => fileInputRef.current?.click()}
           >
-            <ImagePlus size={15} />
+            <Plus size={16} />
           </button>
           {busy && (
             <>
