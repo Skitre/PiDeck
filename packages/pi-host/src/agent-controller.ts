@@ -314,6 +314,59 @@ export function createAgentHandlers(
       };
     },
 
+    "agent.setQueue": async (ctx) => {
+      const server = factory.getServer();
+      if (!server) {
+        return { error: createHostError("AGENT_NOT_READY", "No active session") };
+      }
+      const params = ctx.params as { steering: string[]; followUp: string[] };
+      const out = await withStableGraphRead({
+        requestId: ctx.id,
+        identity: server.identity,
+        serviceGraphLock: server.serviceGraphLock,
+        precheck: () =>
+          factory.checkIdentity(ctx.context, {
+            requireWorkspace: true,
+            requireSession: true,
+          }),
+        run: async () => {
+          const session = factory.getGraph()?.agentSession;
+          if (!session) throw new Error("No active session");
+          // Atomic rebuild: the SDK only supports enqueue + clear-all, so
+          // reorder/edit/delete are expressed as clear + re-add in order.
+          // Queued texts are already template-expanded; re-adding is safe.
+          session.clearQueue();
+          for (const text of params.steering) {
+            try {
+              await session.steer(text);
+            } catch (err) {
+              logger.warn("setQueue: steer re-add failed", {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+          for (const text of params.followUp) {
+            try {
+              await session.followUp(text);
+            } catch (err) {
+              logger.warn("setQueue: followUp re-add failed", {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+          const state = {
+            steering: [...session.getSteeringMessages()],
+            followUp: [...session.getFollowUpMessages()],
+          };
+          server.emit("agent.queueChanged", state);
+          return state;
+        },
+      });
+      return out.ok
+        ? { result: out.result, identity: out.identity }
+        : { error: out.error, identity: out.identity };
+    },
+
     "agent.compact": async (ctx) => {
       const stale = factory.checkIdentity(ctx.context, {
         requireWorkspace: true,

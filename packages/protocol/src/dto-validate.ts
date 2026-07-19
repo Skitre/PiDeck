@@ -803,6 +803,15 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         (result.tokenUsage === undefined || isJsonValue(result.tokenUsage))
         ? null
         : "invalid session stats";
+    case "agent.setQueue":
+      return isPlainObject(result) &&
+        hasExactKeys(result, ["steering", "followUp"]) &&
+        Array.isArray(result.steering) &&
+        result.steering.every(isString) &&
+        Array.isArray(result.followUp) &&
+        result.followUp.every(isString)
+        ? null
+        : "invalid agent.setQueue result";
     case "agent.prompt":
       return isPlainObject(result) &&
         hasExactKeys(result, ["accepted", "runId"]) &&

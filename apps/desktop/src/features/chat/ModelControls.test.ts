@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ModelSummary } from "@pideck/protocol";
-import { includeCurrentModel, thinkingLevelsForModel } from "./ChatHeader";
+import { includeCurrentModel, thinkingLevelsForModel } from "./ModelControls";
 
 const current: ModelSummary = {
   provider: "muapi",

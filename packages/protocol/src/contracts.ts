@@ -72,6 +72,7 @@ export type HostContextMap = {
   "agent.followUp": ActiveSessionContext;
   "agent.abort": ActiveSessionContext;
   "agent.clearQueue": ActiveSessionContext;
+  "agent.setQueue": ActiveSessionContext;
   "agent.compact": ActiveSessionContext;
   "agent.abortCompaction": ActiveSessionContext;
   "agent.setAutoCompaction": ActiveSessionContext;
@@ -134,6 +135,7 @@ export type HostRequestParams = {
   "agent.followUp": { text: string; images?: SerializableImage[] };
   "agent.abort": null;
   "agent.clearQueue": null;
+  "agent.setQueue": { steering: string[]; followUp: string[] };
   "agent.compact": { instructions?: string } | null;
   "agent.abortCompaction": null;
   "agent.setAutoCompaction": { enabled: boolean };
@@ -222,6 +224,7 @@ export type HostResultMap = {
   "agent.followUp": { accepted: true };
   "agent.abort": { aborted: boolean; session: SessionSnapshot };
   "agent.clearQueue": { steering: string[]; followUp: string[] };
+  "agent.setQueue": { steering: string[]; followUp: string[] };
   "agent.compact": { result: SerializableCompactionResult; session: SessionSnapshot };
   "agent.abortCompaction": { accepted: true };
   "agent.setAutoCompaction": SessionSnapshot;

@@ -101,6 +101,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "agent.followUp": { text: "hi" },
   "agent.abort": null,
   "agent.clearQueue": null,
+  "agent.setQueue": { steering: [], followUp: ["next task"] },
   "agent.compact": null,
   "agent.abortCompaction": null,
   "agent.setAutoCompaction": { enabled: true },
@@ -229,6 +230,8 @@ function invalidParams(method: HostMethod): unknown {
     case "agent.steer":
     case "agent.followUp":
       return {};
+    case "agent.setQueue":
+      return { steering: "x", followUp: [] };
     case "agent.compact":
       return "x";
     case "agent.setAutoCompaction":

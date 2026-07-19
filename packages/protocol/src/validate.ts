@@ -260,6 +260,14 @@ export function validateRequestParams<M extends HostMethod>(
         validateImages(params.images)
         ? ok(params)
         : fail(`invalid ${method} params`, { method });
+    case "agent.setQueue":
+      return exactObject(params, ["steering", "followUp"]) &&
+        Array.isArray(params.steering) &&
+        params.steering.every(isNonEmptyString) &&
+        Array.isArray(params.followUp) &&
+        params.followUp.every(isNonEmptyString)
+        ? ok(params)
+        : fail("invalid agent.setQueue params", { method });
     case "agent.compact":
       return params === null ||
         (exactObject(params, [], ["instructions"]) &&

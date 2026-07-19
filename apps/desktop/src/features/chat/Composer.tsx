@@ -4,6 +4,8 @@ import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import type { SerializableImage } from "@pideck/protocol";
 import { buildAttachedFileBlock } from "./transcript-model";
+import { ModelControls } from "./ModelControls";
+import { QueuePanel } from "./QueuePanel";
 import {
   activeSessionContext,
   captureRequestGeneration,
@@ -108,7 +110,6 @@ export function Composer({ disabled }: { disabled?: boolean }) {
   const setSession = useAppStore((s) => s.applySessionSnapshot);
   const setSessionDraft = useAppStore((s) => s.setSessionDraft);
   const pushNotification = useAppStore((s) => s.pushNotification);
-  const [streamMode, setStreamMode] = useState<"steer" | "followUp">("followUp");
   const [images, setImages] = useState<PendingImage[]>([]);
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -354,16 +355,11 @@ export function Composer({ disabled }: { disabled?: boolean }) {
 
     try {
       if (busy) {
-        const res =
-          streamMode === "steer"
-            ? await hostClient.request("agent.steer", context, {
-                text: outgoingText,
-                ...imageParams,
-              })
-            : await hostClient.request("agent.followUp", context, {
-                text: outgoingText,
-                ...imageParams,
-              });
+        // Busy sends append to the waiting queue (follow-up), never run concurrently.
+        const res = await hostClient.request("agent.followUp", context, {
+          text: outgoingText,
+          ...imageParams,
+        });
         if (!res.ok) {
           pushNotification(res.error?.message ?? "Send failed", "error");
           restoreDraft();
@@ -410,6 +406,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
 
   return (
     <div className="shrink-0 px-5 pb-5 pt-2">
+      <QueuePanel />
       <div
         className={`mx-auto max-w-3xl rounded-lg border bg-surface-raised p-2 shadow-sm transition-colors ${
           dragOver ? "border-accent" : "border-border"
@@ -590,26 +587,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
           >
             <Plus size={16} />
           </button>
-          {busy && (
-            <>
-              <select
-                className="h-7 rounded-md border border-border bg-surface px-2 text-xs"
-                value={streamMode}
-                onChange={(event) =>
-                  setStreamMode(event.target.value as "steer" | "followUp")
-                }
-                title="Message behavior while Pi is running"
-              >
-                <option value="followUp">Follow-up</option>
-                <option value="steer">Steer</option>
-              </select>
-              {(session?.pending.steering.length || session?.pending.followUp.length) ? (
-                <span className="text-[11px] text-muted">
-                  {session.pending.steering.length + session.pending.followUp.length} queued
-                </span>
-              ) : null}
-            </>
-          )}
+          <ModelControls />
           <div className="ml-auto">
             {busy ? (
               <button

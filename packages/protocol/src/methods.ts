@@ -27,6 +27,7 @@ export const HOST_METHODS = [
   "agent.followUp",
   "agent.abort",
   "agent.clearQueue",
+  "agent.setQueue",
   "agent.compact",
   "agent.abortCompaction",
   "agent.setAutoCompaction",
@@ -131,6 +132,7 @@ export type ActiveSessionMethod =
   | "agent.followUp"
   | "agent.abort"
   | "agent.clearQueue"
+  | "agent.setQueue"
   | "agent.compact"
   | "agent.abortCompaction"
   | "agent.setAutoCompaction"
@@ -209,6 +211,7 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "agent.followUp": "activeSession",
   "agent.abort": "activeSession",
   "agent.clearQueue": "activeSession",
+  "agent.setQueue": "activeSession",
   "agent.compact": "activeSession",
   "agent.abortCompaction": "activeSession",
   "agent.setAutoCompaction": "activeSession",

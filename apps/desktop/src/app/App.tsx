@@ -4,6 +4,7 @@ import { hostClient } from "../lib/bridge/host-client";
 import { createTauriTransport } from "../lib/bridge/tauri-transport";
 import { fullRehydrate } from "../lib/bridge/rehydrate";
 import { Sidebar } from "../components/Sidebar";
+import { WindowControls } from "../components/WindowControls";
 import { ChatPage } from "../features/chat/ChatPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { TrustModal } from "../features/workspaces/TrustModal";
@@ -649,6 +650,9 @@ export function App() {
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-surface text-foreground">
+      <div className="absolute right-0 top-0 z-50">
+        <WindowControls />
+      </div>
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col">
