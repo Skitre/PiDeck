@@ -46,7 +46,7 @@ This list uses verified scope and severity rather than copying the review labels
 - [ ] Virtualize or window long transcript and session lists. (2026-07-19 partial: `reuseStableRows` + memoized rows make the stable transcript prefix skip re-render during streaming; true virtualization still open.)
 - [ ] Make packaged dependency archives reproducible.
 - [ ] Align E2E PATH isolation with release smoke tests.
-- [ ] Mount or delete the unused `TitleBar.tsx` component (never imported; its "PiDeck" text was the e2e attach anchor until 2026-07-19).
+- [x] Mount or delete the unused `TitleBar.tsx` component. (2026-07-19: deleted — it was designed for a decorations:false window; the app uses the native title bar, and its SDK-version/host-phase info lives in Settings.)
 
 ## 2026-07-19 — release-gate defects found by the first post-disinfection full runs
 

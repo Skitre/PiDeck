@@ -661,16 +661,20 @@ export function App() {
                 Settings remain available when the host recovers.
               </p>
             </div>
-          ) : connecting ? (
-            <div className="flex flex-1 items-center justify-center text-muted">
-              Connecting to Pi Host…
-            </div>
-          ) : rehydrating || desynchronized ? (
-            <div className="flex flex-1 items-center justify-center text-muted">
-              {desynchronized ? "Resynchronizing with Host…" : "Loading snapshots…"}
-            </div>
           ) : (
-            <ChatPage />
+            <>
+              {(connecting || rehydrating || desynchronized) && (
+                <div className="flex h-7 shrink-0 items-center justify-center gap-2 border-b border-border bg-surface-raised text-xs text-muted">
+                  <span className="size-1.5 animate-pulse rounded-full bg-warning" />
+                  {connecting
+                    ? "Connecting to Pi Host…"
+                    : desynchronized
+                      ? "Resynchronizing with Host…"
+                      : "Loading snapshots…"}
+                </div>
+              )}
+              <ChatPage />
+            </>
           )}
         </main>
       </div>
