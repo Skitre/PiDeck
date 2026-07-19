@@ -204,7 +204,7 @@ export function validateRequestParams<M extends HostMethod>(
           (typeof params.limit === "number" &&
             Number.isInteger(params.limit) &&
             params.limit >= 1 &&
-            params.limit <= 200))
+            params.limit <= 5000))
         ? ok(params)
         : fail("invalid workspace.searchFiles params", { method });
     case "workspace.setCurrent":

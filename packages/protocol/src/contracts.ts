@@ -192,7 +192,10 @@ export type HostResultMap = {
   };
   "workspace.getCurrent": WorkspaceSnapshot | null;
   "workspace.getTrust": { workspace: WorkspaceSnapshot; options: TrustOption[] };
-  "workspace.searchFiles": { files: string[] };
+  "workspace.searchFiles": {
+    files: { path: string; kind: "file" | "dir" }[];
+    truncated: boolean;
+  };
   "workspace.setTrust": { workspace: WorkspaceSnapshot; session?: SessionSnapshot };
   "session.list": { workspaceId: string; items: SessionSummary[] };
   "session.create": SessionSnapshot;

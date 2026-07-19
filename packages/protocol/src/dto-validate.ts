@@ -768,9 +768,16 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         : "invalid session tree";
     case "workspace.searchFiles":
       return isPlainObject(result) &&
-        hasExactKeys(result, ["files"]) &&
+        hasExactKeys(result, ["files", "truncated"]) &&
+        typeof result.truncated === "boolean" &&
         Array.isArray(result.files) &&
-        result.files.every(isString)
+        result.files.every(
+          (f) =>
+            isPlainObject(f) &&
+            hasExactKeys(f, ["path", "kind"]) &&
+            isString(f.path) &&
+            (f.kind === "file" || f.kind === "dir"),
+        )
         ? null
         : "invalid workspace.searchFiles result";
     case "session.getCommands":

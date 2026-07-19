@@ -78,6 +78,26 @@ export function fileTokenAt(
   return { start: before.length - match[2].length - 1, query: match[2] };
 }
 
+/** LiveAgent-style rank: filename prefix < path prefix < filename substring
+ * < rest, then shallower, then dirs before files. */
+export function fileSortKey(
+  entry: { path: string; kind: "file" | "dir" },
+  query: string,
+): [number, number, number] {
+  const path = entry.path.toLocaleLowerCase();
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const rank = !query
+    ? 3
+    : name.startsWith(query)
+      ? 0
+      : path.startsWith(query)
+        ? 1
+        : name.includes(query)
+          ? 2
+          : 3;
+  return [rank, entry.path.split("/").length, entry.kind === "dir" ? 0 : 1];
+}
+
 export function Composer({ disabled }: { disabled?: boolean }) {
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
@@ -96,6 +116,11 @@ export function Composer({ disabled }: { disabled?: boolean }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const templatesRef = useRef<{ key: string; items: CompletionItem[] } | null>(null);
+  const fileSnapshotRef = useRef<{
+    query: string;
+    entries: { path: string; kind: "file" | "dir" }[];
+    truncated: boolean;
+  } | null>(null);
   const fileSearchSeq = useRef(0);
   const busy = session ? !session.isIdle : false;
   const sessionId = session?.sessionId ?? null;
@@ -106,6 +131,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     setFiles([]);
     setDragOver(false);
     setCompletion(null);
+    fileSnapshotRef.current = null;
   }, [sessionId]);
 
   async function loadCommandItems(): Promise<CompletionItem[]> {
@@ -149,29 +175,64 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     const file = fileTokenAt(nextText, caret);
     if (file && host && workspace) {
       const seq = ++fileSearchSeq.current;
+      const query = file.query.toLocaleLowerCase();
+
+      const applySnapshot = (snapshot: {
+        query: string;
+        entries: { path: string; kind: "file" | "dir" }[];
+        truncated: boolean;
+      }) => {
+        if (seq !== fileSearchSeq.current) return;
+        const matches = snapshot.entries
+          .filter((entry) => entry.path.toLocaleLowerCase().includes(query))
+          .map((entry) => ({ entry, key: fileSortKey(entry, query) }))
+          .sort(
+            (a, b) =>
+              a.key[0] - b.key[0] ||
+              a.key[1] - b.key[1] ||
+              a.key[2] - b.key[2] ||
+              (a.entry.path < b.entry.path ? -1 : 1),
+          )
+          .slice(0, 30)
+          .map(({ entry }) => ({
+            // Files replace the whole @token with the bare path; directories
+            // keep the @ so the mention stays active for drilling deeper.
+            insert: entry.kind === "dir" ? `@${entry.path}/` : `${entry.path} `,
+            label: entry.kind === "dir" ? `${entry.path}/` : entry.path,
+          }));
+        setCompletion(
+          matches.length > 0
+            ? { kind: "file", tokenStart: file.start, query: file.query, items: matches, selected: 0 }
+            : null,
+        );
+      };
+
+      // Session snapshot: one host fetch per @-session; keystrokes filter the
+      // snapshot client-side. Refetch only when the query stops extending the
+      // snapshot's query (or the snapshot was truncated).
+      const cached = fileSnapshotRef.current;
+      if (cached && !cached.truncated && query.startsWith(cached.query)) {
+        applySnapshot(cached);
+        return;
+      }
       const context = {
         expectedHostInstanceId: host.hostInstanceId,
         expectedWorkspaceId: host.workspaceId,
         expectedWorkspaceRevision: host.workspaceRevision,
       };
-      window.setTimeout(() => {
-        if (seq !== fileSearchSeq.current) return;
-        void hostClient
-          .request("workspace.searchFiles", context, { query: file.query, limit: 20 })
-          .then((res) => {
-            if (seq !== fileSearchSeq.current || !res.ok) return;
-            const items = res.result.files.map((path) => ({
-              insert: `${path} `,
-              label: path,
-            }));
-            setCompletion(
-              items.length > 0
-                ? { kind: "file", tokenStart: file.start, query: file.query, items, selected: 0 }
-                : null,
-            );
-          })
-          .catch(() => undefined);
-      }, 120);
+      void hostClient
+        .request("workspace.searchFiles", context, { query: file.query, limit: 3000 })
+        .then((res) => {
+          if (!res.ok) return;
+          const snapshot = {
+            query,
+            entries: res.result.files,
+            truncated: res.result.truncated,
+          };
+          fileSnapshotRef.current = snapshot;
+          applySnapshot(snapshot);
+        })
+        .catch(() => undefined);
       return;
     }
     setCompletion(null);
@@ -189,6 +250,10 @@ export function Composer({ disabled }: { disabled?: boolean }) {
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(nextCaret, nextCaret);
     });
+    // Accepting a directory keeps the mention open so the user drills deeper.
+    if (state.kind === "file" && item.insert.endsWith("/")) {
+      updateCompletion(nextText, nextCaret);
+    }
   }
 
   async function addFiles(incoming: Iterable<File>) {
