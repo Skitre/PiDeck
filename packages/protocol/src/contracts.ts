@@ -41,7 +41,7 @@ import type {
   ProviderDraft,
   ProviderSnapshot,
   DiscoveredProviderModel,
-  PromptTemplateSummary,
+  CommandSummary,
 } from "./types.js";
 
 export type HostContextMap = {
@@ -66,7 +66,7 @@ export type HostContextMap = {
   "session.getEntries": ActiveSessionContext;
   "session.getTree": ActiveSessionContext;
   "session.getStats": ActiveSessionContext;
-  "session.getPromptTemplates": ActiveSessionContext;
+  "session.getCommands": ActiveSessionContext;
   "agent.prompt": ActiveSessionContext;
   "agent.steer": ActiveSessionContext;
   "agent.followUp": ActiveSessionContext;
@@ -124,7 +124,7 @@ export type HostRequestParams = {
   "session.getEntries": { sinceEntryId?: string } | null;
   "session.getTree": null;
   "session.getStats": null;
-  "session.getPromptTemplates": null;
+  "session.getCommands": null;
   "agent.prompt": {
     text: string;
     images?: SerializableImage[];
@@ -213,7 +213,7 @@ export type HostResultMap = {
     leafId: string | null;
   };
   "session.getStats": SessionStatsSnapshot;
-  "session.getPromptTemplates": { templates: PromptTemplateSummary[] };
+  "session.getCommands": { commands: CommandSummary[] };
   "agent.prompt": { accepted: true; runId: string };
   "agent.steer": { accepted: true };
   "agent.followUp": { accepted: true };

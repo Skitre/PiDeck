@@ -773,20 +773,21 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         result.files.every(isString)
         ? null
         : "invalid workspace.searchFiles result";
-    case "session.getPromptTemplates":
+    case "session.getCommands":
       return isPlainObject(result) &&
-        hasExactKeys(result, ["templates"]) &&
-        Array.isArray(result.templates) &&
-        result.templates.every(
+        hasExactKeys(result, ["commands"]) &&
+        Array.isArray(result.commands) &&
+        result.commands.every(
           (t) =>
             isPlainObject(t) &&
-            hasExactKeys(t, ["name", "description"], ["argumentHint"]) &&
-            isString(t.name) &&
+            hasExactKeys(t, ["invocation", "description", "kind"], ["argumentHint"]) &&
+            isString(t.invocation) &&
             isString(t.description) &&
+            (t.kind === "template" || t.kind === "command" || t.kind === "skill") &&
             (t.argumentHint === undefined || isString(t.argumentHint)),
         )
         ? null
-        : "invalid session.getPromptTemplates result";
+        : "invalid session.getCommands result";
     case "session.getStats":
       return isPlainObject(result) &&
         hasExactKeys(result, ["messageCount"], ["toolCallCount", "tokenUsage"]) &&

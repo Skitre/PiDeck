@@ -113,15 +113,18 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     const key = `${session.sessionId}:${session.revision}`;
     if (templatesRef.current?.key === key) return templatesRef.current.items;
     const res = await hostClient.request(
-      "session.getPromptTemplates",
+      "session.getCommands",
       activeSessionContext(host, workspace, session),
       null,
     );
     if (!res.ok) return [];
-    const items = res.result.templates.map((template) => ({
-      insert: `/${template.name} `,
-      label: `/${template.name}`,
-      detail: [template.argumentHint, template.description].filter(Boolean).join(" — "),
+    const kindLabel = { template: "prompt", command: "extension", skill: "skill" } as const;
+    const items = res.result.commands.map((command) => ({
+      insert: `/${command.invocation} `,
+      label: `/${command.invocation}`,
+      detail: [command.argumentHint, command.description, `(${kindLabel[command.kind]})`]
+        .filter(Boolean)
+        .join(" — "),
     }));
     templatesRef.current = { key, items };
     return items;

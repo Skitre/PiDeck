@@ -21,7 +21,7 @@ export const HOST_METHODS = [
   "session.getEntries",
   "session.getTree",
   "session.getStats",
-  "session.getPromptTemplates",
+  "session.getCommands",
   "agent.prompt",
   "agent.steer",
   "agent.followUp",
@@ -125,7 +125,7 @@ export type ActiveSessionMethod =
   | "session.getEntries"
   | "session.getTree"
   | "session.getStats"
-  | "session.getPromptTemplates"
+  | "session.getCommands"
   | "agent.prompt"
   | "agent.steer"
   | "agent.followUp"
@@ -203,7 +203,7 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "session.getEntries": "activeSession",
   "session.getTree": "activeSession",
   "session.getStats": "activeSession",
-  "session.getPromptTemplates": "activeSession",
+  "session.getCommands": "activeSession",
   "agent.prompt": "activeSession",
   "agent.steer": "activeSession",
   "agent.followUp": "activeSession",

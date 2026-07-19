@@ -268,7 +268,7 @@ export function createSessionHandlers(
       return { result: out.result, identity: out.identity };
     },
 
-    "session.getPromptTemplates": async (ctx) => {
+    "session.getCommands": async (ctx) => {
       const server = factory.getServer();
       if (!server) {
         return { error: createHostError("HOST_NOT_READY", "Server not bound") };
@@ -286,13 +286,41 @@ export function createSessionHandlers(
         run: async () => {
           const g = factory.getGraph();
           if (!g?.agentSession) throw new Error("No active session");
-          return {
-            templates: g.agentSession.promptTemplates.map((template) => ({
-              name: template.name,
+          const commands: {
+            invocation: string;
+            description: string;
+            argumentHint?: string;
+            kind: "template" | "command" | "skill";
+          }[] = [];
+          for (const template of g.agentSession.promptTemplates) {
+            commands.push({
+              invocation: template.name,
               description: template.description,
               ...(template.argumentHint ? { argumentHint: template.argumentHint } : {}),
-            })),
-          };
+              kind: "template",
+            });
+          }
+          try {
+            for (const command of g.agentSession.extensionRunner.getRegisteredCommands()) {
+              commands.push({
+                invocation: command.invocationName,
+                description: command.description ?? "",
+                kind: "command",
+              });
+            }
+          } catch {
+            /* runner may be unavailable mid-reload */
+          }
+          if (g.resourceLoader) {
+            for (const skill of g.resourceLoader.getSkills().skills) {
+              commands.push({
+                invocation: `skill:${skill.name}`,
+                description: skill.description,
+                kind: "skill",
+              });
+            }
+          }
+          return { commands };
         },
       });
       if (!out.ok) return { error: out.error, identity: out.identity };

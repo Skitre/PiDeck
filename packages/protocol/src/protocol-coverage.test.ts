@@ -95,7 +95,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "session.getEntries": null,
   "session.getTree": null,
   "session.getStats": null,
-  "session.getPromptTemplates": null,
+  "session.getCommands": null,
   "agent.prompt": { text: "hi" },
   "agent.steer": { text: "hi" },
   "agent.followUp": { text: "hi" },

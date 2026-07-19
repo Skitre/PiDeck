@@ -359,10 +359,12 @@ export type SessionStatsSnapshot = {
   tokenUsage?: JsonValue;
 };
 
-export type PromptTemplateSummary = {
-  name: string;
+export type CommandSummary = {
+  /** Text after the leading slash, e.g. "plan" or "skill:review" */
+  invocation: string;
   description: string;
   argumentHint?: string;
+  kind: "template" | "command" | "skill";
 };
 
 export type SerializableImage = {
