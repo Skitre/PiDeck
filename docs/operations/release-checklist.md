@@ -33,6 +33,7 @@ pnpm verify:release
 - [x] `desktop_open_path` 已收敛（仅存在的本地目录/文件；文件只定位不执行；拒绝 UNC）；`shell:allow-open` 已限定为 http(s) URL
 - [x] `THIRD_PARTY_NOTICES.md` 已覆盖 Node.js / npm / Portable Git（GPLv2 源码可得性）/ Tauri
 - [ ] 安装包 Authenticode 签名 + 发布流程中的验签（**需要代码签名证书**：拿到证书后填 `tauri.conf.json` 的 `certificateThumbprint` 与 `timestampUrl`，并在 `windows-installer-integrity.mjs` 中加验签步骤）
+- [ ] 构建机无恶意软件、Windows Defender 实时保护开启（2026-07-17 安装包曾被构建机上的 "Synaptics" EXE 感染型蠕虫包裹并被完整性门控拦下，2026-07-19 已清除；`package:release` 的完整性检查是最后防线，不是唯一防线）
 
 ## 4. 发布后
 

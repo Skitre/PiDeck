@@ -40,7 +40,7 @@ Layers map to implementation paths. P0 Windows completion is recorded in `docs/o
 | Tauri transport | `apps/desktop/src/lib/bridge/tauri-transport.ts` | — |
 | Stores / epoch | `apps/desktop/src/lib/stores/` | `app-store.test.ts`, `epoch-store.test.ts` |
 | Session Catalog / runtime projection | `apps/desktop/src/lib/stores/session-catalog.ts` | `session-catalog.test.ts`, `app-store.test.ts` |
-| Chat | `apps/desktop/src/features/chat/` | — |
+| Chat | `apps/desktop/src/features/chat/` | `transcript-model.test.ts` (row build + stable-row reuse) |
 | Packages | `apps/desktop/src/features/packages/PackagesPage.tsx` | atomic mutation apply |
 | Settings | `apps/desktop/src/features/settings/SettingsPage.tsx` | — |
 | Trust modal | `apps/desktop/src/features/workspaces/TrustModal.tsx` | — |
@@ -52,11 +52,14 @@ Layers map to implementation paths. P0 Windows completion is recorded in `docs/o
 | Entry | `apps/desktop/src-tauri/src/main.rs`, `lib.rs` | via cargo |
 | Desktop settings | `apps/desktop/src-tauri/src/desktop_settings.rs` | — |
 | Host process | `apps/desktop/src-tauri/src/pi_host.rs` | `pi_host_tests.rs` (auto-restart, reap) |
-| Commands | `apps/desktop/src-tauri/src/commands.rs` | — |
+| Commands | `apps/desktop/src-tauri/src/commands.rs` | open-path validation unit tests |
 
-## Optional follow-ups (non-blocking for P0 Windows)
+## Release gating scripts
 
-| Layer | Notes |
-|---|---|
-| Full Tauri WebDriver/Playwright suite | Optional when `apps/desktop/e2e/playwright.config.ts` is present |
-| Portable Git lock for git package install | Optional; M0 does not require git |
+| Feature | Source | Command |
+|---|---|---|
+| Aggregate release gate | `scripts/verify-p0.mjs` | `pnpm verify:release` |
+| Release packaging + integrity | `scripts/package-release.mjs`, `scripts/windows-installer-integrity.mjs` | `pnpm package:release` |
+| Real desktop E2E (WebView2 CDP) | `scripts/run-e2e.mjs` | `pnpm test:e2e` |
+| M0 production-path Extension proof | `scripts/verify-m0-release-extension.mjs` | `pnpm verify:m0-release-extension` |
+| Installed-app smoke | `scripts/smoke-release.mjs` | `pnpm smoke:release` |

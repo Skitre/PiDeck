@@ -43,6 +43,14 @@ This list uses verified scope and severity rather than copying the review labels
 ## Maintenance
 
 - [ ] Split `workspace-graph-factory.ts` by trust, session, package, and extension ownership.
-- [ ] Virtualize or window long transcript and session lists.
+- [ ] Virtualize or window long transcript and session lists. (2026-07-19 partial: `reuseStableRows` + memoized rows make the stable transcript prefix skip re-render during streaming; true virtualization still open.)
 - [ ] Make packaged dependency archives reproducible.
 - [ ] Align E2E PATH isolation with release smoke tests.
+- [ ] Mount or delete the unused `TitleBar.tsx` component (never imported; its "PiDeck" text was the e2e attach anchor until 2026-07-19).
+
+## 2026-07-19 — release-gate defects found by the first post-disinfection full runs
+
+- [x] Project-trust confirm dialog closed before rendering. A trust decision rebuilds the workspace service graph, so workspace/session revisions advance right after the `workspace.setTrust` reply; the authorization-guard effect in `PackagesPage` treated that as an identity change and cleared the "Confirm executable code" gate. Fix: re-capture the authorization while workspace identity and trust decision are unchanged; still close on real identity/trust flips; confirm click re-validates. (commit cf5899c)
+- [x] `smoke:release` crashed probing npm: Node rejects spawning `npm.cmd` with `shell:false` (EINVAL). Probe now goes through `cmd.exe /d /s /c` with null-guarded stdout. (commit cf5899c)
+- [x] E2E window-attach waited for exact text "PiDeck", which only renders in the unmounted `TitleBar.tsx` or with Settings open — timing-dependent. Anchor changed to the always-rendered "Pi Agent" sidebar brand. (commit ff30f0c)
+- [ ] Re-run `pnpm verify:release` end-to-end to validate the three fixes (interrupted 2026-07-19 by owner request after docs/typecheck/build/test/rust went green; `package:release` + integrity had passed in the two prior runs).

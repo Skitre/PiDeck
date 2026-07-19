@@ -43,4 +43,7 @@ Landed behavior updates these pages in the same change.
 | [operations/release-checklist.md](./operations/release-checklist.md) | Current | Pre-release production-grade verification checklist (`verify:release`) |
 | [operations/remediation-report.md](./operations/remediation-report.md) | Current | Stage status and residual blockers |
 | [reference/source-map.md](./reference/source-map.md) | Current | Feature → source paths |
+| [reviews/2026-07-18-full-review.md](./reviews/2026-07-18-full-review.md) | Archived | Round-1 full project review |
+| [reviews/2026-07-18-review-round2.md](./reviews/2026-07-18-review-round2.md) | Archived | Round-2 verification review (N1–N9) |
+| [reviews/2026-07-18-remediation-todo.md](./reviews/2026-07-18-remediation-todo.md) | Living | Review remediation tracker (updated as items land) |
 | [roadmap/pi-web-p0-roadmap.md](./roadmap/pi-web-p0-roadmap.md) | In progress | pi-web comparison, product priorities, and multi-Session P0 design |
