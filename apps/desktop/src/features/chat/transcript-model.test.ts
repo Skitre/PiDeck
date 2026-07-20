@@ -95,6 +95,41 @@ describe("reuseStableRows", () => {
 });
 
 describe("buildTranscriptRows", () => {
+  it("aggregates usage across assistant messages in one turn", () => {
+    const baseUsage = {
+      input: 10,
+      output: 2,
+      cacheRead: 3,
+      cacheWrite: 1,
+      reasoning: 1,
+      totalTokens: 16,
+      cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0.004, total: 0.037 },
+    };
+    const rows = buildTranscriptRows([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "First" }],
+        usage: baseUsage,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Second" }],
+        usage: { ...baseUsage, reasoning: 2 },
+      },
+    ]);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.usage).toEqual({
+      input: 20,
+      output: 4,
+      cacheRead: 6,
+      cacheWrite: 2,
+      reasoning: 3,
+      totalTokens: 32,
+      cost: { input: 0.02, output: 0.04, cacheRead: 0.006, cacheWrite: 0.008, total: 0.074 },
+    });
+  });
+
   it("merges historical tool results into their assistant tool calls", () => {
     const messages: SerializableAgentMessage[] = [
       {

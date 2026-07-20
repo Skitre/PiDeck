@@ -10,12 +10,12 @@ const identity = (hostInstanceId: string) => ({
   packageRevision: 0,
 });
 
-function ready(hostInstanceId: string) {
+function ready(hostInstanceId: string, timestamp = Date.now()) {
   return JSON.stringify({
     protocolVersion: 1,
     event: "host.ready",
     sequence: 1,
-    timestamp: Date.now(),
+    timestamp,
     ...identity(hostInstanceId),
     payload: {
       protocolVersion: 1,
@@ -38,12 +38,12 @@ function ready(hostInstanceId: string) {
   });
 }
 
-function lifecycleFatal(hostInstanceId: string, message: string) {
+function lifecycleFatal(hostInstanceId: string, message: string, timestamp = Date.now()) {
   return JSON.stringify({
     protocolVersion: 1,
     event: "host.fatal",
     sequence: 1,
-    timestamp: Date.now(),
+    timestamp,
     ...identity(hostInstanceId),
     payload: {
       error: {
@@ -121,6 +121,28 @@ describe("HostClient Rust lifecycle epochs", () => {
       client.detach();
     });
   }
+
+  it("ignores a lifecycle fatal delivered after a newer Host is ready", () => {
+    const client = new HostClient();
+    const wire = transportFixture();
+    const events: string[] = [];
+    client.attach(wire.transport);
+    client.onEvent((event) => events.push(event.event));
+
+    const replacementId = "20000000-0000-4000-8000-000000000001";
+    wire.emit(ready(replacementId, 200));
+    wire.emit(
+      lifecycleFatal(
+        "00000000-0000-4000-8000-000000000002",
+        "stale process exit",
+        100,
+      ),
+    );
+
+    expect(client.getHostInstanceId()).toBe(replacementId);
+    expect(events).toEqual(["host.ready"]);
+    client.detach();
+  });
 });
 
 describe("HostClient transport disposal", () => {

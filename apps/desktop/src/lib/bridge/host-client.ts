@@ -41,6 +41,7 @@ export class HostClient {
   private detached = false;
   private disposeTransport: (() => void) | null = null;
   private retiredHostInstanceIds = new Set<string>();
+  private latestHostReadyTimestamp = 0;
 
   attach(transport: HostTransport): void {
     this.disposeTransport?.();
@@ -140,6 +141,15 @@ export class HostClient {
           "00000000-0000-4000-8000-000000000003",
         ].includes(event.hostInstanceId);
       if (syntheticLifecycleFatal) {
+        // Rust lifecycle notifications use sentinel identities because the child
+        // may already be gone. A notification can arrive after its replacement
+        // has emitted host.ready; never let that stale epoch retire the new Host.
+        if (
+          this.hostInstanceId &&
+          event.timestamp < this.latestHostReadyTimestamp
+        ) {
+          return;
+        }
         if (this.hostInstanceId) this.retiredHostInstanceIds.add(this.hostInstanceId);
         this.hostInstanceId = null;
         this.sequence = 0;
@@ -155,6 +165,7 @@ export class HostClient {
           this.rejectAllPending("host epoch replaced");
         }
         this.hostInstanceId = nextHostId;
+        this.latestHostReadyTimestamp = event.timestamp;
         this.sequence = event.sequence;
       } else {
         if (!this.hostInstanceId || event.hostInstanceId !== this.hostInstanceId) return;

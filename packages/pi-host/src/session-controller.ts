@@ -1,6 +1,7 @@
 import { createHostError, toJsonValue } from "@pideck/protocol";
 import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
+import { buildSessionUsageReport } from "./session-usage-report.js";
 
 export function createSessionHandlers(
   factory: WorkspaceGraphFactory,
@@ -262,6 +263,31 @@ export function createSessionHandlers(
           return {
             messageCount: g.agentSession.messages.length,
           };
+        },
+      });
+      if (!out.ok) return { error: out.error, identity: out.identity };
+      return { result: out.result, identity: out.identity };
+    },
+
+    "session.usageReport": async (ctx) => {
+      const server = factory.getServer();
+      if (!server) {
+        return { error: createHostError("HOST_NOT_READY", "Server not bound") };
+      }
+      const { withStableGraphRead } = await import("./stable-graph-read.js");
+      const out = await withStableGraphRead({
+        requestId: ctx.id,
+        identity: server.identity,
+        serviceGraphLock: server.serviceGraphLock,
+        precheck: () => factory.checkIdentity(ctx.context, { requireWorkspace: true }),
+        run: async () => {
+          const g = factory.getGraph();
+          if (!g) throw new Error("No workspace");
+          return buildSessionUsageReport({
+            agentDir: factory.deps.agentDir,
+            canonicalCwd: g.canonicalCwd,
+            workspaceId: g.workspaceId,
+          });
         },
       });
       if (!out.ok) return { error: out.error, identity: out.identity };

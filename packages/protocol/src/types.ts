@@ -186,7 +186,41 @@ export type ToolSnapshot = {
 export type SerializableAgentMessage = {
   role: string;
   content: SerializableAgentContent[] | string;
+  usage?: SerializableUsage;
   [key: string]: JsonValue | SerializableAgentContent[] | string | undefined;
+};
+
+export type SerializableUsage = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheWrite1h?: number;
+  reasoning?: number;
+  totalTokens: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+};
+
+export type SessionContextUsage = {
+  tokens: number | null;
+  contextWindow: number;
+  breakdown?: SessionContextBreakdown;
+};
+
+export type SessionContextBreakdown = {
+  systemPrompt: number;
+  toolDefinitions: number;
+  userPrompts: number;
+  assistantMessages: number;
+  toolResults: number;
+  summaries: number;
+  other: number;
 };
 
 export type SessionSnapshot = {
@@ -206,6 +240,7 @@ export type SessionSnapshot = {
   steeringMode: "all" | "one-at-a-time";
   followUpMode: "all" | "one-at-a-time";
   pending: { steering: string[]; followUp: string[] };
+  contextUsage?: SessionContextUsage;
   messages: SerializableAgentMessage[];
   tools: ToolSnapshot;
 };
@@ -357,6 +392,27 @@ export type SessionStatsSnapshot = {
   messageCount: number;
   toolCallCount?: number;
   tokenUsage?: JsonValue;
+};
+
+export type SessionUsageReportItem = {
+  sessionId: string;
+  sessionPath: string;
+  name?: string;
+  updatedAt: number;
+  archived: boolean;
+  messageCount: number;
+  usage: SerializableUsage;
+};
+
+export type SessionUsageReport = {
+  workspaceId: string;
+  generatedAt: number;
+  totals: {
+    sessionCount: number;
+    messageCount: number;
+    usage: SerializableUsage;
+  };
+  sessions: SessionUsageReportItem[];
 };
 
 export type CommandSummary = {

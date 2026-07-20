@@ -21,6 +21,7 @@ export const HOST_METHODS = [
   "session.getEntries",
   "session.getTree",
   "session.getStats",
+  "session.usageReport",
   "session.getCommands",
   "agent.prompt",
   "agent.steer",
@@ -118,6 +119,7 @@ export type WorkspaceOnlyMethod =
   | "session.delete"
   | "session.cleanupArchived"
   | "session.getSnapshot"
+  | "session.usageReport"
   | "package.list"
   | "package.checkUpdates"
   | "piSettings.get";
@@ -209,6 +211,7 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "session.getEntries": "activeSession",
   "session.getTree": "activeSession",
   "session.getStats": "activeSession",
+  "session.usageReport": "workspace",
   "session.getCommands": "activeSession",
   "agent.prompt": "activeSession",
   "agent.steer": "activeSession",

@@ -1,6 +1,7 @@
 import type {
   SerializableAgentContent,
   SerializableAgentMessage,
+  SerializableUsage,
 } from "@pideck/protocol";
 
 export type ToolTraceStatus = "waiting" | "running" | "done" | "error" | "aborted";
@@ -38,6 +39,7 @@ export type TranscriptRow = {
   sections?: AssistantTurnSections;
   startedAt?: number;
   endedAt?: number;
+  usage?: SerializableUsage;
 };
 
 type WorkingTranscriptRow = TranscriptRow & {
@@ -59,6 +61,34 @@ function asRecord(value: unknown): Record<string, unknown> {
 function numberField(value: unknown, key: string): number | undefined {
   const candidate = asRecord(value)[key];
   return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : undefined;
+}
+
+function mergeUsage(
+  left: SerializableUsage | undefined,
+  right: SerializableUsage | undefined,
+): SerializableUsage | undefined {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    input: left.input + right.input,
+    output: left.output + right.output,
+    cacheRead: left.cacheRead + right.cacheRead,
+    cacheWrite: left.cacheWrite + right.cacheWrite,
+    ...(left.cacheWrite1h !== undefined || right.cacheWrite1h !== undefined
+      ? { cacheWrite1h: (left.cacheWrite1h ?? 0) + (right.cacheWrite1h ?? 0) }
+      : {}),
+    ...(left.reasoning !== undefined || right.reasoning !== undefined
+      ? { reasoning: (left.reasoning ?? 0) + (right.reasoning ?? 0) }
+      : {}),
+    totalTokens: left.totalTokens + right.totalTokens,
+    cost: {
+      input: left.cost.input + right.cost.input,
+      output: left.cost.output + right.cost.output,
+      cacheRead: left.cost.cacheRead + right.cost.cacheRead,
+      cacheWrite: left.cost.cacheWrite + right.cost.cacheWrite,
+      total: left.cost.total + right.cost.total,
+    },
+  };
 }
 
 function contentParts(message: SerializableAgentMessage): SerializableAgentContent[] {
@@ -353,6 +383,7 @@ export function buildTranscriptRows(messages: SerializableAgentMessage[]): Trans
       previous.blocks.push(...blocks);
       previous.copyText = copyTextForBlocks(previous.blocks);
       previous.rounds = [...(previous.rounds ?? []), blocks];
+      previous.usage = mergeUsage(previous.usage, message.usage);
       extendRowTiming(previous, messageStartedAt, messageEndedAt);
       for (const block of blocks) {
         const timing = blockTiming(block);
@@ -371,6 +402,7 @@ export function buildTranscriptRows(messages: SerializableAgentMessage[]): Trans
         ? { startedAt: messageStartedAt }
         : {}),
       ...(role === "assistant" && messageEndedAt !== undefined ? { endedAt: messageEndedAt } : {}),
+      ...(role === "assistant" && message.usage ? { usage: message.usage } : {}),
     });
     const current = rows[rows.length - 1];
     if (current?.role === "assistant") {
@@ -456,6 +488,27 @@ function blockListEquivalent(a: TranscriptBlock[], b: TranscriptBlock[]): boolea
   return true;
 }
 
+function usageEquivalent(
+  a: SerializableUsage | undefined,
+  b: SerializableUsage | undefined,
+): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.input === b.input &&
+    a.output === b.output &&
+    a.cacheRead === b.cacheRead &&
+    a.cacheWrite === b.cacheWrite &&
+    a.cacheWrite1h === b.cacheWrite1h &&
+    a.reasoning === b.reasoning &&
+    a.totalTokens === b.totalTokens &&
+    a.cost.input === b.cost.input &&
+    a.cost.output === b.cost.output &&
+    a.cost.cacheRead === b.cost.cacheRead &&
+    a.cost.cacheWrite === b.cost.cacheWrite &&
+    a.cost.total === b.cost.total
+  );
+}
+
 function rowEquivalent(a: TranscriptRow, b: TranscriptRow): boolean {
   if (
     a.key !== b.key ||
@@ -463,6 +516,7 @@ function rowEquivalent(a: TranscriptRow, b: TranscriptRow): boolean {
     a.copyText !== b.copyText ||
     a.startedAt !== b.startedAt ||
     a.endedAt !== b.endedAt ||
+    !usageEquivalent(a.usage, b.usage) ||
     !blockListEquivalent(a.blocks, b.blocks)
   ) {
     return false;

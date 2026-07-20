@@ -3,9 +3,10 @@ import { useAppStore } from "../../lib/stores/app-store";
 import { applyTheme } from "../../lib/theme";
 import { hostClient } from "../../lib/bridge/host-client";
 import { mergeHostIdentity, workspaceContext } from "../../lib/bridge/host-context";
-import { ArrowLeft, KeyRound, Package, Settings2 } from "lucide-react";
+import { ArrowLeft, ChartColumn, KeyRound, Package, Settings2 } from "lucide-react";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { PackagesPage } from "../packages/PackagesPage";
+import { UsageSettings } from "./UsageSettings";
 
 function GeneralSettings() {
   const host = useAppStore((s) => s.host);
@@ -265,7 +266,7 @@ function GeneralSettings() {
   );
 }
 
-export type SettingsSection = "general" | "providers" | "packages";
+export type SettingsSection = "general" | "providers" | "packages" | "usage";
 
 const SETTINGS_NAV: Array<{
   id: SettingsSection;
@@ -275,6 +276,7 @@ const SETTINGS_NAV: Array<{
   { id: "general", label: "General", icon: Settings2 },
   { id: "providers", label: "Providers", icon: KeyRound },
   { id: "packages", label: "Packages", icon: Package },
+  { id: "usage", label: "Usage", icon: ChartColumn },
 ];
 
 export function SettingsPage({
@@ -292,7 +294,10 @@ export function SettingsPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
-      <header className="flex h-14 shrink-0 items-center border-b border-border px-4">
+      <header
+        className="flex h-14 shrink-0 items-center border-b border-border px-4"
+        data-tauri-drag-region
+      >
         <button
           type="button"
           onClick={onClose}
@@ -302,7 +307,7 @@ export function SettingsPage({
         >
           <ArrowLeft size={18} />
         </button>
-        <div>
+        <div className="pointer-events-none">
           <h1 className="text-sm font-semibold">Settings</h1>
           <p className="text-[11px] text-muted">Configure PiDeck and its runtime</p>
         </div>
@@ -332,8 +337,10 @@ export function SettingsPage({
             <GeneralSettings />
           ) : section === "providers" ? (
             <ProvidersSettings />
-          ) : (
+          ) : section === "packages" ? (
             <PackagesPage />
+          ) : (
+            <UsageSettings />
           )}
         </div>
       </div>

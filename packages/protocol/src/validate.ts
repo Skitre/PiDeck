@@ -186,6 +186,7 @@ export function validateRequestParams<M extends HostMethod>(
     case "session.getSnapshot":
     case "session.getTree":
     case "session.getStats":
+    case "session.usageReport":
     case "session.getCommands":
     case "agent.abort":
     case "agent.clearQueue":

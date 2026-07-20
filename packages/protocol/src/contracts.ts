@@ -21,6 +21,7 @@ import type {
   SessionSnapshot,
   SessionSummary,
   SessionStatsSnapshot,
+  SessionUsageReport,
   ToolSnapshot,
   ModelSummary,
   ModelConfigHealth,
@@ -66,6 +67,7 @@ export type HostContextMap = {
   "session.getEntries": ActiveSessionContext;
   "session.getTree": ActiveSessionContext;
   "session.getStats": ActiveSessionContext;
+  "session.usageReport": WorkspaceContext;
   "session.getCommands": ActiveSessionContext;
   "agent.prompt": ActiveSessionContext;
   "agent.steer": ActiveSessionContext;
@@ -127,6 +129,7 @@ export type HostRequestParams = {
   "session.getEntries": { sinceEntryId?: string } | null;
   "session.getTree": null;
   "session.getStats": null;
+  "session.usageReport": null;
   "session.getCommands": null;
   "agent.prompt": {
     text: string;
@@ -225,6 +228,7 @@ export type HostResultMap = {
     leafId: string | null;
   };
   "session.getStats": SessionStatsSnapshot;
+  "session.usageReport": SessionUsageReport;
   "session.getCommands": { commands: CommandSummary[] };
   "agent.prompt": { accepted: true; runId: string };
   "agent.steer": { accepted: true };

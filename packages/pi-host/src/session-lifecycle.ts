@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rename, unlink } from "node:fs/promises";
-import { basename, join, resolve as pathResolve } from "node:path";
+import { basename, join } from "node:path";
 import {
   AgentSession,
   createAgentSession,
@@ -24,18 +24,10 @@ import {
 } from "./session-title.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import type { ManagedSessionInfo, WorkspaceGraph } from "./workspace-graph-types.js";
+import { sessionStorageDirs as resolveSessionStorageDirs } from "./session-storage.js";
 
-function sessionStorageDirs(
-  factory: WorkspaceGraphFactory,
-  g: WorkspaceGraph,
-): {
-  activeDir: string;
-  archiveDir: string;
-} {
-  const resolvedCwd = pathResolve(g.canonicalCwd);
-  const safePath = `--${resolvedCwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
-  const activeDir = join(pathResolve(factory.deps.agentDir), "sessions", safePath);
-  return { activeDir, archiveDir: join(activeDir, ".archive") };
+function sessionStorageDirs(factory: WorkspaceGraphFactory, g: WorkspaceGraph) {
+  return resolveSessionStorageDirs(factory.deps.agentDir, g.canonicalCwd);
 }
 
 async function listSessionFiles(

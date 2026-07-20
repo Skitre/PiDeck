@@ -697,19 +697,7 @@ export function App() {
               </p>
             </div>
           ) : (
-            <>
-              {(connecting || rehydrating || desynchronized) && (
-                <div className="flex h-7 shrink-0 items-center justify-center gap-2 border-b border-border bg-surface-raised text-xs text-muted">
-                  <span className="size-1.5 animate-pulse rounded-full bg-warning" />
-                  {connecting
-                    ? "Connecting to Pi Host…"
-                    : desynchronized
-                      ? "Resynchronizing with Host…"
-                      : "Loading snapshots…"}
-                </div>
-              )}
-              <ChatPage />
-            </>
+            <ChatPage />
           )}
         </main>
         <RightDock />

@@ -19,6 +19,7 @@ import {
 } from "./validate.js";
 import { createEvent, createSuccessResponse, createFailureResponse } from "./envelopes.js";
 import { createHostError } from "./errors.js";
+import { isSessionSnapshot } from "./dto-validate.js";
 
 const REQUEST_ID = "00000000-0000-4000-8000-000000000001";
 const RESPONSE_ID = "00000000-0000-4000-8000-000000000002";
@@ -95,6 +96,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "session.getEntries": null,
   "session.getTree": null,
   "session.getStats": null,
+  "session.usageReport": null,
   "session.getCommands": null,
   "agent.prompt": { text: "hi" },
   "agent.steer": { text: "hi" },
@@ -199,6 +201,7 @@ function invalidParams(method: HostMethod): unknown {
     case "session.getSnapshot":
     case "session.getTree":
     case "session.getStats":
+    case "session.usageReport":
     case "agent.abort":
     case "agent.clearQueue":
     case "agent.abortCompaction":
@@ -551,6 +554,95 @@ describe("protocol coverage — response discrimination", () => {
     });
     expect(env.method).toBe("system.hello");
     expect(env.id).toBe(RESPONSE_ID);
+  });
+  it("session.usageReport validates the complete report shape", () => {
+    const usage = {
+      input: 10,
+      output: 2,
+      cacheRead: 3,
+      cacheWrite: 1,
+      reasoning: 1,
+      totalTokens: 16,
+      cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0.004, total: 0.037 },
+    };
+    const response = createSuccessResponse(baseIdentity, RESPONSE_ID, "session.usageReport", {
+      workspaceId: WORKSPACE_ID,
+      generatedAt: 1,
+      totals: { sessionCount: 1, messageCount: 1, usage },
+      sessions: [
+        {
+          sessionId: SESSION_ID,
+          sessionPath: "/sessions/one.jsonl",
+          updatedAt: 1,
+          archived: false,
+          messageCount: 1,
+          usage,
+        },
+      ],
+    });
+    expect(isHostResponse(response)).toBe(true);
+    expect(
+      isHostResponse({
+        ...response,
+        result: { ...response.result, unexpected: true },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("context usage breakdown", () => {
+  const snapshot = {
+    sessionId: SESSION_ID,
+    cwd: "/p",
+    revision: 1,
+    isStreaming: false,
+    isIdle: true,
+    isCompacting: false,
+    isRetrying: false,
+    thinkingLevel: "off",
+    autoCompactionEnabled: true,
+    autoRetryEnabled: true,
+    steeringMode: "all",
+    followUpMode: "all",
+    pending: { steering: [], followUp: [] },
+    contextUsage: {
+      tokens: 100,
+      contextWindow: 1_000,
+      breakdown: {
+        systemPrompt: 20,
+        toolDefinitions: 20,
+        userPrompts: 10,
+        assistantMessages: 20,
+        toolResults: 20,
+        summaries: 5,
+        other: 5,
+      },
+    },
+    messages: [],
+    tools: {
+      revision: 1,
+      workspaceId: WORKSPACE_ID,
+      sessionId: SESSION_ID,
+      sessionRevision: 1,
+      tools: [],
+      active: [],
+    },
+  };
+
+  it("accepts the exact breakdown shape", () => {
+    expect(isSessionSnapshot(snapshot)).toBe(true);
+  });
+
+  it("rejects extra breakdown fields", () => {
+    expect(
+      isSessionSnapshot({
+        ...snapshot,
+        contextUsage: {
+          ...snapshot.contextUsage,
+          breakdown: { ...snapshot.contextUsage.breakdown, hidden: 1 },
+        },
+      }),
+    ).toBe(false);
   });
 });
 

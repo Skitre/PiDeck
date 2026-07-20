@@ -1,4 +1,4 @@
-import { MessageCirclePlus, Settings } from "lucide-react";
+import { LoaderCircle, MessageCirclePlus, Settings } from "lucide-react";
 import { useRef, useState } from "react";
 import { useAppStore, type NavPage } from "../lib/stores/app-store";
 import { hostClient } from "../lib/bridge/host-client";
@@ -82,7 +82,22 @@ export function SidebarLayout({
   setPage: (page: NavPage) => void;
 }) {
   const host = useAppStore((s) => s.host);
+  const hostFatal = useAppStore((s) => s.hostFatal);
+  const connecting = useAppStore((s) => s.connecting);
+  const rehydrating = useAppStore((s) => s.rehydrating);
+  const desynchronized = useAppStore((s) => s.desynchronized);
   const hostReady = host?.phase === "ready" || host?.phase === "waitingForWorkspace";
+  const connectionPending =
+    !hostFatal && (connecting || rehydrating || desynchronized);
+  const connectionTitle = hostFatal
+    ? "Host offline"
+    : connecting
+      ? "Connecting to Pi Host"
+      : desynchronized
+        ? "Resynchronizing with Host"
+        : rehydrating
+          ? "Loading Host snapshots"
+          : host?.phase ?? "Host offline";
   const [sessionsCollapsed, setSessionsCollapsed] = useState(() =>
     sidebarPref("pideck.sidebar.sessionsCollapsed"),
   );
@@ -138,12 +153,24 @@ export function SidebarLayout({
         >
           <Settings size={17} />
           <span className="flex-1">Settings</span>
-          <span
-            className={`size-1.5 rounded-full ${
-              hostReady ? "bg-success" : host ? "bg-warning" : "bg-muted"
-            }`}
-            title={host?.phase ?? "Host offline"}
-          />
+          {connectionPending ? (
+            <span className="flex shrink-0" title={connectionTitle}>
+              <LoaderCircle size={14} className="animate-spin text-muted" />
+            </span>
+          ) : (
+            <span
+              className={`size-1.5 rounded-full ${
+                hostFatal
+                  ? "bg-danger"
+                  : hostReady
+                    ? "bg-success"
+                    : host
+                      ? "bg-warning"
+                      : "bg-muted"
+              }`}
+              title={connectionTitle}
+            />
+          )}
         </button>
       </div>
     </aside>

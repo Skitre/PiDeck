@@ -4,6 +4,7 @@ import { useAppStore } from "../../lib/stores/app-store";
 import { sanitizeAgentText } from "./markdown-utils";
 import { ToolView } from "./ToolView";
 import { formatDuration } from "./ToolCard";
+import { formatTokenCount } from "../../lib/format-token-count";
 import {
   buildTranscriptRows,
   parseUserAttachments,
@@ -289,7 +290,7 @@ const TranscriptRowView = memo(function TranscriptRowView({
     );
     const parsed = parseUserAttachments(row.copyText);
     return (
-      <div className="group relative ml-auto max-w-[78%]">
+      <div className="group relative ml-auto w-fit max-w-[78%]">
         {images.length > 0 && (
           <div className="mb-1 flex flex-wrap justify-end gap-1.5">
             {images.map((image, index) => (
@@ -325,10 +326,12 @@ const TranscriptRowView = memo(function TranscriptRowView({
             {parsed.text}
           </div>
         )}
-        <CopyMessageButton
-          text={row.copyText}
-          className="-left-9 top-1 group-hover:opacity-100"
-        />
+        <div className="mt-1 flex h-7 items-center justify-end">
+          <CopyMessageButton
+            text={row.copyText}
+            className="opacity-0 group-hover:opacity-100"
+          />
+        </div>
       </div>
     );
   }
@@ -356,10 +359,6 @@ const TranscriptRowView = memo(function TranscriptRowView({
     <div className="group/assistant relative w-full">
       <div className="flex h-7 items-center gap-2">
         <AssistantAvatar />
-        <DurationLabel
-          startedAt={row.startedAt}
-          endedAt={row.endedAt}
-        />
       </div>
       <div className="mt-2 min-w-0 space-y-3">
         {sections.initialThinking.length > 0 && (
@@ -398,12 +397,19 @@ const TranscriptRowView = memo(function TranscriptRowView({
             ))}
           </div>
         )}
-        {row.copyText && (
+      </div>
+      <div className="mt-2 flex h-7 items-center gap-2">
+        <DurationLabel
+          startedAt={row.startedAt}
+          endedAt={row.endedAt}
+        />
+        <div className="ml-auto flex items-center gap-1">
           <CopyMessageButton
             text={row.copyText}
-            className="right-0 top-0 group-hover/assistant:opacity-100"
+            className="opacity-0 group-hover/assistant:opacity-100"
           />
-        )}
+          <UsageLabel usage={row.usage} />
+        </div>
       </div>
     </div>
   );
@@ -558,12 +564,39 @@ function ThinkingBlock({
   );
 }
 
+function UsageLabel({ usage }: { usage?: TranscriptRow["usage"] }) {
+  if (!usage) return null;
+  const tooltip = [
+    `Input: ${formatTokenCount(usage.input)} tokens`,
+    `Output: ${formatTokenCount(usage.output)} tokens`,
+    `Cache read: ${formatTokenCount(usage.cacheRead)} tokens`,
+    `Cache write: ${formatTokenCount(usage.cacheWrite)} tokens`,
+    `Reasoning: ${usage.reasoning === undefined ? "not reported" : formatTokenCount(usage.reasoning)}`,
+  ].join("\n");
+  const cost =
+    usage.cost.total > 0
+      ? usage.cost.total < 0.0001
+        ? "<$0.0001"
+        : `$${usage.cost.total.toFixed(4)}`
+      : null;
+
+  return (
+    <span
+      className="whitespace-nowrap text-[10px] tabular-nums text-muted"
+      title={tooltip}
+    >
+      {formatTokenCount(usage.totalTokens)} tok
+      {cost ? ` / ${cost}` : ""}
+    </span>
+  );
+}
+
 function CopyMessageButton({
   text,
-  className,
+  className = "",
 }: {
   text: string;
-  className: string;
+  className?: string;
 }) {
   const [copied, setCopied] = useState(false);
   if (!text) return null;
@@ -572,7 +605,7 @@ function CopyMessageButton({
       type="button"
       title={copied ? "Copied" : "Copy message"}
       aria-label={copied ? "Copied" : "Copy message"}
-      className={`absolute flex size-7 items-center justify-center rounded-md text-muted opacity-0 transition-opacity hover:bg-surface-overlay hover:text-foreground ${className}`}
+      className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted transition-opacity hover:bg-surface-overlay hover:text-foreground ${className}`}
       onClick={() => {
         void navigator.clipboard
           .writeText(text)

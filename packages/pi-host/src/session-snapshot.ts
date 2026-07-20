@@ -7,6 +7,7 @@ import type {
   ToolSnapshot,
 } from "@pideck/protocol";
 import { toJsonValue } from "@pideck/protocol";
+import { buildContextUsageBreakdown } from "./context-usage-breakdown.js";
 
 export function buildToolSnapshot(args: {
   session: AgentSession;
@@ -67,6 +68,16 @@ export function buildSessionSnapshot(args: {
   const messages: SerializableAgentMessage[] = session.messages.map((m) =>
     toJsonValue(m) as SerializableAgentMessage,
   );
+  const contextUsage = session.getContextUsage?.();
+  const contextBreakdown = contextUsage
+    ? buildContextUsageBreakdown({
+        systemPrompt: session.systemPrompt,
+        tools: session.getAllTools(),
+        activeToolNames: session.getActiveToolNames(),
+        messages: session.messages,
+        totalTokens: contextUsage.tokens,
+      })
+    : undefined;
 
   return {
     sessionId: args.sessionId || session.sessionId,
@@ -88,6 +99,15 @@ export function buildSessionSnapshot(args: {
       steering: [...session.getSteeringMessages()],
       followUp: [...session.getFollowUpMessages()],
     },
+    ...(contextUsage
+      ? {
+          contextUsage: {
+            tokens: contextUsage.tokens,
+            contextWindow: contextUsage.contextWindow,
+            breakdown: contextBreakdown,
+          },
+        }
+      : {}),
     messages,
     tools: buildToolSnapshot({
       session,

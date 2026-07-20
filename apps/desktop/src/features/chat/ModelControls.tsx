@@ -7,6 +7,7 @@ import {
   captureRequestGeneration,
   isCurrentRequestGeneration,
 } from "../../lib/bridge/host-context";
+import { formatTokenCount } from "../../lib/format-token-count";
 
 export function includeCurrentModel(
   models: ModelSummary[],
@@ -29,6 +30,69 @@ export function thinkingLevelsForModel(
     (model) => model.provider === current.provider && model.modelId === current.modelId,
   );
   return selected?.thinkingLevels ?? fallback;
+}
+
+function ContextUsageRing() {
+  const contextUsage = useAppStore((s) => s.session?.contextUsage);
+  const breakdown = contextUsage?.breakdown;
+  const percent =
+    contextUsage?.tokens === null || !contextUsage
+      ? null
+      : Math.min(100, Math.max(0, (contextUsage.tokens / contextUsage.contextWindow) * 100));
+  const roundedPercent = percent === null ? null : Math.round(percent);
+  const title = contextUsage
+    ? contextUsage.tokens === null
+      ? `Context usage unknown / ${formatTokenCount(contextUsage.contextWindow)} tokens`
+      : `${formatTokenCount(contextUsage.tokens)} / ${formatTokenCount(contextUsage.contextWindow)} context tokens`
+    : "No model context available";
+
+  return (
+    <span
+      className="group/context relative flex size-7 shrink-0 items-center justify-center rounded-full"
+      style={{
+        background: `conic-gradient(var(--color-accent) ${
+          percent === null ? 0 : percent * 3.6
+        }deg, var(--color-border) 0deg)`,
+      }}
+      aria-label={title}
+      role="img"
+      tabIndex={0}
+    >
+      <span className="absolute inset-[3px] rounded-full bg-surface-raised" />
+      <span className="relative text-[8px] tabular-nums text-muted">
+        {roundedPercent === null ? "--" : `${roundedPercent}%`}
+      </span>
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-64 -translate-x-1/2 flex-col rounded-md border border-border bg-surface-raised p-3 text-left text-[11px] leading-4 text-foreground shadow-lg group-hover/context:flex group-focus/context:flex">
+        <span className="font-medium">Context usage</span>
+        <span className="mt-0.5 tabular-nums text-muted">{title}</span>
+        {breakdown && (
+          <>
+            <span className="my-2 h-px bg-border" />
+            <span className="mb-1 text-[10px] font-medium uppercase text-muted">
+              Estimated composition
+            </span>
+            <span className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1">
+              <span className="text-muted">System prompt</span>
+              <span className="tabular-nums">~{formatTokenCount(breakdown.systemPrompt)}</span>
+              <span className="text-muted">Tool definitions</span>
+              <span className="tabular-nums">~{formatTokenCount(breakdown.toolDefinitions)}</span>
+              <span className="text-muted">User prompts</span>
+              <span className="tabular-nums">~{formatTokenCount(breakdown.userPrompts)}</span>
+              <span className="text-muted">Assistant</span>
+              <span className="tabular-nums">~{formatTokenCount(breakdown.assistantMessages)}</span>
+              <span className="text-muted">Tool results</span>
+              <span className="tabular-nums">~{formatTokenCount(breakdown.toolResults)}</span>
+              <span className="text-muted">Summaries</span>
+              <span className="tabular-nums">~{formatTokenCount(breakdown.summaries)}</span>
+              <span className="text-muted">Other / framing</span>
+              <span className="tabular-nums">~{formatTokenCount(breakdown.other)}</span>
+            </span>
+            <span className="mt-2 text-[10px] text-muted">Estimated; total from provider.</span>
+          </>
+        )}
+      </span>
+    </span>
+  );
 }
 
 /** Model + thinking-level pickers; lives in the composer's bottom bar. */
@@ -196,6 +260,7 @@ export function ModelControls() {
           </option>
         ))}
       </select>
+      <ContextUsageRing />
     </>
   );
 }

@@ -31,6 +31,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isNonNegativeNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && value >= 0;
+}
+
 function isString(value: unknown): value is string {
   return typeof value === "string";
 }
@@ -330,6 +334,33 @@ export function isSerializableAgentContent(value: unknown): boolean {
   );
 }
 
+export function isSerializableUsage(value: unknown): boolean {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(
+      value,
+      ["input", "output", "cacheRead", "cacheWrite", "totalTokens", "cost"],
+      ["cacheWrite1h", "reasoning"],
+    ) ||
+    ![value.input, value.output, value.cacheRead, value.cacheWrite, value.totalTokens].every(
+      isSafeRevision,
+    ) ||
+    (value.cacheWrite1h !== undefined && !isSafeRevision(value.cacheWrite1h)) ||
+    (value.reasoning !== undefined && !isSafeRevision(value.reasoning)) ||
+    !isPlainObject(value.cost) ||
+    !hasExactKeys(value.cost, ["input", "output", "cacheRead", "cacheWrite", "total"])
+  ) {
+    return false;
+  }
+  return [
+    value.cost.input,
+    value.cost.output,
+    value.cost.cacheRead,
+    value.cost.cacheWrite,
+    value.cost.total,
+  ].every(isNonNegativeNumber);
+}
+
 function isAgentMessage(value: unknown): boolean {
   if (!isPlainObject(value) || !isString(value.role)) return false;
   if (
@@ -340,8 +371,33 @@ function isAgentMessage(value: unknown): boolean {
   ) {
     return false;
   }
+  if (value.usage !== undefined && !isSerializableUsage(value.usage)) return false;
   return Object.entries(value).every(
     ([key, item]) => key === "role" || key === "content" || item === undefined || isJsonValue(item),
+  );
+}
+
+function isSessionContextBreakdown(value: unknown): boolean {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(value, [
+      "systemPrompt",
+      "toolDefinitions",
+      "userPrompts",
+      "assistantMessages",
+      "toolResults",
+      "summaries",
+      "other",
+    ]) &&
+    [
+      value.systemPrompt,
+      value.toolDefinitions,
+      value.userPrompts,
+      value.assistantMessages,
+      value.toolResults,
+      value.summaries,
+      value.other,
+    ].every(isSafeRevision)
   );
 }
 
@@ -418,7 +474,7 @@ export function isSessionSnapshot(value: unknown): boolean {
         "messages",
         "tools",
       ],
-      ["sessionPath", "name", "model"],
+      ["sessionPath", "name", "model", "contextUsage"],
     )
   ) {
     return false;
@@ -433,6 +489,14 @@ export function isSessionSnapshot(value: unknown): boolean {
     isSafeRevision(value.revision) &&
     [value.isStreaming, value.isIdle, value.isCompacting, value.isRetrying].every(isBoolean) &&
     (value.model === undefined || isModelSummary(value.model)) &&
+    (value.contextUsage === undefined ||
+      (isPlainObject(value.contextUsage) &&
+        hasExactKeys(value.contextUsage, ["tokens", "contextWindow"], ["breakdown"]) &&
+        (value.contextUsage.tokens === null || isSafeRevision(value.contextUsage.tokens)) &&
+        isSafeRevision(value.contextUsage.contextWindow) &&
+        value.contextUsage.contextWindow > 0 &&
+        (value.contextUsage.breakdown === undefined ||
+          isSessionContextBreakdown(value.contextUsage.breakdown)))) &&
     isString(value.thinkingLevel) &&
     isBoolean(value.autoCompactionEnabled) &&
     isBoolean(value.autoRetryEnabled) &&
@@ -471,6 +535,43 @@ function isSessionSummary(value: unknown): boolean {
       )) &&
     (value.sessionRevision === undefined || isSafeRevision(value.sessionRevision))
   );
+}
+
+function isSessionUsageReportItem(value: unknown): boolean {
+  return (
+    isPlainObject(value) &&
+    hasExactKeys(
+      value,
+      ["sessionId", "sessionPath", "updatedAt", "archived", "messageCount", "usage"],
+      ["name"],
+    ) &&
+    isUuid(value.sessionId) &&
+    isString(value.sessionPath) &&
+    isOptionalString(value.name) &&
+    isNonNegativeNumber(value.updatedAt) &&
+    isBoolean(value.archived) &&
+    isSafeRevision(value.messageCount) &&
+    isSerializableUsage(value.usage)
+  );
+}
+
+function isSessionUsageReport(value: unknown): boolean {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(value, ["workspaceId", "generatedAt", "totals", "sessions"]) ||
+    !isUuid(value.workspaceId) ||
+    !isNonNegativeNumber(value.generatedAt) ||
+    !isPlainObject(value.totals) ||
+    !hasExactKeys(value.totals, ["sessionCount", "messageCount", "usage"]) ||
+    !isSafeRevision(value.totals.sessionCount) ||
+    !isSafeRevision(value.totals.messageCount) ||
+    !isSerializableUsage(value.totals.usage) ||
+    !Array.isArray(value.sessions) ||
+    !value.sessions.every(isSessionUsageReportItem)
+  ) {
+    return false;
+  }
+  return value.totals.sessionCount === value.sessions.length;
 }
 
 function isDiagnostic(value: unknown): boolean {
@@ -803,6 +904,8 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         (result.tokenUsage === undefined || isJsonValue(result.tokenUsage))
         ? null
         : "invalid session stats";
+    case "session.usageReport":
+      return isSessionUsageReport(result) ? null : "invalid session usage report";
     case "agent.setQueue":
       return isPlainObject(result) &&
         hasExactKeys(result, ["steering", "followUp"]) &&
