@@ -2,7 +2,6 @@ import { useAppStore } from "../../lib/stores/app-store";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
 import { ChatHeader } from "./ChatHeader";
-import { ExtensionWidgets } from "./ExtensionWidgets";
 
 export function ChatPage() {
   const workspace = useAppStore((s) => s.workspace);
@@ -63,7 +62,6 @@ export function ChatPage() {
       )}
       {session ? (
         <>
-          <ExtensionWidgets />
           <Transcript />
           <Composer disabled={authBlocked || packageBlocked} />
         </>

@@ -6,6 +6,7 @@ import type { SerializableImage } from "@pideck/protocol";
 import { buildAttachedFileBlock } from "./transcript-model";
 import { ModelControls } from "./ModelControls";
 import { QueuePanel } from "./QueuePanel";
+import { ExtensionWidgets } from "./ExtensionWidgets";
 import {
   activeSessionContext,
   captureRequestGeneration,
@@ -407,10 +408,12 @@ export function Composer({ disabled }: { disabled?: boolean }) {
   return (
     <div className="shrink-0 px-5 pb-5 pt-2">
       <QueuePanel />
-      <div
-        className={`mx-auto max-w-3xl rounded-lg border bg-surface-raised p-2 shadow-sm transition-colors ${
-          dragOver ? "border-accent" : "border-border"
-        }`}
+      {/* Anchor for the floating widget drawer — the input card never moves. */}
+      <div className="relative mx-auto max-w-3xl">
+        <div
+          className={`rounded-lg border bg-surface-raised p-2 shadow-sm transition-colors ${
+            dragOver ? "border-accent" : "border-border"
+          }`}
         onDragOver={(event) => {
           if (disabled) return;
           if ([...event.dataTransfer.items].some((item) => item.kind === "file")) {
@@ -612,7 +615,9 @@ export function Composer({ disabled }: { disabled?: boolean }) {
               </button>
             )}
           </div>
+          </div>
         </div>
+        <ExtensionWidgets />
       </div>
     </div>
   );
