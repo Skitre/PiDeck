@@ -3,6 +3,7 @@ import { ChevronDown, Pencil, Play, Trash2, ArrowUp, Check, X } from "lucide-rea
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import { activeSessionContext } from "../../lib/bridge/host-context";
+import type { ActiveSessionContext } from "@pideck/protocol";
 
 /**
  * Waiting queue above the composer. Backed by the SDK queue (visible to the
@@ -10,6 +11,24 @@ import { activeSessionContext } from "../../lib/bridge/host-context";
  * clear-and-rebuild. "Run now" is a hard interrupt: park the queue, abort the
  * current run, prompt the chosen item, restore the rest.
  */
+
+/** Transient conditions worth a short retry — e.g. the operation lock of an
+ * aborted run releases a beat after agent.abort responds. */
+const RETRYABLE_CODES = new Set(["AGENT_BUSY", "SERVICE_GRAPH_BUSY", "PACKAGE_MUTATION_BUSY"]);
+
+async function setQueueWithRetry(
+  context: ActiveSessionContext,
+  params: { steering: string[]; followUp: string[] },
+) {
+  for (let attempt = 0; ; attempt += 1) {
+    const res = await hostClient.request("agent.setQueue", context, params);
+    if (res.ok || attempt >= 3 || !RETRYABLE_CODES.has(res.error?.code ?? "")) {
+      return res;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 export function QueuePanel() {
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
@@ -29,8 +48,7 @@ export function QueuePanel() {
     if (!host || !workspace || !session || busyOp) return;
     setBusyOp(true);
     try {
-      const res = await hostClient.request(
-        "agent.setQueue",
+      const res = await setQueueWithRetry(
         activeSessionContext(host, workspace, session),
         { steering: nextSteering, followUp: nextFollowUp },
       );
@@ -46,12 +64,13 @@ export function QueuePanel() {
     if (!host || !workspace || !session || busyOp) return;
     const item = followUp[index];
     if (!item) return;
+    const steeringBefore = [...steering];
     const remaining = followUp.filter((_, i) => i !== index);
     setBusyOp(true);
     try {
       const context = activeSessionContext(host, workspace, session);
       // 1. Park everything so nothing auto-runs when the current run aborts.
-      const parked = await hostClient.request("agent.setQueue", context, {
+      const parked = await setQueueWithRetry(context, {
         steering: [],
         followUp: [],
       });
@@ -61,8 +80,18 @@ export function QueuePanel() {
       }
       // 2. Hard-interrupt the current run.
       const aborted = await hostClient.request("agent.abort", context, null);
-      if (aborted.ok) setSession(aborted.result.session);
-      // 3. Run the chosen item immediately.
+      if (!aborted.ok) {
+        pushNotification(aborted.error?.message ?? "Abort failed", "error");
+        // Undo the park so nothing is lost.
+        await setQueueWithRetry(context, {
+          steering: steeringBefore,
+          followUp: [...followUp],
+        });
+        return;
+      }
+      setSession(aborted.result.session);
+      // 3. Run the chosen item. The aborted run's operation lock releases a
+      // moment after the abort response, so retry briefly on busy errors.
       const current = useAppStore.getState();
       if (!current.host || !current.workspace || !current.session) return;
       const freshContext = activeSessionContext(
@@ -70,19 +99,38 @@ export function QueuePanel() {
         current.workspace,
         current.session,
       );
-      const prompted = await hostClient.request(
+      let prompted = await hostClient.request(
         "agent.prompt",
         freshContext,
         { text: item },
         null,
       );
+      for (
+        let attempt = 0;
+        !prompted.ok && RETRYABLE_CODES.has(prompted.error?.code ?? "") && attempt < 8;
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        prompted = await hostClient.request(
+          "agent.prompt",
+          freshContext,
+          { text: item },
+          null,
+        );
+      }
       if (!prompted.ok) {
         pushNotification(prompted.error?.message ?? "Run failed", "error");
+        // Put the chosen item back at the front so it is not lost.
+        await setQueueWithRetry(freshContext, {
+          steering: steeringBefore,
+          followUp: [item, ...remaining],
+        });
+        return;
       }
       // 4. Restore the remaining items behind the new run.
-      if (remaining.length > 0) {
-        await hostClient.request("agent.setQueue", freshContext, {
-          steering: [],
+      if (remaining.length > 0 || steeringBefore.length > 0) {
+        await setQueueWithRetry(freshContext, {
+          steering: steeringBefore,
           followUp: remaining,
         });
       }

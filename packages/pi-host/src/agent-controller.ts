@@ -27,6 +27,9 @@ function toSdkImages(images: SerializableImage[] | undefined): ImageContent[] | 
   }));
 }
 
+/** Upper bound for waiting on session.abort() while holding the graph lock. */
+const ABORT_SETTLE_TIMEOUT_MS = 15_000;
+
 export function summarizeModel(model: Model<any>): ModelSummary {
   return {
     provider: model.provider,
@@ -266,8 +269,57 @@ export function createAgentHandlers(
           if (!g?.agentSession || !g.sessionManager) throw new Error("No active session");
           let aborted = false;
           if (!g.agentSession.isIdle) {
-            await g.agentSession.abort();
+            // Park the queue before aborting: the SDK auto-runs the next
+            // queued follow-up the moment a run ends, so aborting with a
+            // populated queue would chain straight into the next run and
+            // leave session.abort()'s waitForIdle() — and the service graph
+            // lock held here — blocked until the entire queue drained. The
+            // CLI interrupt clears queues before aborting for the same
+            // reason.
+            const parked = g.agentSession.clearQueue();
+            let settleTimer: ReturnType<typeof setTimeout> | undefined;
+            const settled = await Promise.race([
+              g.agentSession.abort().then(() => true as const),
+              new Promise<false>((resolve) => {
+                settleTimer = setTimeout(() => resolve(false), ABORT_SETTLE_TIMEOUT_MS);
+              }),
+            ]);
+            if (settleTimer) clearTimeout(settleTimer);
             aborted = true;
+            if (settled) {
+              // Session is idle now — re-adding only enqueues; nothing runs
+              // until the user prompts again.
+              for (const text of parked.steering) {
+                try {
+                  await g.agentSession.steer(text);
+                } catch (err) {
+                  logger.warn("agent.abort: steer re-add failed", {
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                }
+              }
+              for (const text of parked.followUp) {
+                try {
+                  await g.agentSession.followUp(text);
+                } catch (err) {
+                  logger.warn("agent.abort: followUp re-add failed", {
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                }
+              }
+            } else {
+              logger.warn(
+                "agent.abort: run did not settle in time; parked queue not restored",
+                {
+                  steering: parked.steering.length,
+                  followUp: parked.followUp.length,
+                },
+              );
+            }
+            server.emit("agent.queueChanged", {
+              steering: [...g.agentSession.getSteeringMessages()],
+              followUp: [...g.agentSession.getFollowUpMessages()],
+            });
           }
           const identity = server.getIdentity();
           const snap = buildSessionSnapshot({

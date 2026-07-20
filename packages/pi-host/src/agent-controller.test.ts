@@ -78,6 +78,7 @@ function stableHandlerFixture(wait: Promise<void>) {
     steer: vi.fn(async () => wait),
     followUp: vi.fn(async () => wait),
     abort: vi.fn(async () => wait),
+    clearQueue: vi.fn(() => ({ steering: [], followUp: [] })),
     isIdle: false,
     isCompacting: false,
     isRetrying: false,
@@ -155,6 +156,63 @@ describe("session-bound agent handlers", () => {
     expect("error" in outcome).toBe(false);
     expect(outcome.identity).toEqual(fixture.server.getIdentity());
     expect(fixture.serviceGraphLock.isHeld()).toBe(false);
+  });
+});
+
+describe("agent.abort with queued messages", () => {
+  it("parks the queue before aborting and restores it after, so the chain stops", async () => {
+    const gate = deferred();
+    gate.resolve();
+    const fixture = stableHandlerFixture(gate.promise);
+    const session = fixture.session as unknown as Record<string, unknown>;
+    const order: string[] = [];
+    session.clearQueue = vi.fn(() => {
+      order.push("clearQueue");
+      return { steering: ["s1"], followUp: ["f1", "f2"] };
+    });
+    session.abort = vi.fn(async () => {
+      order.push("abort");
+    });
+    session.steer = vi.fn(async (text: string) => {
+      order.push(`steer:${text}`);
+    });
+    session.followUp = vi.fn(async (text: string) => {
+      order.push(`followUp:${text}`);
+    });
+    const handler = createAgentHandlers(fixture.factory)["agent.abort"]!;
+
+    const outcome = await handler({ id: "abort-queued", context: {}, params: null } as never);
+
+    expect("error" in outcome).toBe(false);
+    // Queue must be cleared BEFORE abort (the SDK auto-runs the next queued
+    // follow-up when a run ends) and re-added afterwards in original order.
+    expect(order).toEqual([
+      "clearQueue",
+      "abort",
+      "steer:s1",
+      "followUp:f1",
+      "followUp:f2",
+    ]);
+    expect(fixture.server.emit).toHaveBeenCalledWith("agent.queueChanged", {
+      steering: ["steer"],
+      followUp: ["follow-up"],
+    });
+    expect(fixture.serviceGraphLock.isHeld()).toBe(false);
+  });
+
+  it("skips park/restore entirely when the session is idle", async () => {
+    const gate = deferred();
+    gate.resolve();
+    const fixture = stableHandlerFixture(gate.promise);
+    const session = fixture.session as unknown as Record<string, unknown>;
+    session.isIdle = true;
+    const handler = createAgentHandlers(fixture.factory)["agent.abort"]!;
+
+    const outcome = await handler({ id: "abort-idle", context: {}, params: null } as never);
+
+    expect("error" in outcome).toBe(false);
+    expect(session.clearQueue).not.toHaveBeenCalled();
+    expect(session.abort).not.toHaveBeenCalled();
   });
 });
 
