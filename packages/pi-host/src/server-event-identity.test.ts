@@ -34,7 +34,7 @@ afterEach(() => {
 });
 
 describe("PiHostServer.emitForIdentity", () => {
-  it("keeps the global sequence while labeling an event with a background Session", () => {
+  it("keeps the global sequence while labeling an event with a background Session", async () => {
     const host = server();
     const lines: string[] = [];
     vi.spyOn(process.stdout, "write").mockImplementation(
@@ -56,6 +56,8 @@ describe("PiHostServer.emitForIdentity", () => {
       updatedAt: 1,
     });
     host.emit("host.statusChanged", host.buildStatus());
+    // Writes flush asynchronously through the outbound queue.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const first = JSON.parse(lines[0]!) as Record<string, unknown>;
     const second = JSON.parse(lines[1]!) as Record<string, unknown>;

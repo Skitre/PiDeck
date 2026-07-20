@@ -18,6 +18,7 @@ import {
 import { IdentityState } from "./identity.js";
 import { AgentOperationLock, TryMutex } from "./locks.js";
 import { logger } from "./logger.js";
+import { OutboundWriter } from "./outbound-queue.js";
 import { createLineReader } from "./transport.js";
 
 export type HostRuntimeDeps = {
@@ -63,6 +64,14 @@ export class PiHostServer {
   private fatalError?: HostError;
   private readonly deps: HostRuntimeDeps;
   private stopReader: (() => void) | null = null;
+  /** Bounded outbound queue (A3) — allocates event sequences at write time. */
+  private readonly outbound = new OutboundWriter({
+    stream: process.stdout,
+    allocateSequence: () => {
+      this.sequence += 1;
+      return this.sequence;
+    },
+  });
 
   constructor(deps: HostRuntimeDeps) {
     this.deps = deps;
@@ -130,22 +139,11 @@ export class PiHostServer {
       throw new Error(error.message);
     }
 
-    this.sequence += 1;
-    const msg = createEvent(
-      identity,
-      event,
-      this.sequence,
-      payload as never,
-    );
-    this.writeLine(msg);
-  }
-
-  private writeLine(obj: unknown): void {
-    process.stdout.write(JSON.stringify(obj) + "\n");
+    this.outbound.enqueueEvent(identity, event, payload);
   }
 
   writeResponse(body: unknown): void {
-    this.writeLine(body);
+    this.outbound.enqueueResponse(body);
   }
 
   async start(): Promise<void> {
@@ -478,7 +476,12 @@ export class PiHostServer {
     this.shuttingDown = true;
     // onShutdown may already have run from system.shutdown handler
     this.stopReader?.();
-    // Drain stdout fully before exit — no fixed 50ms exit that skips cleanup
+    // Drain the outbound queue and stdout before exit, with a hard deadline
+    // so a blocked pipe cannot prevent process exit.
+    await Promise.race([
+      this.outbound.drain(),
+      new Promise<void>((resolve) => setTimeout(resolve, 500)),
+    ]);
     await new Promise<void>((resolve) => {
       const done = () => resolve();
       if (process.stdout.write("")) {

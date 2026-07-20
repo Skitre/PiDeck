@@ -2,6 +2,8 @@
 
 Transport: **JSONL** over stdin (requests) / stdout (responses + events). UTF-8. One JSON object per line. stderr = logs only.
 
+Outbound backpressure (`packages/pi-host/src/outbound-queue.ts`): all output flows through one bounded queue that honors stream drain. Event sequences are allocated at write time; above a 1MB soft watermark, latest-wins events coalesce and terminal frames merge; above a 16MB hard cap, droppable events are shed and — in the extreme — a sequence gap is forced deliberately so the client's gap detection triggers its standard rehydrate recovery. Responses are never dropped.
+
 ## Identity & revisions
 
 Every Host process has a new `hostInstanceId`. Monotonic:
