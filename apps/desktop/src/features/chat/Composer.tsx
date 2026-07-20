@@ -163,9 +163,24 @@ export function Composer({ disabled }: { disabled?: boolean }) {
     if (command) {
       void loadCommandItems().then((all) => {
         const query = command.query.toLocaleLowerCase();
-        const items = all.filter((item) =>
-          item.label.toLocaleLowerCase().startsWith(`/${query}`),
-        );
+        // Prefix matches rank first, substring matches anywhere follow
+        // (so /con still finds fast-context); stable sort keeps the
+        // template/command/skill grouping within each rank.
+        const items = all
+          .map((item) => {
+            const name = item.label.toLocaleLowerCase();
+            const rank = !query
+              ? 0
+              : name.startsWith(`/${query}`)
+                ? 0
+                : name.includes(query)
+                  ? 1
+                  : 2;
+            return { item, rank };
+          })
+          .filter(({ rank }) => rank < 2)
+          .sort((a, b) => a.rank - b.rank)
+          .map(({ item }) => item);
         setCompletion(
           items.length > 0
             ? { kind: "command", tokenStart: command.start, query: command.query, items, selected: 0 }
