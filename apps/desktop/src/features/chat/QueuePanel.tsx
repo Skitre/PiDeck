@@ -102,7 +102,7 @@ export function QueuePanel() {
       let prompted = await hostClient.request(
         "agent.prompt",
         freshContext,
-        { text: item },
+        { text: item, attachQueuedImages: true },
         null,
       );
       for (
@@ -114,7 +114,7 @@ export function QueuePanel() {
         prompted = await hostClient.request(
           "agent.prompt",
           freshContext,
-          { text: item },
+          { text: item, attachQueuedImages: true },
           null,
         );
       }

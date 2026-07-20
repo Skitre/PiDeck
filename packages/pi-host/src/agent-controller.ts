@@ -15,6 +15,12 @@ import { buildSessionSnapshot, buildToolSnapshot } from "./session-snapshot.js";
 import { rebindCurrentSessionModel } from "./model-thinking.js";
 import { createProvisionalSessionTitle } from "./session-title.js";
 import { withStableGraphRead } from "./stable-graph-read.js";
+import {
+  carryImagesAcrossEdit,
+  pruneQueuedImages,
+  recordQueuedImages,
+  takeQueuedImages,
+} from "./queue-attachments.js";
 import { logger } from "./logger.js";
 
 /** Protocol images ({mediaType,data}) → SDK ImageContent ({type,mimeType,data}). */
@@ -121,8 +127,13 @@ export function createAgentHandlers(
         text: string;
         images?: SerializableImage[];
         streamingBehavior?: "steer" | "followUp";
+        attachQueuedImages?: boolean;
       };
-      const promptImages = toSdkImages(params.images);
+      const promptImages =
+        toSdkImages(params.images) ??
+        (params.attachQueuedImages
+          ? takeQueuedImages(g.agentSession, params.text)
+          : undefined);
       const runId = randomUUID();
       const runIdentity = server.getIdentity();
       factory.currentRunId = runId;
@@ -206,7 +217,17 @@ export function createAgentHandlers(
         run: async () => {
           const session = factory.getGraph()?.agentSession;
           if (!session) throw new Error("No active session");
-          await session.steer(params.text, toSdkImages(params.images));
+          const images = toSdkImages(params.images);
+          await session.steer(params.text, images);
+          if (images?.length) {
+            // Key by the template-expanded mirror text — that is what
+            // setQueue rebuilds send back.
+            recordQueuedImages(
+              session,
+              session.getSteeringMessages().at(-1) ?? params.text,
+              images,
+            );
+          }
           server.emit("agent.queueChanged", {
             steering: [...session.getSteeringMessages()],
             followUp: [...session.getFollowUpMessages()],
@@ -237,7 +258,15 @@ export function createAgentHandlers(
         run: async () => {
           const session = factory.getGraph()?.agentSession;
           if (!session) throw new Error("No active session");
-          await session.followUp(params.text, toSdkImages(params.images));
+          const images = toSdkImages(params.images);
+          await session.followUp(params.text, images);
+          if (images?.length) {
+            recordQueuedImages(
+              session,
+              session.getFollowUpMessages().at(-1) ?? params.text,
+              images,
+            );
+          }
           server.emit("agent.queueChanged", {
             steering: [...session.getSteeringMessages()],
             followUp: [...session.getFollowUpMessages()],
@@ -288,10 +317,19 @@ export function createAgentHandlers(
             aborted = true;
             if (settled) {
               // Session is idle now — re-adding only enqueues; nothing runs
-              // until the user prompts again.
+              // until the user prompts again. Attached images ride along via
+              // the side-table.
               for (const text of parked.steering) {
+                const images = takeQueuedImages(g.agentSession, text);
                 try {
-                  await g.agentSession.steer(text);
+                  await g.agentSession.steer(text, images);
+                  if (images) {
+                    recordQueuedImages(
+                      g.agentSession,
+                      g.agentSession.getSteeringMessages().at(-1) ?? text,
+                      images,
+                    );
+                  }
                 } catch (err) {
                   logger.warn("agent.abort: steer re-add failed", {
                     error: err instanceof Error ? err.message : String(err),
@@ -299,8 +337,16 @@ export function createAgentHandlers(
                 }
               }
               for (const text of parked.followUp) {
+                const images = takeQueuedImages(g.agentSession, text);
                 try {
-                  await g.agentSession.followUp(text);
+                  await g.agentSession.followUp(text, images);
+                  if (images) {
+                    recordQueuedImages(
+                      g.agentSession,
+                      g.agentSession.getFollowUpMessages().at(-1) ?? text,
+                      images,
+                    );
+                  }
                 } catch (err) {
                   logger.warn("agent.abort: followUp re-add failed", {
                     error: err instanceof Error ? err.message : String(err),
@@ -387,10 +433,28 @@ export function createAgentHandlers(
           // Atomic rebuild: the SDK only supports enqueue + clear-all, so
           // reorder/edit/delete are expressed as clear + re-add in order.
           // Queued texts are already template-expanded; re-adding is safe.
+          // Images ride along via the attachment side-table.
+          const oldTexts = [
+            ...session.getSteeringMessages(),
+            ...session.getFollowUpMessages(),
+          ];
+          pruneQueuedImages(session, oldTexts);
+          carryImagesAcrossEdit(session, oldTexts, [
+            ...params.steering,
+            ...params.followUp,
+          ]);
           session.clearQueue();
           for (const text of params.steering) {
+            const images = takeQueuedImages(session, text);
             try {
-              await session.steer(text);
+              await session.steer(text, images);
+              if (images) {
+                recordQueuedImages(
+                  session,
+                  session.getSteeringMessages().at(-1) ?? text,
+                  images,
+                );
+              }
             } catch (err) {
               logger.warn("setQueue: steer re-add failed", {
                 error: err instanceof Error ? err.message : String(err),
@@ -398,8 +462,16 @@ export function createAgentHandlers(
             }
           }
           for (const text of params.followUp) {
+            const images = takeQueuedImages(session, text);
             try {
-              await session.followUp(text);
+              await session.followUp(text, images);
+              if (images) {
+                recordQueuedImages(
+                  session,
+                  session.getFollowUpMessages().at(-1) ?? text,
+                  images,
+                );
+              }
             } catch (err) {
               logger.warn("setQueue: followUp re-add failed", {
                 error: err instanceof Error ? err.message : String(err),

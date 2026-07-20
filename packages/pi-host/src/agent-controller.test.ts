@@ -216,6 +216,103 @@ describe("agent.abort with queued messages", () => {
   });
 });
 
+describe("queued image preservation", () => {
+  /** Stateful fake queue so rebuilds/parks exercise real text flows. */
+  function queueFixture() {
+    const gate = deferred();
+    gate.resolve();
+    const fixture = stableHandlerFixture(gate.promise);
+    const session = fixture.session as unknown as Record<string, unknown>;
+    const steering: Array<{ text: string; images?: unknown }> = [];
+    const followUp: Array<{ text: string; images?: unknown }> = [];
+    session.steer = vi.fn(async (text: string, images?: unknown) => {
+      steering.push({ text, images });
+    });
+    session.followUp = vi.fn(async (text: string, images?: unknown) => {
+      followUp.push({ text, images });
+    });
+    session.getSteeringMessages = () => steering.map((entry) => entry.text);
+    session.getFollowUpMessages = () => followUp.map((entry) => entry.text);
+    session.clearQueue = vi.fn(() => {
+      const cleared = {
+        steering: steering.map((entry) => entry.text),
+        followUp: followUp.map((entry) => entry.text),
+      };
+      steering.length = 0;
+      followUp.length = 0;
+      return cleared;
+    });
+    session.abort = vi.fn(async () => {});
+    const handlers = createAgentHandlers(fixture.factory);
+    return { fixture, handlers, steering, followUp };
+  }
+
+  const png = [{ mediaType: "image/png", data: "Zm9v" }];
+  const sdkPng = [{ type: "image", mimeType: "image/png", data: "Zm9v" }];
+
+  it("setQueue rebuild re-attaches images to reordered items", async () => {
+    const { handlers, followUp } = queueFixture();
+    await handlers["agent.followUp"]!({
+      id: "q1",
+      context: {},
+      params: { text: "with image", images: png },
+    } as never);
+    await handlers["agent.followUp"]!({
+      id: "q2",
+      context: {},
+      params: { text: "plain" },
+    } as never);
+
+    const outcome = await handlers["agent.setQueue"]!({
+      id: "q3",
+      context: {},
+      params: { steering: [], followUp: ["plain", "with image"] },
+    } as never);
+
+    expect("error" in outcome).toBe(false);
+    expect(followUp.map((entry) => entry.text)).toEqual(["plain", "with image"]);
+    expect(followUp[0]!.images).toBeUndefined();
+    expect(followUp[1]!.images).toEqual(sdkPng);
+  });
+
+  it("setQueue rebuild carries images across a single edit", async () => {
+    const { handlers, followUp } = queueFixture();
+    await handlers["agent.followUp"]!({
+      id: "e1",
+      context: {},
+      params: { text: "original", images: png },
+    } as never);
+
+    await handlers["agent.setQueue"]!({
+      id: "e2",
+      context: {},
+      params: { steering: [], followUp: ["edited"] },
+    } as never);
+
+    expect(followUp.map((entry) => entry.text)).toEqual(["edited"]);
+    expect(followUp[0]!.images).toEqual(sdkPng);
+  });
+
+  it("abort park/restore keeps images on queued items", async () => {
+    const { handlers, followUp } = queueFixture();
+    await handlers["agent.followUp"]!({
+      id: "a1",
+      context: {},
+      params: { text: "queued while running", images: png },
+    } as never);
+
+    const outcome = await handlers["agent.abort"]!({
+      id: "a2",
+      context: {},
+      params: null,
+    } as never);
+
+    expect("error" in outcome).toBe(false);
+    expect(followUp.map((entry) => entry.text)).toEqual(["queued while running"]);
+    expect(followUp[0]!.images).toEqual(sdkPng);
+  });
+});
+
 describe("agent.compact concurrency", () => {
   function compactFixture(isIdle: boolean) {
     const gate = deferred();

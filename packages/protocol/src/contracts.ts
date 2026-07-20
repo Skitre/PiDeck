@@ -132,6 +132,9 @@ export type HostRequestParams = {
     text: string;
     images?: SerializableImage[];
     streamingBehavior?: "steer" | "followUp";
+    /** Re-attach images remembered for this text in the host's queue
+     * attachment table (used by run-now on queued items). */
+    attachQueuedImages?: boolean;
   };
   "agent.steer": { text: string; images?: SerializableImage[] };
   "agent.followUp": { text: string; images?: SerializableImage[] };

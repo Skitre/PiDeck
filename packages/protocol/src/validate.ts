@@ -245,9 +245,11 @@ export function validateRequestParams<M extends HostMethod>(
         ? ok(params)
         : fail("invalid session.getEntries params", { method });
     case "agent.prompt":
-      return exactObject(params, ["text"], ["images", "streamingBehavior"]) &&
+      return exactObject(params, ["text"], ["images", "streamingBehavior", "attachQueuedImages"]) &&
         isString(params.text) &&
         validateImages(params.images) &&
+        (params.attachQueuedImages === undefined ||
+          typeof params.attachQueuedImages === "boolean") &&
         (params.streamingBehavior === undefined ||
           params.streamingBehavior === "steer" ||
           params.streamingBehavior === "followUp")
