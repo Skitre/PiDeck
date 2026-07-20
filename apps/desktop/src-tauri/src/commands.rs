@@ -1,8 +1,9 @@
 use crate::desktop_settings::DesktopSettings;
+use crate::shell_terminal::{ShellTerminalCreateResult, ShellTerminalEvent};
 use crate::AppState;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use tauri::State;
+use tauri::{ipc::Channel, State};
 
 #[tauri::command]
 pub async fn desktop_settings_get(state: State<'_, AppState>) -> Result<DesktopSettings, String> {
@@ -47,6 +48,48 @@ pub async fn pi_host_restart(state: State<'_, AppState>) -> Result<(), String> {
 pub async fn pi_host_status(state: State<'_, AppState>) -> Result<bool, String> {
     let mut host = state.host.lock().await;
     Ok(host.is_running())
+}
+
+#[tauri::command]
+pub async fn shell_terminal_create(
+    state: State<'_, AppState>,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+    on_event: Channel<ShellTerminalEvent>,
+) -> Result<ShellTerminalCreateResult, String> {
+    let mut terminals = state.terminals.lock().await;
+    terminals.create(&cwd, cols, rows, on_event)
+}
+
+#[tauri::command]
+pub async fn shell_terminal_write(
+    state: State<'_, AppState>,
+    terminal_id: String,
+    data: String,
+) -> Result<(), String> {
+    let terminals = state.terminals.lock().await;
+    terminals.write(&terminal_id, &data)
+}
+
+#[tauri::command]
+pub async fn shell_terminal_resize(
+    state: State<'_, AppState>,
+    terminal_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), String> {
+    let terminals = state.terminals.lock().await;
+    terminals.resize(&terminal_id, cols, rows)
+}
+
+#[tauri::command]
+pub async fn shell_terminal_close(
+    state: State<'_, AppState>,
+    terminal_id: String,
+) -> Result<bool, String> {
+    let mut terminals = state.terminals.lock().await;
+    Ok(terminals.close(&terminal_id))
 }
 
 /// What the file manager should do with a validated local path.

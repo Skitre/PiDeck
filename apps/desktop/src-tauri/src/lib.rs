@@ -3,15 +3,18 @@ mod desktop_settings;
 mod pi_host;
 #[cfg(test)]
 mod pi_host_tests;
+mod shell_terminal;
 
 use desktop_settings::DesktopSettingsStore;
 use pi_host::PiHostManager;
+use shell_terminal::ShellTerminalManager;
 use tauri::{Emitter, Listener, Manager};
 use tokio::sync::Mutex;
 
 pub struct AppState {
     pub settings: Mutex<DesktopSettingsStore>,
     pub host: Mutex<PiHostManager>,
+    pub terminals: Mutex<ShellTerminalManager>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +28,7 @@ pub fn run() {
             app.manage(AppState {
                 settings: Mutex::new(settings),
                 host: Mutex::new(host),
+                terminals: Mutex::new(ShellTerminalManager::new()),
             });
 
             let handle = app.handle().clone();
@@ -32,7 +36,8 @@ pub fn run() {
                 let state = handle.state::<AppState>();
                 // start_unlocked never holds the host mutex across the ready-wait,
                 // so IPC commands and app exit stay responsive during startup.
-                if let Err(e) = pi_host::start_unlocked(&state.host, pi_host::StartKind::Fresh).await
+                if let Err(e) =
+                    pi_host::start_unlocked(&state.host, pi_host::StartKind::Fresh).await
                 {
                     eprintln!("[pideck] failed to start host: {e}");
                     // Surface to UI as host.fatal so the banner shows the real cause
@@ -69,9 +74,11 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     let state = handle.state::<AppState>();
                     eprintln!("[pideck] auto-restarting Host once after crash");
-                    if let Err(e) =
-                        pi_host::start_unlocked(&state.host, pi_host::StartKind::AutoRestartAfterCrash)
-                            .await
+                    if let Err(e) = pi_host::start_unlocked(
+                        &state.host,
+                        pi_host::StartKind::AutoRestartAfterCrash,
+                    )
+                    .await
                     {
                         eprintln!("[pideck] auto-restart failed: {e}");
                         let _ = handle.emit(
@@ -110,6 +117,10 @@ pub fn run() {
             commands::pi_host_send,
             commands::pi_host_restart,
             commands::pi_host_status,
+            commands::shell_terminal_create,
+            commands::shell_terminal_write,
+            commands::shell_terminal_resize,
+            commands::shell_terminal_close,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -118,6 +129,9 @@ pub fn run() {
                 let handle = app_handle.clone();
                 tauri::async_runtime::block_on(async move {
                     let state = handle.state::<AppState>();
+                    let mut terminals = state.terminals.lock().await;
+                    terminals.shutdown_all();
+                    drop(terminals);
                     let mut host = state.host.lock().await;
                     host.shutdown().await;
                 });

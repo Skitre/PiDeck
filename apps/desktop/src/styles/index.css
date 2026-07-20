@@ -54,6 +54,22 @@ html.light {
   --color-accent-hover: #bd4f24;
 }
 
+.pi-mark-light {
+  display: none;
+}
+
+.pi-mark-dark {
+  display: block;
+}
+
+html.light .pi-mark-light {
+  display: block;
+}
+
+html.light .pi-mark-dark {
+  display: none;
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,

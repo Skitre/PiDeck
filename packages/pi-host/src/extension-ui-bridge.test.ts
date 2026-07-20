@@ -320,6 +320,53 @@ describe("extension-ui-bridge", () => {
     expect(events.some((x) => x.e === "extensionUi.customClosed")).toBe(true);
   });
 
+  it("custom() cancels via protocol response without terminal input", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    const panel = ui.custom(() => ({
+      render: () => ["waiting"],
+      invalidate: () => {},
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const started = events.find((x) => x.e === "extensionUi.customStarted")?.p as {
+      requestId: string;
+    };
+
+    expect(respondExtensionUi(started.requestId, "cancelled", undefined, id)).toBe(true);
+    await expect(panel).resolves.toBeUndefined();
+    expect(events.some((x) => x.e === "extensionUi.customClosed")).toBe(true);
+  });
+
+  it("custom input runs extension-owned close callbacks", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    const extensionFlow = new Promise<void>((resolve) => {
+      void ui.custom((_tui, _theme, _keybindings, done) => ({
+        render: () => ["waiting"],
+        invalidate: () => {},
+        handleInput: (data: string) => {
+          if (data !== "\u0003") return;
+          done(undefined);
+          resolve();
+        },
+      }));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const started = events.find((x) => x.e === "extensionUi.customStarted")?.p as {
+      requestId: string;
+    };
+
+    expect(injectExtensionCustomInput(started.requestId, "\u0003")).toBe(true);
+    await expect(extensionFlow).resolves.toBeUndefined();
+    expect(events.some((x) => x.e === "extensionUi.customClosed")).toBe(true);
+  });
+
   it("custom() rejects and notifies when the factory throws", async () => {
     const events: Array<{ e: HostEventName; p: unknown }> = [];
     const ui = createExtensionUiContext({

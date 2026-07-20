@@ -11,6 +11,7 @@ import {
 import { SessionList } from "../features/sessions/SessionList";
 import { WorkspacePicker } from "../features/workspaces/WorkspacePicker";
 import { sidebarPref, setSidebarPref } from "../lib/sidebar-prefs";
+import { PiMark } from "./PiMark";
 
 function NewSessionButton() {
   const host = useAppStore((s) => s.host);
@@ -112,9 +113,7 @@ export function SidebarLayout({
   return (
     <aside className="flex w-[268px] shrink-0 flex-col border-r border-border bg-sidebar">
       <div className="flex h-16 shrink-0 items-center gap-3 px-4" data-tauri-drag-region>
-        <div className="flex size-8 items-center justify-center rounded-md bg-foreground text-[11px] font-semibold text-surface">
-          pi
-        </div>
+        <PiMark className="size-8" />
         <span className="text-[15px] font-semibold">Pi Agent</span>
       </div>
 

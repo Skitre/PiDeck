@@ -28,7 +28,10 @@ Implemented in `packages/protocol` + handlers in `packages/pi-host`:
 - `piSettings.get` / `patch`
 - `extensionUi.respond` / `customInput` / `customResize`
 
-Desktop-only (Rust, not Host): `desktopSettings.get` / `patch`, `desktop.openPath`.
+Desktop-only (Rust, not Host): `desktopSettings.get` / `patch`, `desktop.openPath`, and
+`shell_terminal_create` / `write` / `resize` / `close`. The real Shell terminal uses
+`portable-pty` plus a Tauri Channel directly between Rust and xterm.js; it intentionally
+stays outside Host identity/revision epochs, so restarting Pi Host does not terminate it.
 
 ## Events
 

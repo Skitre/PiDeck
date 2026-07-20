@@ -5,6 +5,7 @@ import { sanitizeAgentText } from "./markdown-utils";
 import { ToolView } from "./ToolView";
 import { formatDuration } from "./ToolCard";
 import { formatTokenCount } from "../../lib/format-token-count";
+import { PiMark } from "../../components/PiMark";
 import {
   buildTranscriptRows,
   parseUserAttachments,
@@ -230,9 +231,7 @@ export function Transcript() {
 function EmptyConversation() {
   return (
     <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
-      <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-foreground text-[11px] font-semibold text-surface">
-        pi
-      </div>
+      <PiMark className="mb-3 size-9" />
       <p className="text-sm font-medium">Start a conversation</p>
       <p className="mt-1 text-xs text-muted">Pi is ready in this workspace.</p>
     </div>
@@ -240,11 +239,7 @@ function EmptyConversation() {
 }
 
 function AssistantAvatar() {
-  return (
-    <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-overlay text-[10px] font-semibold">
-      pi
-    </div>
-  );
+  return <PiMark className="mt-0.5 size-7" />;
 }
 
 function DurationLabel({
