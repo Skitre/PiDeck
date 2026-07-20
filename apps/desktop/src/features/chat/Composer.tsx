@@ -606,7 +606,18 @@ export function Composer({ disabled }: { disabled?: boolean }) {
             <Plus size={16} />
           </button>
           <ModelControls />
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-1.5">
+            {busy && canSend && (
+              <button
+                type="button"
+                title="Queue message (Enter)"
+                aria-label="Queue message"
+                className="flex size-8 items-center justify-center rounded-md bg-foreground text-surface transition-colors hover:opacity-85"
+                onClick={() => void send()}
+              >
+                <Send size={15} />
+              </button>
+            )}
             {busy ? (
               <button
                 type="button"
