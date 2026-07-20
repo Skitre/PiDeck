@@ -60,6 +60,7 @@ export type ExtensionUiBridgeOptions = {
   getIdentity: () => HostIdentity;
   waitUntilActive?: () => Promise<void>;
   isDisposed?: () => boolean;
+  registerCleanup?: (cleanup: () => void) => void;
 };
 
 export type ExtensionUiBinding = {
@@ -220,6 +221,10 @@ const panelKeybindings = new KeybindingsManager({
 const CUSTOM_FRAME_FLUSH_MS = 16;
 const WIDGET_SNAPSHOT_WIDTH = 80;
 
+type ActiveWidgetFactory = {
+  dispose: () => void;
+};
+
 /**
  * Build ExtensionUIContext with positional SDK 0.80.7 signatures.
  * Returns a value that structurally satisfies ExtensionUIContext (no whole cast).
@@ -229,6 +234,20 @@ export function createExtensionUiContext(
 ): ExtensionUIContext {
   const identityAt = () => opts.getIdentity();
   const desktopTheme = createDesktopStubTheme();
+  const activeWidgetFactories = new Map<string, ActiveWidgetFactory>();
+
+  const disposeWidgetFactory = (key: string) => {
+    const active = activeWidgetFactories.get(key);
+    if (!active) return;
+    activeWidgetFactories.delete(key);
+    active.dispose();
+  };
+  const disposeAllWidgetFactories = () => {
+    for (const key of [...activeWidgetFactories.keys()]) {
+      disposeWidgetFactory(key);
+    }
+  };
+  opts.registerCleanup?.(disposeAllWidgetFactories);
 
   const requestBlocking = async (
     kind: "select" | "confirm" | "input" | "editor",
@@ -333,27 +352,78 @@ export function createExtensionUiContext(
     setHiddenThinkingLabel: () => {},
     setWidget: (key, content, _options?) => {
       const sanitizedKey = stripAnsi(String(key));
+      disposeWidgetFactory(sanitizedKey);
       if (typeof content === "function") {
-        // Seam A: Component.render(width) is pure — render one static snapshot
-        // through the existing widgetChanged channel. Not live-updating.
-        try {
-          const widgetTui = new TUI(new VirtualTerminal({ onData: () => {} }));
-          const widgetComponent = content(widgetTui, desktopTheme);
-          const lines = widgetComponent.render(WIDGET_SNAPSHOT_WIDTH);
+        const widgetTui = new TUI(
+          new VirtualTerminal({
+            cols: WIDGET_SNAPSHOT_WIDTH,
+            onData: () => {},
+          }),
+        );
+        let widgetComponent: (Component & { dispose?(): void }) | undefined;
+        let disposed = false;
+        let lastSnapshot: string | undefined;
+        let lastRenderError: string | undefined;
+        const dispose = () => {
+          if (disposed) return;
+          disposed = true;
           try {
-            widgetComponent.dispose?.();
+            widgetTui.stop();
+          } catch {
+            /* ignore stop errors */
+          }
+          try {
+            widgetComponent?.dispose?.();
           } catch {
             /* ignore dispose errors */
           }
-          opts.emit("extensionUi.widgetChanged", {
-            key: sanitizedKey,
-            widget: lines.map((line) => stripAnsi(line)),
-          });
+        };
+        try {
+          widgetComponent = content(widgetTui, desktopTheme);
+          const renderBridge: Component = {
+            render: (width) => {
+              if (disposed || !widgetComponent) return [];
+              try {
+                const lines = widgetComponent.render(width);
+                const sanitizedLines = lines.map((line) => stripAnsi(line));
+                const snapshot = JSON.stringify(sanitizedLines);
+                if (snapshot !== lastSnapshot) {
+                  lastSnapshot = snapshot;
+                  opts.emit("extensionUi.widgetChanged", {
+                    key: sanitizedKey,
+                    widget: sanitizedLines,
+                  });
+                }
+                lastRenderError = undefined;
+                return lines;
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                const sanitizedMessage = stripAnsi(message);
+                if (sanitizedMessage !== lastRenderError) {
+                  lastRenderError = sanitizedMessage;
+                  opts.emit("package.diagnostic", {
+                    severity: "info",
+                    message: `Extension setWidget factory render failed for key=${sanitizedKey}: ${sanitizedMessage}`,
+                  });
+                }
+                return [];
+              }
+            },
+            invalidate: () => widgetComponent?.invalidate(),
+          };
+          const activeFactory = { dispose };
+          activeWidgetFactories.set(sanitizedKey, activeFactory);
+          widgetTui.addChild(renderBridge);
+          widgetTui.start();
         } catch (err) {
+          if (activeWidgetFactories.get(sanitizedKey)?.dispose === dispose) {
+            activeWidgetFactories.delete(sanitizedKey);
+          }
+          dispose();
           const message = err instanceof Error ? err.message : String(err);
           opts.emit("package.diagnostic", {
             severity: "info",
-            message: `Extension setWidget factory snapshot failed for key=${sanitizedKey}: ${stripAnsi(message)}`,
+            message: `Extension setWidget factory failed for key=${sanitizedKey}: ${stripAnsi(message)}`,
           });
         }
         return;
@@ -564,6 +634,7 @@ export async function bindExtensionUi(
   let activated = false;
   let readyForEvents = false;
   let disposed = false;
+  const contextCleanups = new Set<() => void>();
   const queuedEvents: Array<{ event: HostEventName; payload: unknown }> = [];
   let releaseActivation!: () => void;
   const activation = new Promise<void>((resolve) => {
@@ -576,10 +647,26 @@ export async function bindExtensionUi(
     }
     opts.emit(event, payload);
   };
+  const queueEvent = (event: HostEventName, payload: unknown) => {
+    if (event === "extensionUi.widgetChanged") {
+      const key = (payload as { key?: unknown }).key;
+      for (let i = queuedEvents.length - 1; i >= 0; i -= 1) {
+        const queued = queuedEvents[i];
+        if (
+          queued?.event === event &&
+          (queued.payload as { key?: unknown }).key === key
+        ) {
+          queuedEvents.splice(i, 1);
+          break;
+        }
+      }
+    }
+    queuedEvents.push({ event, payload });
+  };
   const emit = (event: HostEventName, payload: unknown) => {
     if (disposed) return;
     if (!activated || (!readyForEvents && !BLOCKING_EXTENSION_EVENTS.has(event))) {
-      queuedEvents.push({ event, payload });
+      queueEvent(event, payload);
       return;
     }
     publishEvent(event, payload);
@@ -589,6 +676,7 @@ export async function bindExtensionUi(
     getIdentity: () => bindingIdentity,
     waitUntilActive: () => activation,
     isDisposed: () => disposed,
+    registerCleanup: (cleanup) => contextCleanups.add(cleanup),
   });
   const ready = session
     .bindExtensions({
@@ -630,10 +718,19 @@ export async function bindExtensionUi(
       };
     },
     cleanup: () => {
+      if (disposed) return;
       disposed = true;
       queuedEvents.length = 0;
       releaseActivation();
       cancelPendingForIdentity(bindingIdentity);
+      for (const cleanup of contextCleanups) {
+        try {
+          cleanup();
+        } catch {
+          /* ignore Extension UI cleanup errors */
+        }
+      }
+      contextCleanups.clear();
     },
     updateIdentity: (identity) => {
       const next = { ...identity };

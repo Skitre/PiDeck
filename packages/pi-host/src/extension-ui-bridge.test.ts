@@ -187,6 +187,8 @@ describe("extension-ui-bridge", () => {
     const session = {
       bindExtensions: async ({ uiContext }: { uiContext: ReturnType<typeof createExtensionUiContext> }) => {
         uiContext.setStatus("startup", "loading");
+        uiContext.setWidget("startup", ["loading"]);
+        uiContext.setWidget("startup", ["ready"]);
         uiContext.notify("candidate ready", "info");
       },
     };
@@ -202,10 +204,12 @@ describe("extension-ui-bridge", () => {
     publish();
     expect(events.map((event) => event.e)).toEqual([
       "extensionUi.statusChanged",
+      "extensionUi.widgetChanged",
       "extensionUi.notification",
     ]);
+    expect(events[1]?.p).toEqual({ key: "startup", widget: ["ready"] });
     publish();
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(3);
     binding.cleanup();
   });
 
@@ -335,26 +339,82 @@ describe("extension-ui-bridge", () => {
     expect(notification.message).toContain("factory boom");
   });
 
-  it("setWidget factory renders a static snapshot through widgetChanged", () => {
+  it("setWidget factory publishes live snapshots and disposes when cleared", async () => {
     const events: Array<{ e: HostEventName; p: unknown }> = [];
     const ui = createExtensionUiContext({
       emit: (e, p) => events.push({ e, p }),
       getIdentity: () => id,
     });
+    let text = "line one";
+    let requestRender: (() => void) | undefined;
     let disposed = false;
-    ui.setWidget("tasks", () => ({
-      render: () => ["\x1b[32mline one\x1b[0m", "line two"],
-      invalidate: () => {},
-      dispose: () => {
-        disposed = true;
-      },
-    }));
-    const widget = events.find((x) => x.e === "extensionUi.widgetChanged")?.p as {
+    ui.setWidget("tasks", (tui) => {
+      requestRender = () => tui.requestRender();
+      return {
+        render: () => [`\x1b[32m${text}\x1b[0m`, "line two"],
+        invalidate: () => {},
+        dispose: () => {
+          disposed = true;
+        },
+      };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    let widget = events.find((x) => x.e === "extensionUi.widgetChanged")?.p as {
       key: string;
       widget: string[];
     };
     expect(widget.key).toBe("tasks");
     expect(widget.widget).toEqual(["line one", "line two"]);
+
+    text = "updated";
+    requestRender?.();
+    requestRender?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const updates = events.filter((x) => x.e === "extensionUi.widgetChanged");
+    expect(updates).toHaveLength(2);
+    widget = updates.at(-1)?.p as { key: string; widget: string[] };
+    expect(widget.widget).toEqual(["updated", "line two"]);
+
+    ui.setWidget("tasks", ["static replacement"]);
+    expect(disposed).toBe(true);
+    expect(events.at(-1)).toEqual({
+      e: "extensionUi.widgetChanged",
+      p: { key: "tasks", widget: ["static replacement"] },
+    });
+
+    requestRender?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(3);
+
+    ui.setWidget("tasks", undefined);
+    expect(events.at(-1)).toEqual({
+      e: "extensionUi.widgetChanged",
+      p: { key: "tasks", widget: null },
+    });
+    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(4);
+  });
+
+  it("binding cleanup disposes live setWidget factories", async () => {
+    let disposed = false;
+    const session = {
+      bindExtensions: async ({ uiContext }: { uiContext: ReturnType<typeof createExtensionUiContext> }) => {
+        uiContext.setWidget("live", () => ({
+          render: () => ["live"],
+          invalidate: () => {},
+          dispose: () => {
+            disposed = true;
+          },
+        }));
+      },
+    };
+    const binding = await bindExtensionUi(session as never, null, {
+      emit: () => {},
+      getIdentity: () => id,
+    });
+    const publish = await binding.activate();
+    publish();
+    binding.cleanup();
     expect(disposed).toBe(true);
   });
 });
