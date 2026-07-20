@@ -83,6 +83,13 @@ textarea:focus-visible {
   border-radius: 4px;
 }
 
+/* Transcript virtualization: skip layout/paint for offscreen rows.
+   `auto` keeps the last measured size once a row has been rendered. */
+.transcript-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
 /* Conversation markdown */
 .chat-markdown {
   min-width: 0;

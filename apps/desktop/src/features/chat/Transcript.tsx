@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, Brain, ChevronRight, Copy, FileText, LoaderCircle } from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { sanitizeAgentText } from "./markdown-utils";
@@ -47,6 +47,10 @@ function LazyMarkdownMessage({
   );
 }
 
+/** Rows mounted when a session opens; older rows load in chunks on demand. */
+const INITIAL_VISIBLE_ROWS = 60;
+const SHOW_EARLIER_CHUNK = 120;
+
 export function Transcript() {
   const session = useAppStore((state) => state.session);
   const messages = session?.messages ?? [];
@@ -62,6 +66,52 @@ export function Transcript() {
   const rowModes = useRef(new Set<string>());
   const modeSessionId = useRef<string | null>(null);
   const [following, setFollowing] = useState(true);
+
+  // Top-anchored window: `hidden` rows stay unmounted above the fold. New
+  // rows stream in at the tail without disturbing what is on screen.
+  // Derived-during-render so a freshly opened long session never mounts in
+  // full even once.
+  const sessionKey = session?.sessionId ?? null;
+  const [hiddenState, setHiddenState] = useState<{ sessionId: string | null; hidden: number }>(
+    { sessionId: sessionKey, hidden: Math.max(0, rows.length - INITIAL_VISIBLE_ROWS) },
+  );
+  if (hiddenState.sessionId !== sessionKey) {
+    setHiddenState({
+      sessionId: sessionKey,
+      hidden: Math.max(0, rows.length - INITIAL_VISIBLE_ROWS),
+    });
+  }
+  const hidden = Math.min(
+    hiddenState.sessionId === sessionKey ? hiddenState.hidden : 0,
+    Math.max(0, rows.length - 1),
+  );
+  const visibleRows = hidden > 0 ? rows.slice(hidden) : rows;
+  const expandAnchorRef = useRef<{ prevHeight: number; prevTop: number } | null>(null);
+
+  function showEarlier() {
+    const element = scrollRef.current;
+    if (element) {
+      expandAnchorRef.current = {
+        prevHeight: element.scrollHeight,
+        prevTop: element.scrollTop,
+      };
+    }
+    setHiddenState((current) => ({
+      ...current,
+      hidden: Math.max(0, current.hidden - SHOW_EARLIER_CHUNK),
+    }));
+  }
+
+  useLayoutEffect(() => {
+    // Keep the viewport anchored on the previously-visible content after
+    // older rows mount above it.
+    const anchor = expandAnchorRef.current;
+    if (!anchor) return;
+    expandAnchorRef.current = null;
+    const element = scrollRef.current;
+    if (!element) return;
+    element.scrollTop = anchor.prevTop + (element.scrollHeight - anchor.prevHeight);
+  }, [hidden]);
 
   if (modeSessionId.current !== (session?.sessionId ?? null)) {
     modeSessionId.current = session?.sessionId ?? null;
@@ -131,15 +181,25 @@ export function Transcript() {
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
           {rows.length === 0 && <EmptyConversation />}
-          {rows.map((row) => {
+          {hidden > 0 && (
+            <button
+              type="button"
+              onClick={showEarlier}
+              className="mx-auto flex h-8 items-center rounded-full border border-border bg-surface-raised px-4 text-xs text-muted transition-colors hover:bg-surface-overlay hover:text-foreground"
+            >
+              Show earlier messages ({hidden} hidden)
+            </button>
+          )}
+          {visibleRows.map((row) => {
             const streaming = session?.isStreaming && row.key === lastAssistantKey;
             return (
-              <TranscriptRowView
-                key={`${session?.sessionId ?? "session"}:${row.key}`}
-                row={row}
-                mode={rowModes.current.has(row.key) ? "streaming" : "static"}
-                showCaret={Boolean(streaming)}
-              />
+              <div className="transcript-row" key={`${session?.sessionId ?? "session"}:${row.key}`}>
+                <TranscriptRowView
+                  row={row}
+                  mode={rowModes.current.has(row.key) ? "streaming" : "static"}
+                  showCaret={Boolean(streaming)}
+                />
+              </div>
             );
           })}
           {session && !session.isIdle && !lastAssistantKey && (
