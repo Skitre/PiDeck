@@ -101,6 +101,8 @@ export type HostContextMap = {
   "piSettings.get": WorkspaceContext;
   "piSettings.patch": NullableSessionContext;
   "extensionUi.respond": ActiveSessionContext;
+  "extensionUi.customInput": ActiveSessionContext;
+  "extensionUi.customResize": ActiveSessionContext;
 };
 
 export type HostRequestParams = {
@@ -181,6 +183,8 @@ export type HostRequestParams = {
     status: "resolved" | "cancelled";
     value?: JsonValue;
   };
+  "extensionUi.customInput": { requestId: string; data: string };
+  "extensionUi.customResize": { requestId: string; cols: number; rows: number };
 };
 
 export type HostResultMap = {
@@ -265,6 +269,8 @@ export type HostResultMap = {
   "piSettings.get": PiSettingsSnapshot;
   "piSettings.patch": PiSettingsSnapshot;
   "extensionUi.respond": { accepted: true };
+  "extensionUi.customInput": { accepted: true };
+  "extensionUi.customResize": { accepted: true };
 };
 
 export type HostEventPayloadMap = {
@@ -327,6 +333,14 @@ export type HostEventPayloadMap = {
   "extensionUi.statusChanged": { key?: string; text: string };
   "extensionUi.widgetChanged": { key?: string; widget: JsonValue };
   "extensionUi.notification": { message: string; level: string };
+  "extensionUi.customStarted": {
+    requestId: string;
+    title?: string;
+    cols: number;
+    rows: number;
+  };
+  "extensionUi.customFrame": { requestId: string; data: string };
+  "extensionUi.customClosed": { requestId: string };
 };
 
 // Compile-time completeness: every HostMethod/HostEventName key present

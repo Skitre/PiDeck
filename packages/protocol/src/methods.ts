@@ -56,6 +56,8 @@ export const HOST_METHODS = [
   "piSettings.get",
   "piSettings.patch",
   "extensionUi.respond",
+  "extensionUi.customInput",
+  "extensionUi.customResize",
 ] as const;
 
 export type HostMethod = (typeof HOST_METHODS)[number];
@@ -142,7 +144,9 @@ export type ActiveSessionMethod =
   | "model.list"
   | "model.setCurrent"
   | "model.setThinkingLevel"
-  | "extensionUi.respond";
+  | "extensionUi.respond"
+  | "extensionUi.customInput"
+  | "extensionUi.customResize";
 export type ToolMutationMethod = "agent.setActiveTools";
 export type SessionPackageMethod =
   | "package.install"
@@ -240,4 +244,6 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "piSettings.get": "workspace",
   "piSettings.patch": "nullableSession",
   "extensionUi.respond": "activeSession",
+  "extensionUi.customInput": "activeSession",
+  "extensionUi.customResize": "activeSession",
 };

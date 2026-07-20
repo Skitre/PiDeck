@@ -34,6 +34,7 @@ import {
   bindExtensionUi,
   respondExtensionUi,
   cancelAllPending,
+  injectExtensionCustomInput,
 } from "./extension-ui-bridge.js";
 import type { HostEventName, HostIdentity } from "@pideck/protocol";
 
@@ -130,19 +131,34 @@ describe("extension UI real loader + bindExtensions path", () => {
       const deadline = Date.now() + 40_000;
       while (!stopRespond && Date.now() < deadline) {
         const req = events.find((x) => x.e === "extensionUi.request" && !x.done);
-        if (!req) {
+        const custom = events.find(
+          (x) => x.e === "extensionUi.customStarted" && !x.done,
+        );
+        if (!req && !custom) {
           await new Promise((r) => setTimeout(r, 20));
           continue;
         }
-        req.done = true;
-        const payload = req.p as { requestId: string; kind: string };
-        let value: unknown;
-        if (payload.kind === "select") value = "beta";
-        else if (payload.kind === "confirm") value = true;
-        else if (payload.kind === "input" || payload.kind === "editor") {
-          value = "typed-value";
+        if (req) {
+          req.done = true;
+          const payload = req.p as { requestId: string; kind: string };
+          let value: unknown;
+          if (payload.kind === "select") value = "beta";
+          else if (payload.kind === "confirm") value = true;
+          else if (payload.kind === "input" || payload.kind === "editor") {
+            value = "typed-value";
+          }
+          respondExtensionUi(payload.requestId, "resolved", value, identity);
         }
-        respondExtensionUi(payload.requestId, "resolved", value, identity);
+        if (custom) {
+          custom.done = true;
+          const payload = custom.p as { requestId: string };
+          // Wait for the component to gain focus and the first frame to flush,
+          // then pick the second option: down arrow + enter.
+          await new Promise((r) => setTimeout(r, 100));
+          injectExtensionCustomInput(payload.requestId, "\x1b[B");
+          await new Promise((r) => setTimeout(r, 50));
+          injectExtensionCustomInput(payload.requestId, "\r");
+        }
       }
     })();
 
@@ -173,11 +189,19 @@ describe("extension UI real loader + bindExtensions path", () => {
     expect(body).toContain("selected=beta");
     expect(body).toContain("confirmed=true");
     expect(body).toContain("typed=typed-value");
+    expect(body).toContain("customPicked=two");
     expect(body).toContain("handler=session_start");
     expect(body).toContain("hasUI=true");
     expect(body).toContain(`nonce=${nonce}`);
     expect(events.some((e) => e.e === "extensionUi.request")).toBe(true);
     expect(events.some((e) => e.e === "extensionUi.statusChanged")).toBe(true);
+    expect(events.some((e) => e.e === "extensionUi.customStarted")).toBe(true);
+    const frameData = events
+      .filter((e) => e.e === "extensionUi.customFrame")
+      .map((e) => (e.p as { data: string }).data)
+      .join("");
+    expect(frameData).toContain("one");
+    expect(events.some((e) => e.e === "extensionUi.customClosed")).toBe(true);
 
     binding.cleanup();
     try {

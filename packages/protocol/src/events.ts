@@ -21,6 +21,9 @@ export const HOST_EVENT_NAMES = [
   "extensionUi.statusChanged",
   "extensionUi.widgetChanged",
   "extensionUi.notification",
+  "extensionUi.customStarted",
+  "extensionUi.customFrame",
+  "extensionUi.customClosed",
 ] as const;
 
 export type HostEventName = (typeof HOST_EVENT_NAMES)[number];

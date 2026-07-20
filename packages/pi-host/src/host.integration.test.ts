@@ -125,6 +125,24 @@ class HostProcess {
 }
 
 function respondToExtensionUi(host: HostProcess, msg: Record<string, unknown>): boolean {
+  if (msg.event === "extensionUi.customStarted") {
+    // Answer the fixture's ui.custom panel: Enter picks the highlighted option.
+    const payload = msg.payload as { requestId: string };
+    host.send({
+      protocolVersion: 1,
+      id: randomUUID(),
+      method: "extensionUi.customInput",
+      context: {
+        expectedHostInstanceId: msg.hostInstanceId,
+        expectedWorkspaceId: msg.workspaceId,
+        expectedWorkspaceRevision: msg.workspaceRevision,
+        expectedSessionId: msg.sessionId,
+        expectedSessionRevision: msg.sessionRevision,
+      },
+      params: { requestId: payload.requestId, data: "\r" },
+    });
+    return true;
+  }
   if (msg.event !== "extensionUi.request") return false;
   expect(msg.workspaceId).toEqual(expect.any(String));
   expect(msg.sessionId).toEqual(expect.any(String));
@@ -317,6 +335,7 @@ describe("Pi Host integration", () => {
       expect(markerBody).toContain("selected=beta");
       expect(markerBody).toContain("confirmed=true");
       expect(markerBody).toContain("typed=typed-value");
+      expect(markerBody).toContain("customPicked=one");
       expect(markerBody).toContain(`nonce=${nonce}`);
       expect(markerBody).toContain("invocationCount=1");
       expect(markerBody).toContain("runtimeActive=true");

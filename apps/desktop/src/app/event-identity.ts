@@ -32,6 +32,9 @@ export function expectedIdentityForEvent(
     case "workspace.changed":
     case "workspace.trustRequired":
     case "extensionUi.request":
+    case "extensionUi.customStarted":
+    case "extensionUi.customFrame":
+    case "extensionUi.customClosed":
       return host;
     case "session.snapshot":
     case "session.infoChanged":

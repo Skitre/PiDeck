@@ -5,6 +5,7 @@ import {
   respondExtensionUi,
   cancelPendingForIdentity,
   cancelAllPending,
+  injectExtensionCustomInput,
 } from "./extension-ui-bridge.js";
 import type { HostEventName, HostIdentity } from "@pideck/protocol";
 
@@ -239,5 +240,121 @@ describe("extension-ui-bridge", () => {
     ).toBe(true);
     await expect(pendingInput).resolves.toBe("done");
     binding.cleanup();
+  });
+
+  it("custom() drives a TUI over a virtual terminal: started → frames → done → closed", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    let doneFn: ((result: string) => void) | undefined;
+    const received: string[] = [];
+    const panel = ui.custom<string>((tui, theme, keybindings, done) => {
+      expect(theme).toBeTruthy();
+      expect(keybindings.matches("\r", "tui.select.confirm")).toBe(true);
+      expect(keybindings.matches("\x1b", "app.interrupt")).toBe(true);
+      doneFn = done;
+      return {
+        render: () => ["hello panel"],
+        invalidate: () => {},
+        handleInput: (data: string) => {
+          received.push(data);
+          done(`picked:${data}`);
+        },
+      };
+    });
+
+    const started = events.find((x) => x.e === "extensionUi.customStarted")?.p as {
+      requestId: string;
+      cols: number;
+      rows: number;
+    };
+    expect(started).toBeTruthy();
+    expect(started.cols).toBe(100);
+    expect(started.rows).toBe(32);
+    expect(doneFn).toBeTypeOf("function"); // factory invoked synchronously, like the CLI
+
+    // Wait past the frame flush interval for the first differential render.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const frames = events
+      .filter((x) => x.e === "extensionUi.customFrame")
+      .map((x) => (x.p as { requestId: string; data: string }).data)
+      .join("");
+    expect(frames).toContain("hello panel");
+    expect(
+      events
+        .filter((x) => x.e === "extensionUi.customFrame")
+        .every((x) => (x.p as { requestId: string }).requestId === started.requestId),
+    ).toBe(true);
+
+    // Input injected through the handler path reaches the focused component.
+    const okInput = injectExtensionCustomInput(started.requestId, "\r");
+    expect(okInput).toBe(true);
+    expect(received).toEqual(["\r"]);
+    await expect(panel).resolves.toBe("picked:\r");
+    expect(events.some((x) => x.e === "extensionUi.customClosed")).toBe(true);
+
+    // Panel is gone — further input is rejected.
+    expect(injectExtensionCustomInput(started.requestId, "x")).toBe(false);
+  });
+
+  it("custom() cancels via identity cleanup and emits customClosed", async () => {
+    const cancelId: HostIdentity = { ...id, sessionId: "s-cancel" };
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => cancelId,
+    });
+    const panel = ui.custom(() => ({
+      render: () => ["waiting"],
+      invalidate: () => {},
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    cancelPendingForIdentity(cancelId);
+    await expect(panel).resolves.toBeUndefined();
+    expect(events.some((x) => x.e === "extensionUi.customClosed")).toBe(true);
+  });
+
+  it("custom() rejects and notifies when the factory throws", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    const panel = ui.custom(() => {
+      throw new Error("factory boom");
+    });
+    await expect(panel).rejects.toThrow("factory boom");
+    expect(events.some((x) => x.e === "extensionUi.customClosed")).toBe(true);
+    const notification = events.find((x) => x.e === "extensionUi.notification")?.p as {
+      message: string;
+      level: string;
+    };
+    expect(notification.level).toBe("error");
+    expect(notification.message).toContain("factory boom");
+  });
+
+  it("setWidget factory renders a static snapshot through widgetChanged", () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    let disposed = false;
+    ui.setWidget("tasks", () => ({
+      render: () => ["\x1b[32mline one\x1b[0m", "line two"],
+      invalidate: () => {},
+      dispose: () => {
+        disposed = true;
+      },
+    }));
+    const widget = events.find((x) => x.e === "extensionUi.widgetChanged")?.p as {
+      key: string;
+      widget: string[];
+    };
+    expect(widget.key).toBe("tasks");
+    expect(widget.widget).toEqual(["line one", "line two"]);
+    expect(disposed).toBe(true);
   });
 });

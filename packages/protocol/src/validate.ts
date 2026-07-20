@@ -392,6 +392,25 @@ export function validateRequestParams<M extends HostMethod>(
         (params.value === undefined || isJsonValue(params.value))
         ? ok(params)
         : fail("invalid extensionUi.respond params", { method });
+    case "extensionUi.customInput":
+      return exactObject(params, ["requestId", "data"]) &&
+        isUuid(params.requestId) &&
+        isNonEmptyString(params.data)
+        ? ok(params)
+        : fail("invalid extensionUi.customInput params", { method });
+    case "extensionUi.customResize":
+      return exactObject(params, ["requestId", "cols", "rows"]) &&
+        isUuid(params.requestId) &&
+        typeof params.cols === "number" &&
+        Number.isInteger(params.cols) &&
+        params.cols >= 20 &&
+        params.cols <= 1000 &&
+        typeof params.rows === "number" &&
+        Number.isInteger(params.rows) &&
+        params.rows >= 4 &&
+        params.rows <= 1000
+        ? ok(params)
+        : fail("invalid extensionUi.customResize params", { method });
     default:
       // Exhaustiveness guard: adding a HostMethod without a params validator
       // is a compile error here, not a silently-undefined result at runtime.

@@ -6,8 +6,22 @@
  */
 import { randomUUID } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
-import type { AgentSession, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentSession,
+  ExtensionUIContext,
+  KeybindingsManager as SdkKeybindingsManager,
+  Theme,
+} from "@earendil-works/pi-coding-agent";
 import { Theme as ThemeClass } from "@earendil-works/pi-coding-agent";
+import {
+  type Component,
+  type KeybindingDefinitions,
+  KeybindingsManager,
+  type OverlayHandle,
+  type OverlayOptions,
+  TUI,
+  TUI_KEYBINDINGS,
+} from "@earendil-works/pi-tui";
 import {
   createHostError,
   type HostEventName,
@@ -15,6 +29,7 @@ import {
 } from "@pideck/protocol";
 import type { MethodHandler as ServerMethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
+import { VirtualTerminal } from "./virtual-terminal.js";
 import { logger } from "./logger.js";
 
 type PendingUi = {
@@ -27,10 +42,13 @@ type PendingUi = {
   sessionRevision: number;
   resolve: (value: unknown) => void;
   reject: (err: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: ReturnType<typeof setTimeout> | undefined;
 };
 
 const pending = new Map<string, PendingUi>();
+
+/** Live ui.custom() panels — routes extensionUi.customInput/customResize to the virtual terminal. */
+const activeCustoms = new Map<string, VirtualTerminal>();
 
 export type ExtensionUiBridgeOptions = {
   emit: (event: HostEventName, payload: unknown) => void;
@@ -140,6 +158,67 @@ function createDesktopStubTheme(): Theme {
   } as const;
   return new ThemeClass(fg, bg, "256color", { name: "pideck-stub" });
 }
+
+/**
+ * App-level keybinding definitions mirrored from the SDK's core/keybindings
+ * (not exported through the package root). Extensions' custom panels check
+ * these via keybindings.matches(); unknown ids simply never match.
+ * Suspend is intentionally unbound (no job control in a GUI) and paste maps
+ * to the conventional desktop shortcut.
+ */
+const APP_PANEL_KEYBINDINGS: KeybindingDefinitions = {
+  "app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
+  "app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },
+  "app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },
+  "app.suspend": { defaultKeys: [], description: "Suspend to background" },
+  "app.thinking.cycle": { defaultKeys: "shift+tab", description: "Cycle thinking level" },
+  "app.model.cycleForward": { defaultKeys: "ctrl+p", description: "Cycle to next model" },
+  "app.model.cycleBackward": { defaultKeys: "shift+ctrl+p", description: "Cycle to previous model" },
+  "app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
+  "app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
+  "app.thinking.toggle": { defaultKeys: "ctrl+t", description: "Toggle thinking blocks" },
+  "app.session.toggleNamedFilter": { defaultKeys: "ctrl+n", description: "Toggle named session filter" },
+  "app.editor.external": { defaultKeys: "ctrl+g", description: "Open external editor" },
+  "app.message.copy": { defaultKeys: "ctrl+x", description: "Copy message to clipboard" },
+  "app.message.followUp": { defaultKeys: "alt+enter", description: "Queue follow-up message" },
+  "app.message.dequeue": { defaultKeys: "alt+up", description: "Restore queued messages" },
+  "app.clipboard.pasteImage": { defaultKeys: "ctrl+v", description: "Paste image from clipboard" },
+  "app.session.new": { defaultKeys: [], description: "Start a new session" },
+  "app.session.tree": { defaultKeys: [], description: "Open session tree" },
+  "app.session.fork": { defaultKeys: [], description: "Fork current session" },
+  "app.session.resume": { defaultKeys: [], description: "Resume a session" },
+  "app.tree.foldOrUp": { defaultKeys: ["alt+left", "ctrl+left"], description: "Fold tree branch or move up" },
+  "app.tree.unfoldOrDown": { defaultKeys: ["alt+right", "ctrl+right"], description: "Unfold tree branch or move down" },
+  "app.tree.editLabel": { defaultKeys: "shift+l", description: "Edit tree label" },
+  "app.tree.toggleLabelTimestamp": { defaultKeys: "shift+t", description: "Toggle tree label timestamps" },
+  "app.session.togglePath": { defaultKeys: "ctrl+p", description: "Toggle session path display" },
+  "app.session.toggleSort": { defaultKeys: "ctrl+s", description: "Toggle session sort mode" },
+  "app.session.rename": { defaultKeys: "ctrl+r", description: "Rename session" },
+  "app.session.delete": { defaultKeys: "ctrl+d", description: "Delete session" },
+  "app.session.deleteNoninvasive": { defaultKeys: "ctrl+backspace", description: "Delete session when query is empty" },
+  "app.models.save": { defaultKeys: "ctrl+s", description: "Save model selection" },
+  "app.models.enableAll": { defaultKeys: "ctrl+a", description: "Enable all models" },
+  "app.models.clearAll": { defaultKeys: "ctrl+x", description: "Clear all models" },
+  "app.models.toggleProvider": { defaultKeys: "ctrl+p", description: "Toggle all models for provider" },
+  "app.models.reorderUp": { defaultKeys: "alt+up", description: "Move model up in order" },
+  "app.models.reorderDown": { defaultKeys: "alt+down", description: "Move model down in order" },
+  "app.tree.filter.default": { defaultKeys: "ctrl+d", description: "Tree filter: default view" },
+  "app.tree.filter.noTools": { defaultKeys: "ctrl+t", description: "Tree filter: hide tool results" },
+  "app.tree.filter.userOnly": { defaultKeys: "ctrl+u", description: "Tree filter: user messages only" },
+  "app.tree.filter.labeledOnly": { defaultKeys: "ctrl+l", description: "Tree filter: labeled entries only" },
+  "app.tree.filter.all": { defaultKeys: "ctrl+a", description: "Tree filter: show all entries" },
+  "app.tree.filter.cycleForward": { defaultKeys: "ctrl+o", description: "Tree filter: cycle forward" },
+  "app.tree.filter.cycleBackward": { defaultKeys: "shift+ctrl+o", description: "Tree filter: cycle backward" },
+};
+
+const panelKeybindings = new KeybindingsManager({
+  ...TUI_KEYBINDINGS,
+  ...APP_PANEL_KEYBINDINGS,
+}) as SdkKeybindingsManager;
+
+/** Coalesce TUI writes into extensionUi.customFrame events (per differential render burst). */
+const CUSTOM_FRAME_FLUSH_MS = 16;
+const WIDGET_SNAPSHOT_WIDTH = 80;
 
 /**
  * Build ExtensionUIContext with positional SDK 0.80.7 signatures.
@@ -255,10 +334,28 @@ export function createExtensionUiContext(
     setWidget: (key, content, _options?) => {
       const sanitizedKey = stripAnsi(String(key));
       if (typeof content === "function") {
-        opts.emit("package.diagnostic", {
-          severity: "info",
-          message: `Extension setWidget factory unsupported in desktop for key=${sanitizedKey}`,
-        });
+        // Seam A: Component.render(width) is pure — render one static snapshot
+        // through the existing widgetChanged channel. Not live-updating.
+        try {
+          const widgetTui = new TUI(new VirtualTerminal({ onData: () => {} }));
+          const widgetComponent = content(widgetTui, desktopTheme);
+          const lines = widgetComponent.render(WIDGET_SNAPSHOT_WIDTH);
+          try {
+            widgetComponent.dispose?.();
+          } catch {
+            /* ignore dispose errors */
+          }
+          opts.emit("extensionUi.widgetChanged", {
+            key: sanitizedKey,
+            widget: lines.map((line) => stripAnsi(line)),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          opts.emit("package.diagnostic", {
+            severity: "info",
+            message: `Extension setWidget factory snapshot failed for key=${sanitizedKey}: ${stripAnsi(message)}`,
+          });
+        }
         return;
       }
       opts.emit("extensionUi.widgetChanged", {
@@ -269,11 +366,148 @@ export function createExtensionUiContext(
     setFooter: () => {},
     setHeader: () => {},
     setTitle: () => {},
-    custom: async () => {
-      // P0: TUI-only API — reject with explicit unsupported error (not silent cast).
-      throw new Error(
-        "ExtensionUIContext.custom is TUI-only and unsupported in PiDeck",
-      );
+    custom: async <T,>(
+      factory: (
+        tui: TUI,
+        theme: Theme,
+        keybindings: SdkKeybindingsManager,
+        done: (result: T) => void,
+      ) =>
+        | (Component & { dispose?(): void })
+        | Promise<Component & { dispose?(): void }>,
+      options?: {
+        overlay?: boolean;
+        overlayOptions?: OverlayOptions | (() => OverlayOptions);
+        onHandle?: (handle: OverlayHandle) => void;
+      },
+    ): Promise<T> => {
+      if (opts.waitUntilActive) {
+        await opts.waitUntilActive();
+      }
+      if (opts.isDisposed?.()) return undefined as T;
+      const requestId = randomUUID();
+      const id = identityAt();
+      return await new Promise<T>((resolveOuter, rejectOuter) => {
+        let frameBuffer = "";
+        let flushTimer: ReturnType<typeof setTimeout> | undefined;
+        const flushFrames = () => {
+          flushTimer = undefined;
+          if (!frameBuffer) return;
+          const data = frameBuffer;
+          frameBuffer = "";
+          opts.emit("extensionUi.customFrame", { requestId, data });
+        };
+        const vt = new VirtualTerminal({
+          onData: (data) => {
+            frameBuffer += data;
+            if (!flushTimer) flushTimer = setTimeout(flushFrames, CUSTOM_FRAME_FLUSH_MS);
+          },
+        });
+        const tui = new TUI(vt);
+        let component: (Component & { dispose?(): void }) | undefined;
+        let closed = false;
+        const teardown = () => {
+          closed = true;
+          pending.delete(requestId);
+          activeCustoms.delete(requestId);
+          try {
+            tui.stop();
+          } catch {
+            /* ignore stop errors */
+          }
+          try {
+            component?.dispose?.();
+          } catch {
+            /* ignore dispose errors */
+          }
+          flushFrames();
+          if (flushTimer) {
+            clearTimeout(flushTimer);
+            flushTimer = undefined;
+          }
+          opts.emit("extensionUi.customClosed", { requestId });
+        };
+        const finish = (result: unknown) => {
+          if (closed) return;
+          teardown();
+          resolveOuter(result as T);
+        };
+        const failure = (err: unknown) => {
+          if (closed) return;
+          teardown();
+          rejectOuter(err instanceof Error ? err : new Error(String(err)));
+        };
+
+        pending.set(requestId, {
+          requestId,
+          kind: "custom",
+          hostInstanceId: id.hostInstanceId,
+          workspaceId: id.workspaceId,
+          workspaceRevision: id.workspaceRevision,
+          sessionId: id.sessionId,
+          sessionRevision: id.sessionRevision,
+          resolve: (value) => finish(value),
+          reject: (err) => failure(err),
+          timer: undefined,
+        });
+        activeCustoms.set(requestId, vt);
+
+        opts.emit("extensionUi.customStarted", {
+          requestId,
+          cols: vt.columns,
+          rows: vt.rows,
+        });
+        tui.start();
+
+        const done = (result: T) => finish(result);
+        const failFactory = (err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          logger.warn(`Extension custom panel factory failed: ${message}`);
+          opts.emit("extensionUi.notification", {
+            message: `Extension panel failed: ${stripAnsi(message)}`,
+            level: "error",
+          });
+          failure(err);
+        };
+        // Call the factory synchronously (CLI-faithful) but capture a sync
+        // throw ourselves — inside this Promise executor it would otherwise
+        // reject the outer promise and skip teardown entirely.
+        let factoryResult:
+          | (Component & { dispose?(): void })
+          | Promise<Component & { dispose?(): void }>;
+        try {
+          factoryResult = factory(tui, desktopTheme, panelKeybindings, done);
+        } catch (err) {
+          failFactory(err);
+          return;
+        }
+        Promise.resolve(factoryResult)
+          .then((c) => {
+            if (closed) return;
+            component = c;
+            if (options?.overlay) {
+              const resolveOptions = (): OverlayOptions | undefined => {
+                if (options.overlayOptions) {
+                  return typeof options.overlayOptions === "function"
+                    ? options.overlayOptions()
+                    : options.overlayOptions;
+                }
+                const w = (c as { width?: OverlayOptions["width"] }).width;
+                return w ? { width: w } : undefined;
+              };
+              const handle = tui.showOverlay(c, resolveOptions());
+              options.onHandle?.(handle);
+            } else {
+              tui.addChild(c);
+              tui.setFocus(c);
+            }
+            tui.requestRender();
+          })
+          .catch((err) => {
+            if (closed) return;
+            failFactory(err);
+          });
+      });
     },
     pasteToEditor: () => {},
     setEditorText: () => {},
@@ -305,6 +539,19 @@ export function createExtensionUiContext(
 }
 
 /**
+ * Events that carry a blocking extension interaction. These bypass the
+ * readyForEvents gate: an extension can block inside session_start on a
+ * dialog or custom panel, and bindExtensions() will not settle until it is
+ * answered — holding these back would deadlock activation.
+ */
+const BLOCKING_EXTENSION_EVENTS: ReadonlySet<HostEventName> = new Set([
+  "extensionUi.request",
+  "extensionUi.customStarted",
+  "extensionUi.customFrame",
+  "extensionUi.customClosed",
+]);
+
+/**
  * Bind via public API only. Activation is deferred until the candidate session
  * identity is committed, so blocking session_start UI can be answered.
  */
@@ -331,7 +578,7 @@ export async function bindExtensionUi(
   };
   const emit = (event: HostEventName, payload: unknown) => {
     if (disposed) return;
-    if (!activated || (!readyForEvents && event !== "extensionUi.request")) {
+    if (!activated || (!readyForEvents && !BLOCKING_EXTENSION_EVENTS.has(event))) {
       queuedEvents.push({ event, payload });
       return;
     }
@@ -357,12 +604,17 @@ export async function bindExtensionUi(
       if (!activated && !disposed) {
         activated = true;
         releaseActivation();
-        const blocking = queuedEvents.filter((queued) => queued.event === "extensionUi.request");
+        const blocking = queuedEvents.filter((queued) =>
+          BLOCKING_EXTENSION_EVENTS.has(queued.event),
+        );
         for (const queued of blocking) {
           publishEvent(queued.event, queued.payload);
         }
         for (let i = queuedEvents.length - 1; i >= 0; i -= 1) {
-          if (queuedEvents[i]?.event === "extensionUi.request") queuedEvents.splice(i, 1);
+          const queued = queuedEvents[i];
+          if (queued && BLOCKING_EXTENSION_EVENTS.has(queued.event)) {
+            queuedEvents.splice(i, 1);
+          }
         }
       }
       await ready;
@@ -467,6 +719,26 @@ export function cancelAllPending(_reason: string): void {
   pending.clear();
 }
 
+/** Route frontend keyboard/paste data into a live custom panel. False if unknown/closed. */
+export function injectExtensionCustomInput(requestId: string, data: string): boolean {
+  const vt = activeCustoms.get(requestId);
+  if (!vt) return false;
+  vt.input(data);
+  return true;
+}
+
+/** Resize a live custom panel's virtual terminal. False if unknown/closed. */
+export function resizeExtensionCustom(
+  requestId: string,
+  cols: number,
+  rows: number,
+): boolean {
+  const vt = activeCustoms.get(requestId);
+  if (!vt) return false;
+  vt.resize(cols, rows);
+  return true;
+}
+
 export function createExtensionUiHandlers(
   factory: WorkspaceGraphFactory,
 ): Partial<Record<string, ServerMethodHandler>> {
@@ -492,6 +764,40 @@ export function createExtensionUiHandlers(
           error: createHostError(
             "STALE_REVISION",
             "Unknown, expired, or stale Extension UI requestId",
+          ),
+        };
+      }
+      return { result: { accepted: true } };
+    },
+    "extensionUi.customInput": async (ctx) => {
+      const stale = factory.checkIdentity(ctx.context, {
+        requireWorkspace: true,
+      });
+      if (stale) return { error: stale };
+
+      const params = ctx.params as { requestId: string; data: string };
+      if (!injectExtensionCustomInput(params.requestId, params.data)) {
+        return {
+          error: createHostError(
+            "STALE_REVISION",
+            "Unknown or closed extension panel requestId",
+          ),
+        };
+      }
+      return { result: { accepted: true } };
+    },
+    "extensionUi.customResize": async (ctx) => {
+      const stale = factory.checkIdentity(ctx.context, {
+        requireWorkspace: true,
+      });
+      if (stale) return { error: stale };
+
+      const params = ctx.params as { requestId: string; cols: number; rows: number };
+      if (!resizeExtensionCustom(params.requestId, params.cols, params.rows)) {
+        return {
+          error: createHostError(
+            "STALE_REVISION",
+            "Unknown or closed extension panel requestId",
           ),
         };
       }

@@ -26,6 +26,7 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.80.7",
     "@earendil-works/pi-coding-agent": "0.80.7",
+    "@earendil-works/pi-tui": "0.80.7",
     "@pideck/protocol": "workspace:*"
   },
   "devDependencies": {

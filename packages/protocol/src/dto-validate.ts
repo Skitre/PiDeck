@@ -825,6 +825,10 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
     case "agent.abortRetry":
     case "extensionUi.respond":
       return exactAccepted() ? null : `${method} result must be { accepted: true }`;
+    case "extensionUi.customInput":
+      return exactAccepted() ? null : `${method} result must be { accepted: true }`;
+    case "extensionUi.customResize":
+      return exactAccepted() ? null : `${method} result must be { accepted: true }`;
     case "agent.abort":
       return isPlainObject(result) &&
         hasExactKeys(result, ["aborted", "session"]) &&
@@ -1076,6 +1080,32 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
         isString(payload.level)
         ? null
         : "invalid extensionUi.notification payload";
+    case "extensionUi.customStarted":
+      return isPlainObject(payload) &&
+        hasExactKeys(payload, ["requestId", "cols", "rows"], ["title"]) &&
+        isString(payload.requestId) &&
+        isOptionalString(payload.title) &&
+        typeof payload.cols === "number" &&
+        Number.isInteger(payload.cols) &&
+        payload.cols > 0 &&
+        typeof payload.rows === "number" &&
+        Number.isInteger(payload.rows) &&
+        payload.rows > 0
+        ? null
+        : "invalid extensionUi.customStarted payload";
+    case "extensionUi.customFrame":
+      return isPlainObject(payload) &&
+        hasExactKeys(payload, ["requestId", "data"]) &&
+        isString(payload.requestId) &&
+        isString(payload.data)
+        ? null
+        : "invalid extensionUi.customFrame payload";
+    case "extensionUi.customClosed":
+      return isPlainObject(payload) &&
+        hasExactKeys(payload, ["requestId"]) &&
+        isString(payload.requestId)
+        ? null
+        : "invalid extensionUi.customClosed payload";
     default:
       // Exhaustiveness guard — same contract as validateMethodResultShape.
       return assertNeverShape(event, "event payload");

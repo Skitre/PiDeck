@@ -37,10 +37,29 @@ export default function uiBlockingExtension(pi: ExtensionAPI) {
     const confirmed = await ui.confirm("Confirm fixture", "Proceed with beta?");
     const typed = await ui.input("Fixture input", "type here");
 
+    // ui.custom round-trip: inline component (no pi-tui import — the fixture
+    // runs from a tmpdir where runtime deps do not resolve).
+    const options = ["one", "two", "three"];
+    let index = 0;
+    const customPicked = await ui.custom<string>((tui, _theme, _keybindings, done) => ({
+      render: () => options.map((option, i) => (i === index ? `> ${option}` : `  ${option}`)),
+      invalidate: () => {},
+      handleInput: (data: string) => {
+        if (data === "\x1b[B") index = Math.min(options.length - 1, index + 1);
+        else if (data === "\x1b[A") index = Math.max(0, index - 1);
+        else if (data === "\r") {
+          done(options[index]!);
+          return;
+        }
+        tui.requestRender();
+      },
+    }));
+
     const body = [
       `selected=${selected ?? ""}`,
       `confirmed=${String(confirmed)}`,
       `typed=${typed ?? ""}`,
+      `customPicked=${customPicked ?? ""}`,
       `handler=session_start`,
       `hasUI=true`,
       `nonce=${nonce}`,

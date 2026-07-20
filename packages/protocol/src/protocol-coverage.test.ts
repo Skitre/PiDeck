@@ -157,6 +157,8 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "piSettings.get": null,
   "piSettings.patch": { patch: {} },
   "extensionUi.respond": { requestId: EXTENSION_REQUEST_ID, status: "resolved", value: true },
+  "extensionUi.customInput": { requestId: EXTENSION_REQUEST_ID, data: "\r" },
+  "extensionUi.customResize": { requestId: EXTENSION_REQUEST_ID, cols: 100, rows: 32 },
 };
 
 function contextFor(method: HostMethod): Record<string, unknown> {
@@ -271,6 +273,10 @@ function invalidParams(method: HostMethod): unknown {
       return {};
     case "extensionUi.respond":
       return { requestId: "r", status: "maybe" };
+    case "extensionUi.customInput":
+      return { requestId: EXTENSION_REQUEST_ID, data: "" };
+    case "extensionUi.customResize":
+      return { requestId: EXTENSION_REQUEST_ID, cols: 0, rows: 32 };
     default:
       return { __invalid: true };
   }
@@ -450,6 +456,14 @@ describe("protocol coverage — events", () => {
     "extensionUi.statusChanged": { text: "working" },
     "extensionUi.widgetChanged": { key: "k", widget: null },
     "extensionUi.notification": { message: "hi", level: "info" },
+    "extensionUi.customStarted": {
+      requestId: EXTENSION_REQUEST_ID,
+      title: "MCP",
+      cols: 100,
+      rows: 32,
+    },
+    "extensionUi.customFrame": { requestId: EXTENSION_REQUEST_ID, data: "\x1b[2J" },
+    "extensionUi.customClosed": { requestId: EXTENSION_REQUEST_ID },
   };
 
   for (const event of HOST_EVENT_NAMES) {

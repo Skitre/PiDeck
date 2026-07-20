@@ -4,6 +4,7 @@ import { hostClient } from "../lib/bridge/host-client";
 import { createTauriTransport } from "../lib/bridge/tauri-transport";
 import { fullRehydrate } from "../lib/bridge/rehydrate";
 import { Sidebar } from "../components/Sidebar";
+import { RightDock } from "../components/RightDock";
 import { WindowControls } from "../components/WindowControls";
 import { ChatPage } from "../features/chat/ChatPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -23,6 +24,10 @@ import {
   persistDesktopSettings,
   persistRecentDesktopLocation,
 } from "../lib/desktop-settings";
+import {
+  clearExtensionTerminal as clearExtensionTerminalFrames,
+  pushExtensionTerminalFrame,
+} from "../lib/chat/extension-terminal-bus";
 import type { HostEventEnvelope, HostEventPayloadMap } from "@pideck/protocol";
 
 let rehydrateInFlight: Promise<void> | null = null;
@@ -311,6 +316,32 @@ function handleHostEvent(
       break;
     case "extensionUi.notification":
       store.pushNotification(event.payload.message ?? "", event.payload.level ?? "info");
+      break;
+    case "extensionUi.customStarted":
+      if (!event.sessionId) {
+        requestRecovery("extensionUi.customStarted missing session identity");
+        return;
+      }
+      store.openExtensionTerminal({
+        requestId: event.payload.requestId,
+        title: event.payload.title,
+        cols: event.payload.cols,
+        rows: event.payload.rows,
+        context: {
+          expectedHostInstanceId: event.hostInstanceId,
+          expectedWorkspaceId: event.workspaceId,
+          expectedWorkspaceRevision: event.workspaceRevision,
+          expectedSessionId: event.sessionId,
+          expectedSessionRevision: event.sessionRevision,
+        },
+      });
+      break;
+    case "extensionUi.customFrame":
+      pushExtensionTerminalFrame(event.payload.requestId, event.payload.data);
+      break;
+    case "extensionUi.customClosed":
+      clearExtensionTerminalFrames(event.payload.requestId);
+      store.closeExtensionTerminal(event.payload.requestId);
       break;
     case "model.changed":
       applyModelChanged(event.payload);
@@ -681,6 +712,7 @@ export function App() {
             </>
           )}
         </main>
+        <RightDock />
       </div>
       {page !== "chat" && (
         <SettingsOverlay section={page === "packages" ? "packages" : "general"} />

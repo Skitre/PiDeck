@@ -24,7 +24,7 @@ Implemented in `packages/protocol` + handlers in `packages/pi-host`:
 - `model.list` / `setCurrent` / `setThinkingLevel`
 - `package.*` / `resource.setTopLevelEnabled`
 - `piSettings.get` / `patch`
-- `extensionUi.respond`
+- `extensionUi.respond` / `customInput` / `customResize`
 
 Desktop-only (Rust, not Host): `desktopSettings.get` / `patch`, `desktop.openPath`.
 
@@ -37,6 +37,7 @@ See `HOST_EVENT_NAMES` in `packages/protocol/src/events.ts`. Notable:
 - `session.snapshot`, `agent.event`, `agent.toolsChanged`
 - `package.progress`, `package.snapshot`
 - `extensionUi.request` / status / widget / notification
+- `extensionUi.customStarted` / `customFrame` / `customClosed` — ui.custom() panels: the host runs a real pi-tui TUI over a virtual terminal (`packages/pi-host/src/virtual-terminal.ts`) and streams its ANSI output as frames; the desktop renders them in an xterm.js dock panel and feeds keyboard input back via `extensionUi.customInput`
 
 ## Runtime validation
 

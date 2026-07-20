@@ -34,6 +34,7 @@ import {
   type SessionCatalogState,
   type SessionRuntimeState,
 } from "./session-catalog";
+import { sidebarPref } from "../sidebar-prefs";
 
 export type NavPage = "chat" | "packages" | "settings";
 
@@ -93,6 +94,37 @@ export type ExtensionWidgetState = {
   sessionRevision: number;
 };
 
+/** Live ui.custom() panel rendered in the right dock's terminal tab. */
+export type ExtensionTerminalState = {
+  requestId: string;
+  title?: string;
+  cols: number;
+  rows: number;
+  context: ActiveSessionContext;
+};
+
+/**
+ * Close the extension terminal panel, restoring the dock to its pre-panel
+ * state unless the user toggled the dock manually while the panel was open.
+ */
+function resetExtensionTerminal(state: {
+  extensionTerminal: ExtensionTerminalState | null;
+  dockOpen: boolean;
+  dockRestoreOnPanelClose: boolean | null;
+}): {
+  extensionTerminal: null;
+  dockOpen: boolean;
+  dockRestoreOnPanelClose: null;
+} {
+  return {
+    extensionTerminal: null,
+    dockOpen: state.extensionTerminal
+      ? (state.dockRestoreOnPanelClose ?? state.dockOpen)
+      : state.dockOpen,
+    dockRestoreOnPanelClose: null,
+  };
+}
+
 export type AppState = EpochState & {
   page: NavPage;
   desktopSettings: DesktopSettings | null;
@@ -101,6 +133,11 @@ export type AppState = EpochState & {
   extensionUiQueue: ExtensionUiRequestState[];
   extensionStatus: string | null;
   extensionWidgets: Record<string, ExtensionWidgetState>;
+  extensionTerminal: ExtensionTerminalState | null;
+  /** Right dock visibility. Auto-opens for extension panels; manual toggles persist. */
+  dockOpen: boolean;
+  /** Dock state to restore when the auto-opened panel closes (null = user took over). */
+  dockRestoreOnPanelClose: boolean | null;
   packageProgress: PackageProgressState | null;
   packageRetry: PackageRetryState | null;
   thinkingLevels: string[];
@@ -128,6 +165,9 @@ export type AppState = EpochState & {
   setTrustOptions: (o: TrustOption[] | null) => void;
   setExtensionUiRequest: (r: ExtensionUiRequestState | null) => void;
   enqueueExtensionUiRequest: (r: ExtensionUiRequestState) => void;
+  openExtensionTerminal: (t: ExtensionTerminalState) => void;
+  closeExtensionTerminal: (requestId: string) => void;
+  setDockOpen: (open: boolean) => void;
   setExtensionStatus: (s: string | null) => void;
   setExtensionWidget: (widget: ExtensionWidgetState) => void;
   setPackageProgress: (progress: PackageProgressState | null) => void;
@@ -184,6 +224,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   extensionUiQueue: [],
   extensionStatus: null,
   extensionWidgets: {},
+  extensionTerminal: null,
+  dockOpen: sidebarPref("pideck.dock.open"),
+  dockRestoreOnPanelClose: null,
   packageProgress: null,
   packageRetry: null,
   thinkingLevels: [],
@@ -205,6 +248,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiQueue: [],
       extensionStatus: null,
       extensionWidgets: {},
+      ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,
       thinkingLevels: [],
@@ -248,6 +292,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionUiQueue: [],
             extensionStatus: null,
             extensionWidgets: {},
+            ...resetExtensionTerminal(get()),
             packageProgress: null,
             packageRetry: null,
             thinkingLevels: [],
@@ -266,6 +311,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiQueue: [],
       extensionStatus: null,
       extensionWidgets: {},
+      ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,
       thinkingLevels: [],
@@ -316,6 +362,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? {
             extensionStatus: null,
             extensionWidgets: {},
+            ...resetExtensionTerminal(current),
             packageProgress: null,
             packageRetry: null,
             thinkingLevels: [],
@@ -365,6 +412,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionUiQueue: [],
             extensionStatus: null,
             extensionWidgets: {},
+            ...resetExtensionTerminal(previous),
             packageProgress: null,
             packageRetry: null,
             thinkingLevels: [],
@@ -443,6 +491,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { extensionUiQueue: nextQueue };
       }
       return { extensionUiQueue: [...queue, request] };
+    }),
+  openExtensionTerminal: (panel) =>
+    set((state) => ({
+      extensionTerminal: panel,
+      dockOpen: true,
+      // Keep the original pre-panel dock state if one panel replaces another.
+      dockRestoreOnPanelClose: state.extensionTerminal
+        ? state.dockRestoreOnPanelClose
+        : state.dockOpen,
+    })),
+  closeExtensionTerminal: (requestId) =>
+    set((state) => {
+      if (state.extensionTerminal?.requestId !== requestId) return {};
+      return resetExtensionTerminal(state);
+    }),
+  setDockOpen: (open) =>
+    set({
+      dockOpen: open,
+      // Manual toggle takes over — the panel close no longer restores.
+      dockRestoreOnPanelClose: null,
     }),
   setExtensionStatus: (extensionStatus) => set({ extensionStatus }),
   setExtensionWidget: (extensionWidget) =>
@@ -544,6 +612,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiQueue: [],
       extensionStatus: null,
       extensionWidgets: {},
+      ...resetExtensionTerminal(current),
       packageProgress: null,
       packageRetry: null,
     });
@@ -557,6 +626,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiQueue: [],
       extensionStatus: null,
       extensionWidgets: {},
+      ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,
       thinkingLevels: [],
