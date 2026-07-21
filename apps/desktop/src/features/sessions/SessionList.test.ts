@@ -2,11 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { SessionSnapshot } from "@pideck/protocol";
 import {
   includeActiveSession,
+  canDeleteSession,
   canReloadSession,
+  canRenameSession,
   filterSessionItems,
   requestSessionListWithRetry,
   sessionDisplayName,
   sessionRuntimeLabel,
+  sessionStatusDotClass,
   shouldRetrySessionList,
 } from "./SessionList";
 
@@ -37,6 +40,10 @@ const active = {
 } satisfies SessionSnapshot;
 
 describe("includeActiveSession", () => {
+  it("keeps a blank new conversation out of the list", () => {
+    expect(includeActiveSession([], { ...active, messages: [] })).toEqual([]);
+  });
+
   it("shows an active conversation before session.list persists it", () => {
     expect(includeActiveSession([], active)).toMatchObject([
       {
@@ -80,6 +87,16 @@ describe("sessionRuntimeLabel", () => {
   });
 });
 
+describe("sessionStatusDotClass", () => {
+  it("shows persistent activity states without flashing for session startup", () => {
+    expect(sessionStatusDotClass("running")).toContain("bg-success");
+    expect(sessionStatusDotClass("queued")).toBe("bg-warning");
+    expect(sessionStatusDotClass("error")).toBe("bg-danger");
+    expect(sessionStatusDotClass("starting")).toBeNull();
+    expect(sessionStatusDotClass("inactive")).toBeNull();
+  });
+});
+
 describe("canReloadSession", () => {
   const item = {
     sessionId: "active-session",
@@ -95,6 +112,83 @@ describe("canReloadSession", () => {
     expect(canReloadSession({ ...item, archived: true }, active)).toBe(false);
     expect(canReloadSession({ ...item, sessionId: "other" }, active)).toBe(false);
     expect(canReloadSession(item, { ...active, sessionPath: undefined })).toBe(false);
+  });
+});
+
+describe("canRenameSession", () => {
+  const item = {
+    sessionId: "inactive-session",
+    sessionPath: "C:/sessions/inactive.jsonl",
+    cwd: "C:/workspace",
+    updatedAt: 1,
+    runtimeState: "inactive" as const,
+  };
+
+  it("allows inactive files and idle active Sessions", () => {
+    expect(canRenameSession(item, active)).toBe(true);
+    expect(
+      canRenameSession(
+        { ...item, sessionId: active.sessionId, runtimeState: "idle" },
+        active,
+      ),
+    ).toBe(true);
+  });
+
+  it("blocks active or retained Sessions while their Runtime is busy", () => {
+    expect(
+      canRenameSession(
+        { ...item, sessionId: active.sessionId, runtimeState: "running" },
+        { ...active, isIdle: false },
+      ),
+    ).toBe(false);
+    expect(canRenameSession({ ...item, runtimeState: "running" }, active)).toBe(false);
+    expect(canRenameSession({ ...item, runtimeState: "idle" }, active)).toBe(false);
+  });
+});
+
+describe("canDeleteSession", () => {
+  const item = {
+    sessionId: "inactive-session",
+    sessionPath: "C:/sessions/inactive.jsonl",
+    cwd: "C:/workspace",
+    updatedAt: 1,
+    runtimeState: "inactive" as const,
+  };
+
+  it("allows inactive and archived Sessions", () => {
+    expect(canDeleteSession(item, active)).toBe(true);
+    expect(canDeleteSession({ ...item, archived: true }, active)).toBe(true);
+  });
+
+  it("blocks the currently viewed Session even when it is idle", () => {
+    expect(
+      canDeleteSession(
+        { ...item, sessionId: active.sessionId, runtimeState: "idle" },
+        active,
+      ),
+    ).toBe(false);
+    expect(
+      canDeleteSession(
+        {
+          ...item,
+          sessionId: active.sessionId,
+          runtimeState: "inactive",
+          archived: true,
+        },
+        active,
+      ),
+    ).toBe(false);
+  });
+
+  it("blocks running and retained Runtime Sessions", () => {
+    expect(canDeleteSession({ ...item, runtimeState: "running" }, active)).toBe(false);
+    expect(canDeleteSession({ ...item, runtimeState: "idle" }, active)).toBe(false);
+    expect(
+      canDeleteSession(
+        { ...item, sessionId: active.sessionId, runtimeState: "running" },
+        { ...active, isIdle: false },
+      ),
+    ).toBe(false);
   });
 });
 

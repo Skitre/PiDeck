@@ -343,6 +343,22 @@ describe("deep result/event validation (C3)", () => {
     expect(invalidArchived.ok).toBe(false);
   });
 
+  it("validates session.rename results", () => {
+    expect(
+      validateSuccessResult("session.rename", {
+        sessionId: SESSION_ID,
+        name: "Renamed session",
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateSuccessResult("session.rename", {
+        sessionId: SESSION_ID,
+        name: "Renamed session",
+        unexpected: true,
+      }).ok,
+    ).toBe(false);
+  });
+
   it("parseHostResponse deep-fails wrong result shape", () => {
     const r = parseHostResponse({
       protocolVersion: 1,

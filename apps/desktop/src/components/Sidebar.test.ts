@@ -1,10 +1,12 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SidebarLayout } from "./Sidebar";
 import type { NavPage } from "../lib/stores/app-store";
 
 describe("Sidebar", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it.each<NavPage>(["chat", "packages", "settings"])(
     "keeps the conversation workspace mounted on the %s page",
     (page) => {
@@ -20,4 +22,20 @@ describe("Sidebar", () => {
       expect(html).not.toContain(">Packages<");
     },
   );
+
+  it("keeps only the hover edge control mounted when the sidebar is collapsed", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => (key === "pideck.sidebar.collapsed" ? "1" : null),
+      setItem: vi.fn(),
+    });
+
+    const html = renderToStaticMarkup(
+      createElement(SidebarLayout, { page: "chat", setPage: vi.fn() }),
+    );
+
+    expect(html).toContain('aria-label="Expand left sidebar"');
+    expect(html).toContain("margin-left:-268px");
+    expect(html).not.toContain("New conversation");
+    expect(html).not.toContain("Recent conversations");
+  });
 });

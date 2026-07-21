@@ -26,7 +26,7 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
     steeringMode: "all",
     followUpMode: "all",
     pending: { steering: [], followUp: [] },
-    messages: [],
+    messages: [{ role: "user", content: "hi" }],
     tools: {
       revision: 1,
       workspaceId: "w1",
@@ -40,6 +40,21 @@ function snapshot(overrides: Partial<SessionSnapshot> = {}): SessionSnapshot {
 }
 
 describe("session catalog", () => {
+  it("keeps a new Session out of the catalog until its first message", () => {
+    let catalog = upsertSessionSnapshot(
+      emptySessionCatalog(),
+      "w1",
+      snapshot({ messages: [] }),
+      10,
+    );
+    expect(sessionCatalogItems(catalog)).toEqual([]);
+
+    catalog = upsertSessionSnapshot(catalog, "w1", snapshot(), 20);
+    expect(sessionCatalogItems(catalog)).toMatchObject([
+      { sessionId: "s1", messageCount: 1 },
+    ]);
+  });
+
   it("replaces persisted summaries without discarding live runtime state", () => {
     let catalog = replaceSessionCatalog(emptySessionCatalog(), "w1", [
       {
@@ -90,6 +105,13 @@ describe("session catalog", () => {
     expect(sessionCatalogItems(catalog)).toMatchObject([
       { sessionId: "s1", runtimeState: "idle" },
     ]);
+  });
+
+  it("drops stale error entries missing from session.list", () => {
+    let catalog = upsertSessionSnapshot(emptySessionCatalog(), "w1", snapshot(), 10);
+    catalog = setSessionRuntimeState(catalog, "s1", "error", "Session not found");
+    catalog = replaceSessionCatalog(catalog, "w1", []);
+    expect(sessionCatalogItems(catalog)).toEqual([]);
   });
 
   it("sorts snapshots by latest activity and updates names", () => {

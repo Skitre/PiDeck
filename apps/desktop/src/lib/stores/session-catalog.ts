@@ -46,7 +46,13 @@ export function replaceSessionCatalog(
 
   if (sameWorkspace) {
     for (const id of current.order) {
-      if (!entries[id] && current.entries[id]?.runtimeState !== "inactive") {
+      const runtimeState = current.entries[id]?.runtimeState;
+      if (
+        !entries[id] &&
+        runtimeState !== undefined &&
+        runtimeState !== "inactive" &&
+        runtimeState !== "error"
+      ) {
         entries[id] = current.entries[id];
       }
     }
@@ -68,6 +74,10 @@ export function upsertSessionSnapshot(
 ): SessionCatalogState {
   const base = current.workspaceId === workspaceId ? current : emptySessionCatalog();
   const previous = base.entries[snapshot.sessionId];
+  // SessionManager assigns a future file path immediately, but does not write
+  // the JSONL file until the first message. Keep that blank Session out of the
+  // sidebar; the first user-message snapshot will insert it normally.
+  if (!previous && snapshot.messages.length === 0) return base;
   const runtimeState = runtimeStateFromSnapshot(snapshot);
   const entry: SessionCatalogEntry = {
     sessionId: snapshot.sessionId,

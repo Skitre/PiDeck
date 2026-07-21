@@ -93,6 +93,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "session.cleanupArchived": null,
   "session.getSnapshot": null,
   "session.setName": { name: "n" },
+  "session.rename": { sessionId: SESSION_ID, sessionPath: "/s.jsonl", name: "n" },
   "session.getEntries": null,
   "session.getTree": null,
   "session.getStats": null,
@@ -229,6 +230,8 @@ function invalidParams(method: HostMethod): unknown {
       return { sessionId: "not-a-uuid", sessionPath: "" };
     case "session.setName":
       return {};
+    case "session.rename":
+      return { sessionId: "not-a-uuid", sessionPath: "", name: "" };
     case "session.getEntries":
       return "bad";
     case "agent.prompt":

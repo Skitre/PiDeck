@@ -54,7 +54,7 @@ function createFixture() {
     },
   } as unknown as PiHostServer);
 
-  return { root, cwd: resolvedCwd, activeDir, factory };
+  return { root, cwd: resolvedCwd, activeDir, factory, graph };
 }
 
 function writeSession(dir: string, sessionId: string, cwd: string): string {
@@ -82,6 +82,36 @@ function writeSession(dir: string, sessionId: string, cwd: string): string {
 }
 
 describe("Session file lifecycle", () => {
+  it("renames inactive and archived Sessions without activating them", async () => {
+    const fixture = createFixture();
+    const sessionPath = writeSession(fixture.activeDir, SESSION_ID, fixture.cwd);
+
+    const renamed = await fixture.factory.renameSession(
+      "rename-active-file",
+      SESSION_ID,
+      sessionPath,
+      "Pinned investigation",
+    );
+    expect(renamed).toEqual({ sessionId: SESSION_ID, name: "Pinned investigation" });
+    expect(await fixture.factory.listSessions()).toEqual([
+      expect.objectContaining({ id: SESSION_ID, name: "Pinned investigation" }),
+    ]);
+
+    const archived = await fixture.factory.archiveSession("archive", SESSION_ID, sessionPath);
+    expect("error" in archived).toBe(false);
+    if ("error" in archived) return;
+    const renamedArchived = await fixture.factory.renameSession(
+      "rename-archived-file",
+      SESSION_ID,
+      archived.sessionPath,
+      "Archived investigation",
+    );
+    expect(renamedArchived).toEqual({
+      sessionId: SESSION_ID,
+      name: "Archived investigation",
+    });
+  });
+
   it("archives, lists, restores, and permanently deletes a Session", async () => {
     const fixture = createFixture();
     const originalPath = writeSession(fixture.activeDir, SESSION_ID, fixture.cwd);
@@ -115,13 +145,68 @@ describe("Session file lifecycle", () => {
     );
     expect("error" in archivedAgain).toBe(false);
     if ("error" in archivedAgain) return;
-    const deleted = await fixture.factory.deleteArchivedSession(
+    const deleted = await fixture.factory.deleteSession(
       "delete",
       SESSION_ID,
       archivedAgain.sessionPath,
     );
     expect(deleted).toEqual({ sessionId: SESSION_ID, deleted: true });
     expect(await fixture.factory.listSessions()).toEqual([]);
+  });
+
+  it("permanently deletes an inactive Session without archiving it first", async () => {
+    const fixture = createFixture();
+    const sessionPath = writeSession(fixture.activeDir, SESSION_ID, fixture.cwd);
+
+    const deleted = await fixture.factory.deleteSession(
+      "delete-inactive",
+      SESSION_ID,
+      sessionPath,
+    );
+
+    expect(deleted).toEqual({ sessionId: SESSION_ID, deleted: true });
+    expect(existsSync(sessionPath)).toBe(false);
+  });
+
+  it("refuses to delete the active Session or a running background Runtime", async () => {
+    const activeFixture = createFixture();
+    const activePath = writeSession(
+      activeFixture.activeDir,
+      SESSION_ID,
+      activeFixture.cwd,
+    );
+    activeFixture.graph.sessionSnapshot = {
+      sessionId: SESSION_ID,
+      sessionPath: activePath,
+    } as never;
+
+    const activeDelete = await activeFixture.factory.deleteSession(
+      "delete-active",
+      SESSION_ID,
+      activePath,
+    );
+    expect("error" in activeDelete && activeDelete.error.code).toBe("AGENT_BUSY");
+    expect(existsSync(activePath)).toBe(true);
+
+    const backgroundFixture = createFixture();
+    const backgroundPath = writeSession(
+      backgroundFixture.activeDir,
+      SESSION_ID,
+      backgroundFixture.cwd,
+    );
+    backgroundFixture.graph.backgroundSessions.set(SESSION_ID, {
+      sessionId: SESSION_ID,
+      agentSession: { isIdle: false },
+      sessionSnapshot: { sessionPath: backgroundPath },
+    } as never);
+
+    const backgroundDelete = await backgroundFixture.factory.deleteSession(
+      "delete-running-background",
+      SESSION_ID,
+      backgroundPath,
+    );
+    expect("error" in backgroundDelete && backgroundDelete.error.code).toBe("AGENT_BUSY");
+    expect(existsSync(backgroundPath)).toBe(true);
   });
 
   it("rejects forged paths and Sessions owned by a Runtime", async () => {

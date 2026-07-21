@@ -5,6 +5,8 @@ import {
   ChevronDown,
   MoreHorizontal,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   RefreshCw,
   Search,
@@ -15,6 +17,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import { persistDesktopSettings } from "../../lib/desktop-settings";
+import {
+  prioritizePinnedSessions,
+  readPinnedSessionIds,
+  writePinnedSessionIds,
+} from "../../lib/session-pins";
 import {
   captureRequestGeneration,
   activeSessionContext,
@@ -40,7 +47,7 @@ export function includeActiveSession(
   items: SessionSummary[],
   active: SessionSnapshot | null,
 ): SessionSummary[] {
-  if (!active?.sessionPath) return items;
+  if (!active?.sessionPath || active.messages.length === 0) return items;
   const listed = items.find((item) => item.sessionId === active.sessionId);
   const current: SessionSummary = {
     sessionId: active.sessionId,
@@ -65,7 +72,6 @@ export function sessionRuntimeLabel(state: SessionRuntimeState): string {
 export function sessionStatusDotClass(state: SessionRuntimeState): string | null {
   switch (state) {
     case "running":
-    case "starting":
       return "bg-success animate-pulse";
     case "queued":
       return "bg-warning";
@@ -102,6 +108,23 @@ export function canReloadSession(
       session.sessionPath &&
       session.isIdle,
   );
+}
+
+export function canRenameSession(
+  item: SessionCatalogEntry,
+  session: SessionSnapshot | null,
+): boolean {
+  if (session?.sessionId === item.sessionId) return session.isIdle;
+  return item.runtimeState === "inactive" || item.runtimeState === "error";
+}
+
+export function canDeleteSession(
+  item: SessionCatalogEntry,
+  session: SessionSnapshot | null,
+): boolean {
+  if (session?.sessionId === item.sessionId) return false;
+  if (item.archived) return true;
+  return item.runtimeState === "inactive" || item.runtimeState === "error";
 }
 
 export function shouldRetrySessionList(error: {
@@ -149,6 +172,7 @@ export function SessionList({
   const replaceSessionCatalog = useAppStore((s) => s.replaceSessionCatalog);
   const clearSessionCatalog = useAppStore((s) => s.clearSessionCatalog);
   const setSessionRuntimeState = useAppStore((s) => s.setSessionRuntimeState);
+  const updateSessionCatalogInfo = useAppStore((s) => s.updateSessionCatalogInfo);
   const pushNotification = useAppStore((s) => s.pushNotification);
   const [sessionMutationPending, setSessionMutationPending] = useState(false);
   const [query, setQuery] = useState("");
@@ -157,34 +181,47 @@ export function SessionList({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState("");
   const [menuSessionId, setMenuSessionId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(
+    null,
+  );
   const [confirmAction, setConfirmAction] = useState<SessionConfirmAction | null>(null);
+  const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(() =>
+    readPinnedSessionIds(useAppStore.getState().workspace?.id),
+  );
   const refreshRequest = useRef(0);
   const mutationRequest = useRef(0);
   const itemsWorkspaceId = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!host || !workspace?.servicesReady) {
+    const currentAtStart = useAppStore.getState();
+    const currentHost = currentAtStart.host;
+    const currentWorkspace = currentAtStart.workspace;
+    if (!currentHost || !currentWorkspace?.servicesReady) {
       refreshRequest.current += 1;
       itemsWorkspaceId.current = null;
       clearSessionCatalog();
       return;
     }
-    if (connecting || rehydrating || desynchronized) {
+    if (
+      currentAtStart.connecting ||
+      currentAtStart.rehydrating ||
+      currentAtStart.desynchronized
+    ) {
       refreshRequest.current += 1;
       return;
     }
-    if (itemsWorkspaceId.current !== workspace.id) {
-      itemsWorkspaceId.current = workspace.id;
+    if (itemsWorkspaceId.current !== currentWorkspace.id) {
+      itemsWorkspaceId.current = currentWorkspace.id;
     }
     const request = ++refreshRequest.current;
-    const expectedHostId = host.hostInstanceId;
-    const expectedWorkspaceId = workspace.id;
-    const expectedWorkspaceRevision = workspace.revision;
+    const expectedHostId = currentHost.hostInstanceId;
+    const expectedWorkspaceId = currentWorkspace.id;
+    const expectedWorkspaceRevision = currentWorkspace.revision;
     try {
       const res = await requestSessionListWithRetry(() =>
         hostClient.request(
           "session.list",
-          workspaceContext(host, workspace),
+          workspaceContext(currentHost, currentWorkspace),
           null,
         ),
       );
@@ -206,37 +243,52 @@ export function SessionList({
     }
   }, [
     clearSessionCatalog,
-    connecting,
-    desynchronized,
-    host,
-    rehydrating,
     replaceSessionCatalog,
-    workspace,
   ]);
 
   useEffect(() => {
     void refresh();
-  }, [refresh, session?.sessionId, session?.name]);
+  }, [
+    connecting,
+    desynchronized,
+    host?.hostInstanceId,
+    refresh,
+    rehydrating,
+    workspace?.id,
+    workspace?.revision,
+    workspace?.servicesReady,
+  ]);
 
   useEffect(() => {
-    if (editingSessionId && editingSessionId !== session?.sessionId) {
-      setEditingSessionId(null);
-      setNameDraft("");
-    }
-  }, [editingSessionId, session?.sessionId]);
+    setPinnedSessionIds(readPinnedSessionIds(workspace?.id));
+    setEditingSessionId(null);
+    setNameDraft("");
+    setMenuSessionId(null);
+    setMenuPosition(null);
+  }, [workspace?.id]);
 
   useEffect(() => {
     if (!menuSessionId) return;
-    const closeMenu = (event: PointerEvent) => {
+    const closeSessionMenu = () => {
+      setMenuSessionId(null);
+      setMenuPosition(null);
+    };
+    const handlePointerDown = (event: PointerEvent) => {
       if (
         !(event.target instanceof Element) ||
         !event.target.closest("[data-session-menu]")
       ) {
-        setMenuSessionId(null);
+        closeSessionMenu();
       }
     };
-    document.addEventListener("pointerdown", closeMenu);
-    return () => document.removeEventListener("pointerdown", closeMenu);
+    document.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("resize", closeSessionMenu);
+    window.addEventListener("scroll", closeSessionMenu, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", closeSessionMenu);
+      window.removeEventListener("scroll", closeSessionMenu, true);
+    };
   }, [menuSessionId]);
 
   async function createSession() {
@@ -281,10 +333,6 @@ export function SessionList({
     const target = sessionCatalogItems(sessionCatalog).find(
       (item) => item.sessionPath === path,
     );
-    const previousRuntimeState = target?.runtimeState;
-    if (target && target.runtimeState !== "running" && target.runtimeState !== "queued") {
-      setSessionRuntimeState(target.sessionId, "starting");
-    }
     setSessionMutationPending(true);
     try {
       const res = await hostClient.request(
@@ -301,16 +349,12 @@ export function SessionList({
         return;
       }
       if (!res.ok) {
-        if (target) {
-          if (res.error?.code === "AGENT_BUSY" && previousRuntimeState) {
-            setSessionRuntimeState(target.sessionId, previousRuntimeState);
-          } else {
-            setSessionRuntimeState(
-              target.sessionId,
-              "error",
-              res.error?.message ?? "Open session failed",
-            );
-          }
+        if (target && res.error?.code !== "AGENT_BUSY") {
+          setSessionRuntimeState(
+            target.sessionId,
+            "error",
+            res.error?.message ?? "Open session failed",
+          );
         }
         pushNotification(res.error?.message ?? "Open session failed", "error");
         return;
@@ -331,7 +375,8 @@ export function SessionList({
   }
 
   function beginRename(item: SessionCatalogEntry) {
-    if (item.sessionId !== session?.sessionId || sessionMutationPending) return;
+    if (!canRenameSession(item, session) || sessionMutationPending) return;
+    setMenuSessionId(null);
     setEditingSessionId(item.sessionId);
     setNameDraft(sessionDisplayName(item));
   }
@@ -342,8 +387,11 @@ export function SessionList({
   }
 
   async function renameSession() {
-    if (!host || !workspace || !session || sessionMutationPending) return;
-    if (editingSessionId !== session.sessionId) return;
+    if (!host || !workspace || !editingSessionId || sessionMutationPending) return;
+    const item = sessionCatalogItems(sessionCatalog).find(
+      (entry) => entry.sessionId === editingSessionId,
+    );
+    if (!item || !canRenameSession(item, session)) return;
     const name = nameDraft.trim();
     if (!name) {
       pushNotification("Session name cannot be empty", "error");
@@ -354,9 +402,9 @@ export function SessionList({
     setSessionMutationPending(true);
     try {
       const res = await hostClient.request(
-        "session.setName",
-        activeSessionContext(host, workspace, session),
-        { name },
+        "session.rename",
+        workspaceContext(host, workspace),
+        { sessionId: item.sessionId, sessionPath: item.sessionPath, name },
       );
       if (
         request !== mutationRequest.current ||
@@ -370,7 +418,8 @@ export function SessionList({
         pushNotification(res.error?.message ?? "Rename session failed", "error");
         return;
       }
-      setSession(res.result);
+      updateSessionCatalogInfo(res.result.sessionId, res.result.name);
+      if (res.result.session) setSession(res.result.session);
       cancelRename();
     } catch (error) {
       pushNotification(
@@ -382,8 +431,30 @@ export function SessionList({
     }
   }
 
+  function togglePinnedSession(item: SessionCatalogEntry) {
+    if (!workspace) return;
+    setPinnedSessionIds((current) => {
+      const next = current.includes(item.sessionId)
+        ? current.filter((sessionId) => sessionId !== item.sessionId)
+        : [...current, item.sessionId];
+      writePinnedSessionIds(workspace.id, next);
+      return next;
+    });
+    setMenuSessionId(null);
+  }
+
+  function removePinnedSessions(sessionIds: readonly string[]) {
+    if (!workspace || sessionIds.length === 0) return;
+    const removed = new Set(sessionIds);
+    setPinnedSessionIds((current) => {
+      const next = current.filter((sessionId) => !removed.has(sessionId));
+      writePinnedSessionIds(workspace.id, next);
+      return next;
+    });
+  }
+
   async function runSessionFileAction(
-    method: "session.archive" | "session.restore" | "session.delete",
+    method: "session.archive" | "session.restore",
     item: SessionCatalogEntry,
   ) {
     if (!host || !workspace || sessionMutationPending) return;
@@ -421,15 +492,77 @@ export function SessionList({
       pushNotification(
         method === "session.archive"
           ? "Session archived"
-          : method === "session.restore"
-            ? "Session restored"
-            : "Session permanently deleted",
+          : "Session restored",
         "success",
       );
-      if (method === "session.delete") setConfirmAction(null);
     } catch (error) {
       pushNotification(
         error instanceof Error ? error.message : "Session file operation failed",
+        "error",
+      );
+    } finally {
+      if (request === mutationRequest.current) setSessionMutationPending(false);
+    }
+  }
+
+  async function deleteSessionPermanently(item: SessionCatalogEntry) {
+    if (!host || !workspace || sessionMutationPending) return;
+    const currentSession = useAppStore.getState().session;
+    if (!canDeleteSession(item, currentSession)) {
+      pushNotification(
+        currentSession?.sessionId === item.sessionId
+          ? "Switch to another Session before deleting"
+          : "Wait for the Session run to finish before deleting",
+        "warning",
+      );
+      setConfirmAction(null);
+      return;
+    }
+
+    const request = ++mutationRequest.current;
+    const generation = captureRequestGeneration(host);
+    setSessionMutationPending(true);
+    setMenuSessionId(null);
+    try {
+      const deleted = await hostClient.request(
+        "session.delete",
+        workspaceContext(host, workspace),
+        { sessionId: item.sessionId, sessionPath: item.sessionPath },
+      );
+      if (
+        request !== mutationRequest.current ||
+        !isCurrentRequestGeneration(useAppStore.getState().host, generation, {
+          session: true,
+        })
+      ) {
+        return;
+      }
+      if (!deleted.ok) {
+        if (deleted.error?.code === "SESSION_NOT_FOUND") {
+          await refresh();
+          removePinnedSessions([item.sessionId]);
+          setConfirmAction(null);
+          pushNotification("Session no longer exists; list refreshed", "warning");
+          return;
+        }
+        pushNotification(deleted.error?.message ?? "Session delete failed", "error");
+        return;
+      }
+
+      const lastSessionPath = useAppStore.getState().desktopSettings?.lastSessionPath;
+      if (
+        lastSessionPath &&
+        lastSessionPath.toLocaleLowerCase() === item.sessionPath.toLocaleLowerCase()
+      ) {
+        await persistDesktopSettings({ lastSessionPath: null });
+      }
+      await refresh();
+      removePinnedSessions([item.sessionId]);
+      setConfirmAction(null);
+      pushNotification("Session permanently deleted", "success");
+    } catch (error) {
+      pushNotification(
+        error instanceof Error ? error.message : "Session delete failed",
         "error",
       );
     } finally {
@@ -461,6 +594,16 @@ export function SessionList({
         return;
       }
       await refresh();
+      const remainingSessionIds = new Set(
+        sessionCatalogItems(useAppStore.getState().sessionCatalog).map(
+          (item) => item.sessionId,
+        ),
+      );
+      removePinnedSessions(
+        sessionCatalogItems(sessionCatalog)
+          .filter((item) => item.archived && !remainingSessionIds.has(item.sessionId))
+          .map((item) => item.sessionId),
+      );
       setConfirmAction(null);
       pushNotification(
         res.result.failedCount > 0
@@ -521,7 +664,10 @@ export function SessionList({
     }
   }
 
-  const allItems = sessionCatalogItems(sessionCatalog);
+  const allItems = prioritizePinnedSessions(
+    sessionCatalogItems(sessionCatalog),
+    pinnedSessionIds,
+  );
   const visibleItems = filterSessionItems(allItems, query, filter);
   const archivedCount = allItems.filter((item) => item.archived).length;
 
@@ -636,7 +782,11 @@ export function SessionList({
       <ul className="flex flex-col gap-0.5">
         {visibleItems.map((item) => {
           const active = !item.archived && session?.sessionId === item.sessionId;
-          const editing = active && editingSessionId === item.sessionId;
+          const editing = editingSessionId === item.sessionId;
+          const menuOpen = menuSessionId === item.sessionId;
+          const pinned = pinnedSessionIds.includes(item.sessionId);
+          const canRename = canRenameSession(item, session);
+          const canDelete = canDeleteSession(item, session);
           const canReload = canReloadSession(item, session);
           const canArchive =
             !item.archived &&
@@ -691,7 +841,7 @@ export function SessionList({
                     type="button"
                     onClick={() => void openSession(item.sessionPath)}
                     disabled={sessionMutationPending || !item.sessionPath || item.archived}
-                    className="min-w-0 flex-1 px-2.5 py-2 text-left disabled:opacity-50"
+                    className="min-w-0 flex-1 px-2.5 py-2 text-left"
                     title={
                       item.runtimeState === "error" && item.lastError
                         ? `${sessionDisplayName(item)} — ${item.lastError}`
@@ -699,111 +849,161 @@ export function SessionList({
                     }
                   >
                     <div className="flex min-w-0 items-center gap-1.5">
-                      {(() => {
-                        const dot = item.archived
-                          ? null
-                          : sessionStatusDotClass(item.runtimeState);
-                        return dot ? (
-                          <span
-                            aria-label={sessionRuntimeLabel(item.runtimeState)}
-                            className={`size-1.5 shrink-0 rounded-full ${dot}`}
-                          />
-                        ) : null;
-                      })()}
+                      <span className="flex size-1.5 shrink-0 items-center justify-center">
+                        {(() => {
+                          const dot = item.archived
+                            ? null
+                            : sessionStatusDotClass(item.runtimeState);
+                          return dot ? (
+                            <span
+                              aria-label={sessionRuntimeLabel(item.runtimeState)}
+                              className={`size-1.5 rounded-full ${dot}`}
+                            />
+                          ) : null;
+                        })()}
+                      </span>
                       <span className={`truncate ${active ? "font-medium" : ""}`}>
                         {sessionDisplayName(item)}
                       </span>
+                      {pinned && (
+                        <Pin size={10} aria-label="Pinned" className="shrink-0 text-muted" />
+                      )}
                     </div>
                   </button>
-                  {active && (
+                  <div className="relative mr-1" data-session-menu>
                     <button
                       type="button"
-                      title={session?.isIdle ? "Rename session" : "Finish the current run before renaming"}
-                      aria-label="Rename session"
-                      onClick={() => beginRename(item)}
-                      disabled={sessionMutationPending || !session?.isIdle}
-                      className="mr-1 rounded p-1 text-muted hover:bg-surface hover:text-foreground disabled:opacity-30"
-                    >
-                      <Pencil size={13} />
-                    </button>
-                  )}
-                  <div className="relative mr-1" data-session-menu>
-                      <button
-                        type="button"
-                        title="Session actions"
-                        aria-label="Session actions"
-                        aria-expanded={menuSessionId === item.sessionId}
-                        onClick={() =>
-                          setMenuSessionId((current) =>
-                            current === item.sessionId ? null : item.sessionId,
-                          )
+                      title="Session actions"
+                      aria-label="Session actions"
+                      aria-expanded={menuOpen}
+                      onClick={(event) => {
+                        if (menuOpen) {
+                          setMenuSessionId(null);
+                          setMenuPosition(null);
+                          return;
                         }
-                        disabled={sessionMutationPending}
-                        className="rounded p-1 text-muted hover:bg-surface hover:text-foreground disabled:opacity-30"
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const menuWidth = 144;
+                        const menuHeight = 166;
+                        const viewportPadding = 8;
+                        const below = rect.bottom + 4;
+                        setMenuPosition({
+                          left: Math.max(
+                            viewportPadding,
+                            Math.min(
+                              rect.right - menuWidth,
+                              window.innerWidth - menuWidth - viewportPadding,
+                            ),
+                          ),
+                          top:
+                            below + menuHeight <= window.innerHeight - viewportPadding
+                              ? below
+                              : Math.max(viewportPadding, rect.top - menuHeight - 4),
+                        });
+                        setMenuSessionId(item.sessionId);
+                      }}
+                      disabled={sessionMutationPending}
+                      className={`rounded p-1 text-muted transition-opacity hover:bg-surface hover:text-foreground disabled:opacity-30 ${
+                        menuOpen
+                          ? "opacity-100"
+                          : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
+                      }`}
+                    >
+                      <MoreHorizontal size={14} />
+                    </button>
+                    {menuOpen && menuPosition && (
+                      <div
+                        className="fixed z-50 w-36 rounded-md border border-border bg-surface-raised p-1 shadow-lg"
+                        style={menuPosition}
+                        data-session-menu
                       >
-                        <MoreHorizontal size={14} />
-                      </button>
-                      {menuSessionId === item.sessionId && (
-                        <div className="absolute right-0 top-7 z-20 min-w-28 rounded-md border border-border bg-surface-raised p-1 shadow-lg">
-                          {item.archived ? (
-                            <>
-                              <button
-                                type="button"
-                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-overlay"
-                                onClick={() =>
-                                  void runSessionFileAction("session.restore", item)
-                                }
-                              >
-                                <ArchiveRestore size={13} />
-                                Restore
-                              </button>
-                              <button
-                                type="button"
-                                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-danger hover:bg-surface-overlay"
-                                onClick={() => {
-                                  setMenuSessionId(null);
-                                  setConfirmAction({ kind: "delete", item });
-                                }}
-                              >
-                                <Trash2 size={13} />
-                                Delete
-                              </button>
-                            </>
-                          ) : active ? (
-                            <button
-                              type="button"
-                              title={
-                                canReload
-                                  ? "Reload Session from disk"
-                                  : "Wait for the Session run to finish before reloading"
-                              }
-                              disabled={!canReload}
-                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-40"
-                              onClick={() => void reloadSessionFromDisk()}
-                            >
-                              <RefreshCw size={13} />
-                              Reload
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              title={
-                                canArchive
-                                  ? "Archive Session"
+                        <button
+                          type="button"
+                          title={
+                            canRename
+                              ? "Rename Session"
+                              : "Wait for the Session run to finish before renaming"
+                          }
+                          disabled={!canRename}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => beginRename(item)}
+                        >
+                          <Pencil size={13} />
+                          Rename
+                        </button>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-overlay"
+                          onClick={() => togglePinnedSession(item)}
+                        >
+                          {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                          {pinned ? "Unpin" : "Pin"}
+                        </button>
+                        <button
+                          type="button"
+                          title={
+                            canReload
+                              ? "Reload Session from disk"
+                              : active
+                                ? "Wait for the Session run to finish before reloading"
+                                : "Only the active Session can be reloaded"
+                          }
+                          disabled={!canReload}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => void reloadSessionFromDisk()}
+                        >
+                          <RefreshCw size={13} />
+                          Reload
+                        </button>
+                        <div className="my-1 border-t border-border" />
+                        <button
+                          type="button"
+                          title={
+                            item.archived
+                              ? "Restore Session"
+                              : canArchive
+                                ? "Archive Session"
+                                : active
+                                  ? "Switch away from the Session before archiving"
                                   : "Wait for the Session run to finish before archiving"
-                              }
-                              disabled={!canArchive}
-                              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-40"
-                              onClick={() =>
-                                void runSessionFileAction("session.archive", item)
-                              }
-                            >
-                              <Archive size={13} />
-                              Archive
-                            </button>
+                          }
+                          disabled={!item.archived && !canArchive}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() =>
+                            void runSessionFileAction(
+                              item.archived ? "session.restore" : "session.archive",
+                              item,
+                            )
+                          }
+                        >
+                          {item.archived ? (
+                            <ArchiveRestore size={13} />
+                          ) : (
+                            <Archive size={13} />
                           )}
-                        </div>
-                      )}
+                          {item.archived ? "Restore" : "Archive"}
+                        </button>
+                        <button
+                          type="button"
+                          title={
+                            canDelete
+                              ? "Permanently delete Session"
+                              : active
+                                ? "Switch to another Session before deleting"
+                                : "Wait for the Session run to finish before deleting"
+                          }
+                          disabled={!canDelete}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-danger hover:bg-surface-overlay disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={() => {
+                            setMenuSessionId(null);
+                            setConfirmAction({ kind: "delete", item });
+                          }}
+                        >
+                          <Trash2 size={13} />
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
@@ -847,7 +1047,7 @@ export function SessionList({
                 className="rounded-md bg-danger px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
                 onClick={() => {
                   if (confirmAction.kind === "delete") {
-                    void runSessionFileAction("session.delete", confirmAction.item);
+                    void deleteSessionPermanently(confirmAction.item);
                   } else {
                     void cleanupArchivedSessions();
                   }

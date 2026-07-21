@@ -21,8 +21,20 @@ export type RehydrateResult = {
   tools: ToolSnapshot | null;
 };
 
-export async function fullRehydrate(): Promise<RehydrateResult> {
-  const hostId = hostClient.getHostInstanceId();
+export function resolveRehydrateHostInstanceId(
+  expectedHostInstanceId: string | undefined,
+  observedHostInstanceId: string | null,
+): string | null {
+  return expectedHostInstanceId ?? observedHostInstanceId;
+}
+
+export async function fullRehydrate(
+  expectedHostInstanceId?: string,
+): Promise<RehydrateResult> {
+  const hostId = resolveRehydrateHostInstanceId(
+    expectedHostInstanceId,
+    hostClient.getHostInstanceId(),
+  );
   if (!hostId) {
     throw new Error("No hostInstanceId — call hello first");
   }

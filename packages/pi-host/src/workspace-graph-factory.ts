@@ -41,11 +41,12 @@ import {
   archiveSession,
   cleanupArchivedSessions,
   createSession,
-  deleteArchivedSession,
+  deleteSession,
   listSessions,
   openSession,
   refineActiveSessionName,
   reloadSession,
+  renameSession,
   restoreSession,
   setActiveSessionName,
 } from "./session-lifecycle.js";
@@ -313,6 +314,28 @@ export class WorkspaceGraphFactory {
       /* ignore */
     }
     await this.disposeAgentSessionOnly(runtime.agentSession);
+  }
+
+  /** @internal - session lifecycle file mutations */
+  async disposeBackgroundSessionRuntimeIfIdle(
+    graph: WorkspaceGraph,
+    sessionId: string,
+    sessionPath: string,
+  ): Promise<"none" | "busy" | "disposed"> {
+    const runtime = [...graph.backgroundSessions.values()].find(
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        this.sessionPathsEqual(candidate.sessionSnapshot.sessionPath, sessionPath),
+    );
+    if (!runtime) return "none";
+    if (
+      !runtime.agentSession.isIdle ||
+      this.getSessionOperationLock(runtime.agentSession).isHeld()
+    ) {
+      return "busy";
+    }
+    await this.disposeBackgroundRuntime(graph, runtime);
+    return "disposed";
   }
 
   /** @internal — session-lifecycle module */
@@ -1443,16 +1466,25 @@ export class WorkspaceGraphFactory {
     return restoreSession(this, requestId, sessionId, sessionPath);
   }
 
-  async deleteArchivedSession(
+  async deleteSession(
     requestId: string,
     sessionId: string,
     sessionPath: string,
   ) {
-    return deleteArchivedSession(this, requestId, sessionId, sessionPath);
+    return deleteSession(this, requestId, sessionId, sessionPath);
   }
 
   async cleanupArchivedSessions(requestId: string) {
     return cleanupArchivedSessions(this, requestId);
+  }
+
+  async renameSession(
+    requestId: string,
+    sessionId: string,
+    sessionPath: string,
+    name: string,
+  ) {
+    return renameSession(this, requestId, sessionId, sessionPath, name);
   }
 
   setActiveSessionName(name: string) {

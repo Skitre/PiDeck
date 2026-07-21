@@ -10,6 +10,7 @@ export type GraphOperationKind =
   | "session.open"
   | "session.reload"
   | "session.setName"
+  | "session.rename"
   | "session.archive"
   | "session.restore"
   | "session.delete"

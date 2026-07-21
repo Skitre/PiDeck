@@ -64,6 +64,7 @@ export type HostContextMap = {
   "session.cleanupArchived": WorkspaceContext;
   "session.getSnapshot": WorkspaceContext;
   "session.setName": ActiveSessionContext;
+  "session.rename": WorkspaceContext;
   "session.getEntries": ActiveSessionContext;
   "session.getTree": ActiveSessionContext;
   "session.getStats": ActiveSessionContext;
@@ -126,6 +127,7 @@ export type HostRequestParams = {
   "session.cleanupArchived": null;
   "session.getSnapshot": null;
   "session.setName": { name: string };
+  "session.rename": { sessionId: string; sessionPath: string; name: string };
   "session.getEntries": { sinceEntryId?: string } | null;
   "session.getTree": null;
   "session.getStats": null;
@@ -219,6 +221,7 @@ export type HostResultMap = {
   "session.cleanupArchived": { deletedCount: number; failedCount: number };
   "session.getSnapshot": SessionSnapshot | null;
   "session.setName": SessionSnapshot;
+  "session.rename": { sessionId: string; name: string; session?: SessionSnapshot };
   "session.getEntries": {
     entries: SerializableSessionEntry[];
     leafId: string | null;

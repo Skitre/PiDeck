@@ -1,4 +1,10 @@
-import { LoaderCircle, MessageCirclePlus, Settings } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  LoaderCircle,
+  MessageCirclePlus,
+  Settings,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import { useAppStore, type NavPage } from "../lib/stores/app-store";
 import { hostClient } from "../lib/bridge/host-client";
@@ -102,6 +108,9 @@ export function SidebarLayout({
   const [sessionsCollapsed, setSessionsCollapsed] = useState(() =>
     sidebarPref("pideck.sidebar.sessionsCollapsed"),
   );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    sidebarPref("pideck.sidebar.collapsed"),
+  );
 
   function toggleSessionsCollapsed() {
     setSessionsCollapsed((current) => {
@@ -110,8 +119,33 @@ export function SidebarLayout({
     });
   }
 
+  function toggleSidebarCollapsed() {
+    setSidebarCollapsed((current) => {
+      setSidebarPref("pideck.sidebar.collapsed", !current);
+      return !current;
+    });
+  }
+
   return (
-    <aside className="flex w-[268px] shrink-0 flex-col border-r border-border bg-sidebar">
+    <aside
+      style={{ marginLeft: sidebarCollapsed ? -268 : 0 }}
+      className="relative flex w-[268px] shrink-0 flex-col border-r border-border bg-sidebar transition-[margin-left] duration-200 ease-out"
+    >
+      <div className="group/sidebar-edge absolute -right-4 top-0 z-40 h-full w-4">
+        <button
+          type="button"
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={sidebarCollapsed ? "Expand left sidebar" : "Collapse left sidebar"}
+          aria-expanded={!sidebarCollapsed}
+          className="absolute top-1/2 flex h-12 w-4 -translate-y-1/2 items-center justify-center rounded-r-md border border-l-0 border-border bg-surface-raised text-muted opacity-0 shadow-sm transition-opacity group-hover/sidebar-edge:opacity-100 hover:text-foreground focus-visible:opacity-100"
+          onClick={toggleSidebarCollapsed}
+        >
+          {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
+        </button>
+      </div>
+
+      {sidebarCollapsed ? null : (
+        <>
       <div className="flex h-16 shrink-0 items-center gap-3 px-4" data-tauri-drag-region>
         <PiMark className="size-8" />
         <span className="text-[15px] font-semibold">Pi Agent</span>
@@ -172,6 +206,8 @@ export function SidebarLayout({
           )}
         </button>
       </div>
+        </>
+      )}
     </aside>
   );
 }

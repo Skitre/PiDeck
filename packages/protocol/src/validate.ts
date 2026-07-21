@@ -239,6 +239,13 @@ export function validateRequestParams<M extends HostMethod>(
       return exactObject(params, ["name"]) && isNonEmptyString(params.name)
         ? ok(params)
         : fail("invalid session.setName params", { method });
+    case "session.rename":
+      return exactObject(params, ["sessionId", "sessionPath", "name"]) &&
+        isUuid(params.sessionId) &&
+        isNonEmptyString(params.sessionPath) &&
+        isNonEmptyString(params.name)
+        ? ok(params)
+        : fail("invalid session.rename params", { method });
     case "session.getEntries":
       return params === null ||
         (exactObject(params, [], ["sinceEntryId"]) &&

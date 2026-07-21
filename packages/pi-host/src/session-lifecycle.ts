@@ -154,18 +154,46 @@ export async function restoreSession(
   });
 }
 
-export async function deleteArchivedSession(
+export async function deleteSession(
   factory: WorkspaceGraphFactory,
   requestId: string,
   sessionId: string,
   sessionPath: string,
 ): Promise<{ sessionId: string; deleted: true } | { error: HostError }> {
   return withSessionFileMutation(factory, requestId, "session.delete", async (g) => {
-    const session = (await listSessionFiles(factory, g, true)).find(
+    const [activeSessions, archivedSessions] = await Promise.all([
+      listSessionFiles(factory, g, false),
+      listSessionFiles(factory, g, true),
+    ]);
+    const session = [...activeSessions, ...archivedSessions].find(
       (item) => item.id === sessionId && factory.sessionPathsEqual(item.path, sessionPath),
     );
     if (!session) {
-      return { error: createHostError("SESSION_NOT_FOUND", "Archived Session not found") };
+      return { error: createHostError("SESSION_NOT_FOUND", "Session not found") };
+    }
+    if (
+      g.sessionSnapshot?.sessionId === sessionId &&
+      factory.sessionPathsEqual(g.sessionSnapshot.sessionPath, sessionPath)
+    ) {
+      return {
+        error: createHostError(
+          "AGENT_BUSY",
+          "Switch away from the active Session before deleting it",
+          { retryable: true },
+        ),
+      };
+    }
+    const runtime = await factory.disposeBackgroundSessionRuntimeIfIdle(
+      g,
+      sessionId,
+      sessionPath,
+    );
+    if (runtime === "busy") {
+      return {
+        error: createHostError("AGENT_BUSY", "Wait for the Session run to finish", {
+          retryable: true,
+        }),
+      };
     }
     await unlink(session.path);
     return { sessionId, deleted: true as const };
@@ -193,6 +221,68 @@ export async function cleanupArchivedSessions(
       }
     }
     return { deletedCount, failedCount };
+  });
+}
+
+export async function renameSession(
+  factory: WorkspaceGraphFactory,
+  requestId: string,
+  sessionId: string,
+  sessionPath: string,
+  name: string,
+): Promise<
+  { sessionId: string; name: string; session?: SessionSnapshot } | { error: HostError }
+> {
+  return withSessionFileMutation(factory, requestId, "session.rename", async (g) => {
+    const [activeSessions, archivedSessions] = await Promise.all([
+      listSessionFiles(factory, g, false),
+      listSessionFiles(factory, g, true),
+    ]);
+    const target = [...activeSessions, ...archivedSessions].find(
+      (item) =>
+        item.id === sessionId && factory.sessionPathsEqual(item.path, sessionPath),
+    );
+    if (!target) {
+      return { error: createHostError("SESSION_NOT_FOUND", "Session not found") };
+    }
+
+    const isActive = Boolean(
+      g.sessionSnapshot?.sessionId === sessionId &&
+        factory.sessionPathsEqual(g.sessionSnapshot.sessionPath, sessionPath),
+    );
+    if (isActive) {
+      if (
+        !g.agentSession ||
+        !g.agentSession.isIdle ||
+        factory.getSessionOperationLock(g.agentSession).isHeld()
+      ) {
+        return {
+          error: createHostError("AGENT_BUSY", "Wait for the Session run to finish", {
+            retryable: true,
+          }),
+        };
+      }
+      const snapshot = factory.setActiveSessionName(name);
+      if (!snapshot) {
+        return { error: createHostError("AGENT_NOT_READY", "No active session") };
+      }
+      return {
+        sessionId,
+        name: snapshot.name ?? name,
+        session: snapshot,
+      };
+    }
+
+    if (factory.getSessionRuntimeInfo(target.id, target.path)) {
+      return {
+        error: createHostError("AGENT_BUSY", "Wait for the Session run to finish", {
+          retryable: true,
+        }),
+      };
+    }
+    const sessionManager = SessionManager.open(target.path, undefined, g.canonicalCwd);
+    sessionManager.appendSessionInfo(name);
+    return { sessionId, name: sessionManager.getSessionName() ?? name };
   });
 }
 

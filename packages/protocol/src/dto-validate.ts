@@ -849,6 +849,14 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
     case "agent.setAutoRetry":
     case "model.setThinkingLevel":
       return isSessionSnapshot(result) ? null : `${method} must return SessionSnapshot`;
+    case "session.rename":
+      return isPlainObject(result) &&
+        hasExactKeys(result, ["sessionId", "name"], ["session"]) &&
+        isUuid(result.sessionId) &&
+        isString(result.name) &&
+        (result.session === undefined || isSessionSnapshot(result.session))
+        ? null
+        : "invalid session.rename result";
     case "session.getSnapshot":
       return result === null || isSessionSnapshot(result) ? null : "invalid session snapshot";
     case "session.getEntries":

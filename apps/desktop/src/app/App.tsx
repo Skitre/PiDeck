@@ -30,8 +30,6 @@ import {
 } from "../lib/chat/extension-terminal-bus";
 import type { HostEventEnvelope, HostEventPayloadMap } from "@pideck/protocol";
 
-let rehydrateInFlight: Promise<void> | null = null;
-
 function SettingsOverlay({ section }: { section: "general" | "packages" }) {
   const setPage = useAppStore((s) => s.setPage);
   const [active, setActive] = useState(false);
@@ -67,29 +65,24 @@ function SettingsOverlay({ section }: { section: "general" | "packages" }) {
   );
 }
 
-function runFullRehydrate(): Promise<void> {
-  if (rehydrateInFlight) return rehydrateInFlight;
-  rehydrateInFlight = (async () => {
-    const store = useAppStore.getState();
-    store.setRehydrating(true);
-    try {
-      const snap = await fullRehydrate();
-      useAppStore.getState().completeRehydrate({
-        ...snap,
-        lastSequence: hostClient.getLastSequence(),
-      });
-      useAppStore.getState().setHostFatal(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      useAppStore.getState().markDesynchronized(message);
-      useAppStore.getState().setHostFatal(message);
-      throw err;
-    } finally {
-      useAppStore.getState().setRehydrating(false);
-      rehydrateInFlight = null;
-    }
-  })();
-  return rehydrateInFlight;
+async function runFullRehydrate(expectedHostInstanceId: string): Promise<void> {
+  const store = useAppStore.getState();
+  store.setRehydrating(true);
+  try {
+    const snap = await fullRehydrate(expectedHostInstanceId);
+    useAppStore.getState().completeRehydrate({
+      ...snap,
+      lastSequence: hostClient.getLastSequence(),
+    });
+    useAppStore.getState().setHostFatal(null);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    useAppStore.getState().markDesynchronized(message);
+    useAppStore.getState().setHostFatal(message);
+    throw err;
+  } finally {
+    useAppStore.getState().setRehydrating(false);
+  }
 }
 
 export function applyModelChanged(payload: HostEventPayloadMap["model.changed"]): void {
@@ -560,7 +553,7 @@ export function App() {
                       packageRevision: selected.packageRevision,
                     });
                   }
-                  await runFullRehydrate();
+                  await runFullRehydrate(status.hostInstanceId);
                   const hydrated = useAppStore.getState();
                   if (
                     sessionPathToRestore &&
@@ -580,7 +573,7 @@ export function App() {
                         const nextHost = mergeHostIdentity(currentHost, restored);
                         if (nextHost) useAppStore.getState().setHost(nextHost);
                       }
-                      await runFullRehydrate();
+                      await runFullRehydrate(restored.hostInstanceId);
                     } else if (restored.error.code === "SESSION_NOT_FOUND") {
                       await persistDesktopSettings({ lastSessionPath: null });
                     } else {

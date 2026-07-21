@@ -105,7 +105,7 @@ export function createSessionHandlers(
       const stale = factory.checkIdentity(ctx.context, { requireWorkspace: true });
       if (stale) return { error: stale };
       const params = ctx.params as { sessionId: string; sessionPath: string };
-      const result = await factory.deleteArchivedSession(
+      const result = await factory.deleteSession(
         ctx.id,
         params.sessionId,
         params.sessionPath,
@@ -183,6 +183,24 @@ export function createSessionHandlers(
       } finally {
         server.serviceGraphLock.release(ctx.id);
       }
+    },
+
+    "session.rename": async (ctx) => {
+      const stale = factory.checkIdentity(ctx.context, { requireWorkspace: true });
+      if (stale) return { error: stale };
+      const params = ctx.params as {
+        sessionId: string;
+        sessionPath: string;
+        name: string;
+      };
+      const result = await factory.renameSession(
+        ctx.id,
+        params.sessionId,
+        params.sessionPath,
+        params.name,
+      );
+      if ("error" in result) return { error: result.error };
+      return { result };
     },
 
     "session.getEntries": async (ctx) => {
