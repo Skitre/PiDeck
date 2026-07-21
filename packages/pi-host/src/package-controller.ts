@@ -454,14 +454,6 @@ async function mutatePackageUnderLock(
 
     if (mutationError && !changed && !flushError && !reconcileError) {
       const coded = mutationError as Error & { code?: string };
-      if (
-        coded.code === "PROJECT_NOT_TRUSTED" ||
-        /project trust required/i.test(mutationError.message)
-      ) {
-        return {
-          error: createHostError("PROJECT_NOT_TRUSTED", mutationError.message),
-        };
-      }
       if (coded.code === "RESOURCE_NOT_FOUND") {
         return {
           error: createHostError("RESOURCE_NOT_FOUND", mutationError.message),
@@ -688,34 +680,6 @@ async function runMutation(
   });
 
   try {
-    const projectWrite = (() => {
-      if (kind === "install") {
-        return (params as { scope: "user" | "project" }).scope === "project";
-      }
-      if (kind === "updateAll") {
-        return (params as { scope: "user" | "project" | "all" }).scope !== "user";
-      }
-      if (
-        kind === "remove" ||
-        kind === "update" ||
-        kind === "setResourceEnabled" ||
-        kind === "setResourceTypeEnabled"
-      ) {
-        const packageId = (params as { packageId: string }).packageId;
-        return g.packageSnapshot?.configured.find((pkg) => pkg.id === packageId)?.scope === "project";
-      }
-      if (kind === "setTopLevelEnabled") {
-        const resourceId = (params as { resourceId: string }).resourceId;
-        return g.resourceIdMap.get(resourceId)?.scope === "project";
-      }
-      return false;
-    })();
-    if (projectWrite && g.trustDecision !== "trusted" && g.trustDecision !== "session") {
-      throw Object.assign(new Error("Project trust required for project package changes"), {
-        code: "PROJECT_NOT_TRUSTED",
-      });
-    }
-
     switch (kind) {
       case "install": {
         const p = params as { source: string; scope: "user" | "project" };
@@ -729,7 +693,11 @@ async function runMutation(
         const rec = g.packageSnapshot?.configured.find((c) => c.id === p.packageId);
         if (!rec) throw new Error("Package not found");
         emitProgress("start", "remove", rec.source);
-        const ok = await pm.removeAndPersist(rec.source, { local: rec.scope === "project" });
+        // Project-local settings store paths relative to `<workspace>/.pi`, while
+        // the SDK matches remove inputs relative to the process cwd. Use the
+        // already-resolved local path so both sides identify the same package.
+        const source = rec.kind === "local" && rec.installedPath ? rec.installedPath : rec.source;
+        const ok = await pm.removeAndPersist(source, { local: rec.scope === "project" });
         if (!ok) throw new Error("Package not found in configuration");
         emitProgress("complete", "remove", rec.source);
         break;
@@ -801,9 +769,6 @@ async function runMutation(
         const meta = g.resourceIdMap.get(p.resourceId);
         if (!meta || meta.origin !== "top-level") {
           throw Object.assign(new Error("Resource not found"), { code: "RESOURCE_NOT_FOUND" });
-        }
-        if (meta.scope === "project" && g.trustDecision !== "trusted" && g.trustDecision !== "session") {
-          throw Object.assign(new Error("Project not trusted"), { code: "PROJECT_NOT_TRUSTED" });
         }
         const rel = meta.baseDir
           ? toPosixPath(meta.path.replace(meta.baseDir, "").replace(/^[/\\]/, ""))

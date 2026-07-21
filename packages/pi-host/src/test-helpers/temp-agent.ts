@@ -22,7 +22,6 @@ export function createTempAgentLayout(prefix = "pideck-test-"): TempAgentLayout 
   writeFileSync(join(agentDir, "auth.json"), "{}");
   writeFileSync(join(agentDir, "models.json"), "{}");
   writeFileSync(join(agentDir, "settings.json"), "{}");
-  writeFileSync(join(agentDir, "trust.json"), "{}");
   return {
     root,
     agentDir,

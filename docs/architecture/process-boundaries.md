@@ -4,56 +4,50 @@
 
 **Owns**
 
-- Window lifecycle
-- `DesktopSettingsStore` (`desktop-settings.json` in app config dir)
-- Spawning Node with `PI_CODING_AGENT_DIR` / `--agent-dir`
-- stdin write, stdout line emit (`pi-host-stdout`), stderr log emit
-- Forced kill after 10s shutdown timeout
-- `desktop.openPath` / dialog folder picker
+- Window and desktop settings lifecycle.
+- Spawning, monitoring, restarting, and shutting down the Node Pi Host.
+- The JSONL stdin/stdout bridge and bounded stderr forwarding.
+- Native path opening and folder selection.
 
 **Must not**
 
-- Import or reimplement Pi Package install, filter, trust, or resource discovery
-- Parse `pi list` text
-- Read/write Pi `settings.json` as the product owner
+- Reimplement Pi Package install, filtering, or resource discovery.
+- Parse `pi list` text or own Pi `settings.json`.
 
 ## Node Pi Host
 
 **Owns**
 
-- All Pi SDK services listed in PROJECT_SPEC §4.5
-- Trust gate before project resource load
-- Package mutation reconcile (`flush` / `drainErrors` / list / resolve / reload)
-- Extension UI request/response bridge
-- ModelConfigHealth from `ModelRegistry.refresh()` / `getError()` only
+- All Pi SDK services and cwd-bound workspace graphs.
+- Immediate project resource loading after workspace selection.
+- Package mutation reconciliation and Extension UI bridging.
+- Provider/model health and Host identity revisions.
 
 **Must not**
 
-- Mix logs into stdout (stderr only for logs)
-- Create AgentSession before trust decision when resources require trust
+- Mix logs into stdout.
+- Add a second workspace trust state machine outside the selected-workspace policy.
 
 ## React
 
 **Owns**
 
-- UI state projections (Zustand)
-- Typed `HostClient` requests/events
-- Rendering transcript, packages, settings
+- Zustand projections, typed Host requests/events, and all user-facing views.
+- Explicit confirmation before Project Package mutations.
 
 **Must not**
 
-- `import` from `@earendil-works/pi-coding-agent`
-- Spawn `pi` CLI or npm/git for packages
-- Directly read `~/.pi/agent`
+- Import the Pi SDK, spawn package tooling, or directly read the agent directory.
 
-## Trust-before-load
+## Workspace selection policy
 
-Order is fixed (PROJECT_SPEC §4.9):
+The order is fixed:
 
-1. Canonicalize cwd  
-2. `ProjectTrustStore.get`  
-3. `hasTrustRequiringProjectResources`  
-4. If pending → no ResourceLoader/AgentSession; emit `workspace.trustRequired`  
-5. Only after decision → `SettingsManager.create(..., { projectTrusted })` and full graph  
+1. Canonicalize cwd.
+2. Create `SettingsManager` with explicit `projectTrusted: true`.
+3. Load project resources and create the cwd-bound AgentSession graph.
+4. Publish one ready `workspace.changed` snapshot.
 
-`notRequired` means no gate for load — it does **not** authorize first project Package install without explicit trust.
+Selecting or restoring a workspace authorizes its existing `.pi` project
+resources to load. There is no persistent workspace trust store, pending state,
+or deny action. Existing `.pi/extensions` may execute local code immediately.

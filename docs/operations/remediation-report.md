@@ -1,10 +1,16 @@
 # P0 Remediation / Completion Report
 
+> **Historical release-hardening record.** Release-grade automation is deferred
+> during initial development, and commands described below are not currently
+> available. Current scope lives in [P0 scope and verification](./p0-scope.md).
+
 > **Status: P0 Not Complete**  
-> R0–R8: source remediation advanced; gates not yet closed on a clean-checkout, commit-bound `pnpm verify:release`  
-> M0–M6 / Windows primary installer: **Not Complete** until fresh same-run evidence exists  
+> Current scope: [P0 scope and verification](./p0-scope.md)
+> Core and full release profiles and P0 implementation rows are source-ready,
+> but current same-run verification evidence is not closed.
 >
-> Do not claim release-ready without a same-run `pnpm verify:release` evidence directory that records a real commit SHA and `dirty:false`.
+> Do not claim P0 without same-run core `verify-release.json` evidence with a
+> real commit, `dirty:false`, `candidateBound:true`, and `p0Complete:true`.
 
 ## Stage status (authoritative)
 
@@ -17,8 +23,9 @@
 | R4 | Source ready | Candidate-commit session/workspace + serviceGraphLock |
 | R5/R6 | Source ready | Package disk fingerprint + Extension real loader path |
 | R7 | Source ready | Epoch/rehydrate/sequence watermark + pending reject |
-| R8 | In progress | Real Tauri WebView2 E2E + NSIS installer + installed-app smoke; gate defects found 2026-07-19 (confirm-dialog revision race, e2e window locator, smoke npm probe) are fixed but await a full-run pass |
-| P0 / M0–M6 | **Not Complete** | No accepted clean-checkout `verify:release` with current scripts |
+| R8 | In progress | Profile-aware core/full WebView2 E2E + NSIS + installed smoke are in source; current-commit release evidence remains outstanding |
+| P0 core | **Not Complete** | Source implementation is ready; exact-revision source gate and core release evidence remain outstanding |
+| Full regression | **Not Complete** | No accepted current-commit `verify:release:full` evidence bundle |
 
 ## C6 Extension proof (B-EXT-RUNTIME-01 / B-EXT-01)
 
@@ -41,19 +48,66 @@ The following artifacts predate the current real desktop E2E / Portable Git / fa
 ## Gate commands
 
 ```text
-pnpm verify:docs
-pnpm typecheck && pnpm build && pnpm test
-pnpm test:rust
-pnpm package:release
-pnpm verify:m0-release-extension
-pnpm test:e2e
-pnpm smoke:release
+pnpm verify:quick
+pnpm verify:p0
 pnpm verify:release
+pnpm verify:release:full
 ```
+
+Release packaging now records per-stage timings, avoids duplicate CI staging,
+removes the redundant pnpm virtual store after verified hoisting, and limits
+installer discovery to Tauri bundle directories. Runtime import probes plus
+Host/core/full desktop gates remain authoritative after this optimization.
+The release orchestrator also reuses the immediately preceding `verify:p0`
+JavaScript build only when it is bound to the same clean commit.
+
+The full profile is now a true core superset and uses two desktop launches:
+one build-tree candidate and one installed candidate. M0 retains its distinct
+staged-Host handler proof in direct-only mode. Per-gate result directories,
+streamed logs, heartbeat output, timeouts, failure cleanup evidence, and
+candidate-scoped process audits make long runs inspectable without weakening
+the candidate boundary.
+
+## Current verification state (2026-07-21)
+
+Evidence completed before the workspace policy change remains useful as
+historical diagnostics but cannot close the current source revision:
+
+- the pre-policy `pnpm verify:p0` passed with Protocol 284, Desktop 167, Pi Host
+  133, and Rust 29 tests;
+- deterministic core desktop E2E passed in 51.6 s;
+- M0 direct staged-Host proof passed in 59.2 s;
+- a pre-policy-change candidate was packaged successfully (EXE
+  `3a350eb245700728838502fb814d41fe200df4193a9afa3ab61a234c31e6ac53`,
+  installer `c76aa73a4d4cb2fa64067b9e1bce8d84c0cefa21b8b843d657f92bb7bb18d371`).
+
+That candidate's full E2E failed after the core path because the former trust
+event exposed Project Package confirmation before `workspace.setTrust`
+released `serviceGraphLock`, producing `SERVICE_GRAPH_BUSY`. The product now
+defines workspace selection itself as authorization: trust protocol methods,
+events, Host store/branches, desktop UI, and full-E2E trust steps have been
+removed. Project Package mutations still require an executable-code
+confirmation. An initial post-policy `pnpm verify:p0` passed in 110.4 s with
+Protocol 276, Desktop 164, Pi Host 133, and Rust 29 tests. The final removal of
+the vestigial `projectTrust` capability and trust-named test fixtures happened
+after that run, so it is diagnostic evidence rather than an exact-revision
+gate. A new source verification, packaged candidate, and release verification
+run are still required.
+
+Still outstanding after the workspace policy change:
+
+- current exact-revision `pnpm verify:p0`;
+- a newly packaged candidate followed by current M0/core/full desktop checks;
+- installed `smoke:release:core` / `smoke:release:full`;
+- clean-checkout `verify:release` / `verify:release:full`.
+
+No full E2E result has yet exited 0 end to end.
 
 ## Residual blockers (blocking)
 
-Progress note (2026-07-19): the repository now exists (github.com/Skitre/PiDeck, clean tree runs recorded); post-disinfection `verify:release` runs reached green through docs, typecheck, build, test, rust, and `package:release` (installer passes integrity). The runs failed at m0/e2e/smoke on gate defects that are now fixed in source: the project-trust confirm dialog was closed by trust-transition revision bumps before it could render, the e2e window-attach locator depended on Settings being open, and the smoke npm probe crashed spawning `npm.cmd` without a shell.
+Historical note: 2026-07-19 runs proved packaging integrity but failed the then-current M0/E2E/smoke chain. Those defects were fixed, but the old artifacts do not satisfy the redefined profile-aware gates.
 
-1. One complete same-run `pnpm verify:release` exiting 0 with commit SHA + `dirty:false`, producing fresh installer/E2E/smoke evidence under `artifacts/p0/<run-id>/`.
-2. Expand real-window E2E coverage toward trust/chat/Extension/npm-git/crash workflows.
+1. Build and verify the new core candidate, then run current HEAD through
+   clean-checkout `pnpm verify:release` and accept only same-run evidence.
+2. Run `pnpm verify:release:full` on the protected/nightly Windows runner.
+3. Add Authenticode signing and verification when a certificate is available.

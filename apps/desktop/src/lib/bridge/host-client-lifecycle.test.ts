@@ -27,7 +27,6 @@ function ready(hostInstanceId: string, timestamp = Date.now()) {
       capabilities: {
         packageUpdateCheck: true,
         extensionUi: true,
-        projectTrust: true,
         sessionExport: true,
       },
       modelConfigHealth: {

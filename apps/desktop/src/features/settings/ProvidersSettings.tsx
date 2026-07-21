@@ -100,6 +100,17 @@ function customThinkingMap(model: DiscoveredProviderModel): ThinkingLevelMap {
   ) as ThinkingLevelMap;
 }
 
+export function automaticThinkingConfig(
+  modelId: string,
+): Pick<DiscoveredProviderModel, "reasoning" | "thinkingLevelMap" | "thinkingSource"> {
+  const detected = detectModelThinking(modelId);
+  return {
+    reasoning: true,
+    thinkingLevelMap: detected.thinkingLevelMap,
+    thinkingSource: detected.reasoning ? detected.source : "default",
+  };
+}
+
 function thinkingMode(model: DiscoveredProviderModel): "auto" | "custom" | "disabled" {
   if (!model.reasoning) return "disabled";
   return model.thinkingSource === "manual" ||
@@ -121,7 +132,7 @@ function thinkingSourceLabel(model: DiscoveredProviderModel): string {
     case "configured":
       return "Existing configuration";
     default:
-      return "No reasoning detected";
+      return model.reasoning ? "Automatic defaults" : "No reasoning detected";
   }
 }
 
@@ -148,6 +159,7 @@ export function ProvidersSettings() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [updatingProviderId, setUpdatingProviderId] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualId, setManualId] = useState("");
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
@@ -274,7 +286,8 @@ export function ProvidersSettings() {
       }
       const saved = response.result.provider;
       setProviders((current) =>
-        [...current.filter((provider) => provider.id !== draft.originalId && provider.id !== saved.id), saved].sort(
+        [...current
+          .filter((provider) => provider.id !== draft.originalId && provider.id !== saved.id), saved].sort(
           (left, right) => left.name.localeCompare(right.name),
         ),
       );
@@ -336,6 +349,33 @@ export function ProvidersSettings() {
     }
   }
 
+  async function setProviderEnabled(provider: ProviderSnapshot, enabled: boolean) {
+    if (!host || updatingProviderId) return;
+    setUpdatingProviderId(provider.id);
+    try {
+      const response = await hostClient.request(
+        "provider.setEnabled",
+        hostContext(host),
+        { providerId: provider.id, enabled },
+      );
+      if (!response.ok) {
+        pushNotification(response.error?.message ?? "Could not update Provider", "error");
+        return;
+      }
+      setProviders((current) =>
+        current.map((item) => item.id === response.result.providerId
+          ? { ...item, enabled: response.result.enabled }
+          : item),
+      );
+      refreshProviderConfig();
+      pushNotification(`${provider.name} ${enabled ? "enabled" : "disabled"}`);
+    } catch (error) {
+      pushNotification(error instanceof Error ? error.message : "Could not update Provider", "error");
+    } finally {
+      setUpdatingProviderId(null);
+    }
+  }
+
   async function removeProvider() {
     if (!host || !draft?.originalId || saving) return;
     if (!window.confirm(`Delete ${draft.name}?`)) return;
@@ -350,9 +390,13 @@ export function ProvidersSettings() {
         pushNotification(response.error?.message ?? "Could not delete Provider", "error");
         return;
       }
-      const remaining = providers.filter((provider) => provider.id !== draft.originalId);
+      const listResponse = await hostClient.request("provider.list", hostContext(host), null);
+      const remaining = listResponse.ok
+        ? listResponse.result.providers
+        : providers.filter((provider) => provider.id !== draft.originalId);
       setProviders(remaining);
-      if (remaining[0]) selectProvider(remaining[0]);
+      const nextProvider = remaining.find((provider) => provider.enabled) ?? remaining[0];
+      if (nextProvider) selectProvider(nextProvider);
       else {
         setSelectedId(null);
         setDraft(null);
@@ -435,26 +479,45 @@ export function ProvidersSettings() {
             <p className="p-3 text-xs text-muted">No configured Providers</p>
           ) : (
             filteredProviders.map((provider) => (
-              <button
+              <div
                 key={provider.id}
-                type="button"
-                className={`mb-1 flex w-full items-start gap-2 rounded-md px-3 py-2 text-left ${
+                className={`mb-1 flex w-full items-center rounded-md ${
                   selectedId === provider.id
                     ? "bg-accent/15 text-foreground"
                     : "text-muted hover:bg-surface-overlay hover:text-foreground"
                 }`}
-                onClick={() => selectProvider(provider)}
               >
-                <span
-                  className={`mt-1.5 size-2 shrink-0 rounded-full ${
-                    provider.auth.configured ? "bg-success" : "bg-muted"
-                  }`}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{provider.name}</span>
-                  <span className="block truncate text-[11px]">{provider.models.length} models</span>
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left"
+                  onClick={() => selectProvider(provider)}
+                >
+                  <span
+                    className={`mt-1.5 size-2 shrink-0 rounded-full ${
+                      provider.auth.configured ? "bg-success" : "bg-muted"
+                    }`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{provider.name}</span>
+                    <span className="block truncate text-[11px]">
+                      {provider.models.length} models{provider.enabled ? " - Enabled" : ""}
+                    </span>
+                  </span>
+                </button>
+                <span className="mr-2 flex size-8 shrink-0 items-center justify-center">
+                  {updatingProviderId === provider.id ? (
+                    <RefreshCw className="animate-spin text-muted" size={15} />
+                  ) : (
+                    <input
+                      type="checkbox"
+                      checked={provider.enabled}
+                      aria-label={`${provider.enabled ? "Disable" : "Enable"} ${provider.name}`}
+                      disabled={updatingProviderId !== null}
+                      onChange={(event) => void setProviderEnabled(provider, event.target.checked)}
+                    />
+                  )}
                 </span>
-              </button>
+              </div>
             ))
           )}
         </div>
@@ -741,12 +804,7 @@ export function ProvidersSettings() {
                           });
                           return;
                         }
-                        const detected = detectModelThinking(editingModel.id);
-                        updateModel(editingModel.id, {
-                          reasoning: detected.reasoning,
-                          thinkingLevelMap: detected.thinkingLevelMap,
-                          thinkingSource: detected.source,
-                        });
+                        updateModel(editingModel.id, automaticThinkingConfig(editingModel.id));
                       }}
                     >
                       <option value="auto">Auto</option>

@@ -17,7 +17,6 @@ const current: HostStatusSnapshot = {
   capabilities: {
     packageUpdateCheck: false,
     extensionUi: true,
-    projectTrust: true,
     sessionExport: true,
   },
   workspaceId: "22222222-2222-4222-8222-222222222222",

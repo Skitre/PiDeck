@@ -35,7 +35,6 @@ function createTempAgent(): { agentDir: string; projectDir: string; root: string
   writeFileSync(join(agentDir, "auth.json"), "{}");
   writeFileSync(join(agentDir, "models.json"), "{}");
   writeFileSync(join(agentDir, "settings.json"), "{}");
-  writeFileSync(join(agentDir, "trust.json"), "{}");
   return { agentDir, projectDir, root };
 }
 
@@ -222,7 +221,7 @@ describe("Pi Host integration", () => {
     expect((res.error as { code: string }).code).toBe("STALE_REVISION");
   });
 
-  it("workspace.setCurrent without trust resources becomes ready", async () => {
+  it("workspace.setCurrent makes the selected workspace ready", async () => {
     const hello = await host.request("system.hello", {}, {
       clientName: "test",
       clientVersion: "0.0.0",
@@ -242,13 +241,10 @@ describe("Pi Host integration", () => {
     );
     expect(res.ok).toBe(true);
     const result = res.result as {
-      workspace: { servicesReady: boolean; trust: { decision: string }; id: string };
+      workspace: { servicesReady: boolean; id: string };
     };
-    // Empty project typically notRequired
-    expect(["notRequired", "pending", "trusted", "denied"]).toContain(
-      result.workspace.trust.decision,
-    );
-    if (result.workspace.trust.decision === "notRequired") {
+    expect(result.workspace.servicesReady).toBe(true);
+    {
       expect(result.workspace.servicesReady).toBe(true);
 
       const renamed = await host.request(

@@ -1,28 +1,29 @@
 # Packages & workspaces
 
-## Workspace & trust
+## Workspace loading
 
-1. User picks directory → `workspace.setCurrent`.
-2. If trust required and undecided → pending snapshot + Trust modal.
-3. `workspace.setTrust` with `trustOnce` | `trust` | `deny` rebuilds graph.
+1. User picks a directory through `workspace.setCurrent`.
+2. Host canonicalizes the path and builds services with explicit `projectTrusted: true`.
+3. Project extensions, skills, prompts, and themes become available immediately.
 
-`notRequired` does not allow first project-scope install without explicit trust.
+The selected workspace is trusted by definition. Existing project extensions
+can execute local code as soon as the workspace opens. Project-scope Package
+mutations retain a separate executable-code confirmation in the desktop UI.
 
 ## Package operations
 
-All via Host + `DefaultPackageManager`:
+All operations go through Pi Host and `DefaultPackageManager`:
 
-- list / install / remove / update / updateAll
-- `checkUpdates` only when `capabilities.packageUpdateCheck`
-- resource enable (package origin) and top-level enable (no forged packageId)
+- list / install / remove / update / updateAll;
+- `checkUpdates` only when `capabilities.packageUpdateCheck` is true;
+- package resource enable/disable and standalone top-level resource enable/disable.
 
-Mutations:
-
-- Rejected when Agent busy (`AGENT_BUSY`)
-- Serialized under `serviceGraphLock` (`PACKAGE_MUTATION_BUSY` / `SERVICE_GRAPH_BUSY`)
-- Reconcile: flush → drainErrors → list/resolve → optional session.reload
-- Result status: `committed` | `partialFailure` | `failed`
+Mutations are rejected while the Agent is busy, serialized under
+`serviceGraphLock`, reconciled through settings flush/list/resolve/reload, and
+return `committed`, `partialFailure`, or `failed` status.
 
 ## UI
 
-Packages page: scope segmented control, install field, list with shadow/override cues, resource toggles, standalone resources section.
+The Packages page provides scope filters, install source entry, configured
+Package selection, resource toggles, standalone resources, update actions, and
+explicit confirmation before a Project Package mutation can execute code.

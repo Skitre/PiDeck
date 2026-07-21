@@ -4,7 +4,6 @@ import type {
   DefaultPackageManager,
   DefaultResourceLoader,
   ModelRegistry,
-  ProjectTrustStore,
   SessionManager,
   SettingsManager,
   SessionInfo,
@@ -14,18 +13,13 @@ import type {
   ModelConfigHealth,
   PackageSnapshot,
   SessionSnapshot,
-  TrustOption,
 } from "@pideck/protocol";
-
-export type TrustDecisionUi = "trusted" | "denied" | "session" | "pending" | "notRequired";
 
 export type WorkspaceGraph = {
   workspaceId: string;
   cwd: string;
   canonicalCwd: string;
   revision: number;
-  trustDecision: TrustDecisionUi;
-  projectTrusted: boolean;
   servicesReady: boolean;
   settingsManager: SettingsManager | null;
   packageManager: DefaultPackageManager | null;
@@ -79,29 +73,7 @@ export type GraphFactoryDeps = {
   agentDir: string;
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
-  trustStore: ProjectTrustStore;
   getModelConfigHealth: () => ModelConfigHealth;
   refreshModelHealth: () => Promise<ModelConfigHealth> | ModelConfigHealth;
   packageUpdateCheck: boolean;
 };
-
-export const TRUST_OPTIONS: TrustOption[] = [
-  {
-    id: "trustOnce",
-    label: "Trust this project for this session only",
-    trusted: true,
-    persisted: false,
-  },
-  {
-    id: "trust",
-    label: "Trust this project (persist)",
-    trusted: true,
-    persisted: true,
-  },
-  {
-    id: "deny",
-    label: "Do not trust project resources",
-    trusted: false,
-    persisted: true,
-  },
-];

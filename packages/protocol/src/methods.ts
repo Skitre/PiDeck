@@ -5,9 +5,7 @@ export const HOST_METHODS = [
   "system.shutdown",
   "workspace.setCurrent",
   "workspace.getCurrent",
-  "workspace.getTrust",
   "workspace.searchFiles",
-  "workspace.setTrust",
   "session.list",
   "session.create",
   "session.open",
@@ -38,6 +36,7 @@ export const HOST_METHODS = [
   "agent.getTools",
   "agent.setActiveTools",
   "provider.list",
+  "provider.setEnabled",
   "provider.save",
   "provider.remove",
   "provider.fetchModels",
@@ -105,15 +104,14 @@ export type HostOnlyMethod =
   | "system.getStatus"
   | "system.shutdown"
   | "provider.list"
+  | "provider.setEnabled"
   | "provider.save"
   | "provider.remove"
   | "provider.fetchModels";
 export type WorkspaceOnlyMethod =
   | "workspace.setCurrent"
   | "workspace.getCurrent"
-  | "workspace.getTrust"
   | "workspace.searchFiles"
-  | "workspace.setTrust"
   | "session.list"
   | "session.archive"
   | "session.restore"
@@ -197,9 +195,7 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "system.shutdown": "host",
   "workspace.setCurrent": "workspace",
   "workspace.getCurrent": "workspace",
-  "workspace.getTrust": "workspace",
   "workspace.searchFiles": "workspace",
-  "workspace.setTrust": "workspace",
   "session.list": "workspace",
   "session.create": "nullableSession",
   "session.open": "nullableSession",
@@ -230,6 +226,7 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "agent.getTools": "activeSession",
   "agent.setActiveTools": "toolMutation",
   "provider.list": "host",
+  "provider.setEnabled": "host",
   "provider.save": "host",
   "provider.remove": "host",
   "provider.fetchModels": "host",

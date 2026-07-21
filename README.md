@@ -2,9 +2,13 @@
 
 Windows-first desktop GUI for [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent).
 
-> **Status: P0 Not Complete** — implementation and real desktop/installer gates are in progress.  
-> Evidence: [`docs/operations/remediation-report.md`](./docs/operations/remediation-report.md) · `artifacts/p0/<run-id>/verify-p0.json`.  
-> Do **not** claim P0/M0–M6/release complete until clean-checkout `pnpm verify:release` exits 0 with a real commit SHA.
+> **Status: P0 Not Complete.** The authoritative scope is
+> [`docs/operations/p0-scope.md`](./docs/operations/p0-scope.md).
+> Tracked implementation/claim state is in
+> [`docs/operations/p0-status.json`](./docs/operations/p0-status.json).
+> Release-grade automation is deferred during initial development.
+> `pnpm verify:p0` is the current source gate; `pnpm package:release` creates
+> a development installer candidate without making a release-readiness claim.
 
 PiDeck visualizes Agent sessions, thinking, tool calls, and Package management (Extensions, Skills, Prompts, Themes) using the official Pi SDK as the single source of truth.
 
@@ -40,12 +44,14 @@ pnpm --filter @pideck/desktop run tauri:dev
 ### Verify
 
 ```bash
-# Day-to-day lightweight checks (doc links + typecheck + unit/integration tests)
+# Day-to-day lightweight checks
+pnpm verify:quick
+
+# Pull-request P0 source/core gate (quick + build + Rust tests)
 pnpm verify:p0
 
-# Full production-grade release gate — run before any release.
-# See docs/operations/release-checklist.md for the complete procedure.
-pnpm verify:release
+# Build a development installer candidate
+pnpm package:release
 ```
 
 ## Workspace layout
@@ -57,8 +63,7 @@ pnpm verify:release
 | `packages/pi-host` | Node Pi Host sidecar (SDK owner) |
 | `docs/` | Current implementation documentation |
 | `test-fixtures/` | Packages and extensions for tests |
-| `scripts/` | verify / release / smoke / evidence tooling |
-| `artifacts/p0/` | Generated evidence runs (gitignored content) |
+| `scripts/` | Development verification and packaging tooling |
 
 ## Documentation
 

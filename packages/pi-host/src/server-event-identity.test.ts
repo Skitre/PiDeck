@@ -17,7 +17,6 @@ function server(): PiHostServer {
     capabilities: {
       packageUpdateCheck: false,
       extensionUi: true,
-      projectTrust: true,
       sessionExport: false,
     },
     handlers: {},
@@ -98,7 +97,6 @@ describe("PiHostServer shutdown", () => {
       capabilities: {
         packageUpdateCheck: false,
         extensionUi: true,
-        projectTrust: true,
         sessionExport: false,
       },
       handlers: {},

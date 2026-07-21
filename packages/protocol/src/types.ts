@@ -12,7 +12,6 @@ export type HostIdentity = {
 export type HostCapabilities = {
   packageUpdateCheck: boolean;
   extensionUi: true;
-  projectTrust: true;
   sessionExport: boolean;
 };
 
@@ -29,7 +28,6 @@ export type ModelConfigHealth = {
 export type HostPhase =
   | "booting"
   | "waitingForWorkspace"
-  | "trustRequired"
   | "ready"
   | "agentBusy"
   | "packageBusy"
@@ -50,23 +48,11 @@ export type HostStatusSnapshot = HostIdentity & {
   fatalError?: HostError;
 };
 
-export type TrustOption = {
-  id: "trustOnce" | "trust" | "deny";
-  label: string;
-  trusted: boolean;
-  persisted: boolean;
-};
-
 export type WorkspaceSnapshot = {
   id: string;
   cwd: string;
   canonicalCwd: string;
   revision: number;
-  trust: {
-    required: boolean;
-    decision: "trusted" | "denied" | "session" | "pending" | "notRequired";
-    persistedAtPath?: string;
-  };
   servicesReady: boolean;
 };
 
@@ -143,6 +129,7 @@ export type ProviderAuthStatus = {
 
 export type ProviderSnapshot = {
   id: string;
+  enabled: boolean;
   name: string;
   baseUrl: string;
   api: ProviderApi;
@@ -152,7 +139,7 @@ export type ProviderSnapshot = {
   auth: ProviderAuthStatus;
 };
 
-export type ProviderDraft = Omit<ProviderSnapshot, "auth">;
+export type ProviderDraft = Omit<ProviderSnapshot, "auth" | "enabled">;
 
 export type SerializableAgentContent = {
   type: string;
@@ -353,7 +340,6 @@ export type PiSettingsSnapshot = {
   followUpMode: "all" | "one-at-a-time";
   autoCompaction: boolean;
   autoRetry: boolean;
-  defaultProjectTrust?: string;
 };
 
 export type PiSettingsPatch = {
@@ -362,7 +348,6 @@ export type PiSettingsPatch = {
   followUpMode?: "all" | "one-at-a-time";
   autoCompaction?: boolean;
   autoRetry?: boolean;
-  defaultProjectTrust?: string;
 };
 
 export type ExtensionUiRequest = {

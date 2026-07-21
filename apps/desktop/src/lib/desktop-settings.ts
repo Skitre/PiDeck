@@ -1,6 +1,13 @@
 import type { DesktopSettings } from "@pideck/protocol";
 import { useAppStore } from "./stores/app-store";
 
+export type DesktopSettingsSnapshot = {
+  schemaVersion: number;
+  settings: DesktopSettings;
+  warning?: string;
+  recoveredFrom?: string;
+};
+
 export type DesktopSettingsUpdate = Omit<
   Partial<DesktopSettings>,
   "defaultWorkspace" | "lastWorkspace" | "lastSessionPath" | "agentDir"

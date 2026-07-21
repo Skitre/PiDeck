@@ -52,30 +52,6 @@ export function createWorkspaceHandlers(
       return { result: factory.buildWorkspaceSnapshot(g) };
     },
 
-    "workspace.getTrust": async (ctx) => {
-      const stale = factory.checkIdentity(ctx.context, { requireWorkspace: true });
-      if (stale) return { error: stale };
-      const g = factory.getGraph();
-      if (!g) {
-        return { error: createHostError("PROJECT_NOT_SELECTED", "No workspace") };
-      }
-      return {
-        result: {
-          workspace: factory.buildWorkspaceSnapshot(g),
-          options: factory.getTrustOptions(),
-        },
-      };
-    },
-
-    "workspace.setTrust": async (ctx) => {
-      const stale = factory.checkIdentity(ctx.context, { requireWorkspace: true });
-      if (stale) return { error: stale };
-      const params = ctx.params as { decision: "trustOnce" | "trust" | "deny" };
-      const result = await factory.setTrust(params.decision, ctx.id);
-      if ("error" in result) return { error: result.error };
-      return { result };
-    },
-
     "workspace.searchFiles": async (ctx) => {
       const stale = factory.checkIdentity(ctx.context, { requireWorkspace: true });
       if (stale) return { error: stale };

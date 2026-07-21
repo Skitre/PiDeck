@@ -22,6 +22,7 @@ import { inspectWindowsInstaller } from "./windows-installer-integrity.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "apps/desktop/src-tauri/target/release-staging");
+const stageTimingsMs = {};
 mkdirSync(outDir, { recursive: true });
 
 function run(cmd, args) {
@@ -35,6 +36,49 @@ function run(cmd, args) {
       failedStep: `${cmd} ${args.join(" ")}`,
     });
     process.exit(r.status ?? 1);
+  }
+}
+
+function verifiedSourceBuildCommit() {
+  const expected = process.env.PIDECK_VERIFIED_SOURCE_COMMIT?.trim();
+  if (!expected) return null;
+  const head = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: root,
+    shell: false,
+    encoding: "utf8",
+  });
+  const status = spawnSync("git", ["status", "--porcelain"], {
+    cwd: root,
+    shell: false,
+    encoding: "utf8",
+  });
+  const requiredBuildOutputs = [
+    join(root, "packages", "protocol", "dist", "index.js"),
+    join(root, "packages", "pi-host", "dist", "main.js"),
+  ];
+  if (
+    head.status !== 0 ||
+    head.stdout.trim() !== expected ||
+    status.status !== 0 ||
+    status.stdout.trim() !== "" ||
+    !requiredBuildOutputs.every(existsSync)
+  ) {
+    throw new Error(
+      "PIDECK_VERIFIED_SOURCE_COMMIT does not match a clean HEAD with required build outputs",
+    );
+  }
+  return expected;
+}
+
+function timedStage(label, operation) {
+  const started = Date.now();
+  console.log(`[package:release] ${label} started`);
+  try {
+    return operation();
+  } finally {
+    const durationMs = Date.now() - started;
+    stageTimingsMs[label] = durationMs;
+    console.log(`[package:release] ${label} finished in ${durationMs}ms`);
   }
 }
 
@@ -76,6 +120,7 @@ function writeManifest(obj) {
     platform: process.platform,
     arch: process.arch,
     command: "pnpm package:release",
+    stageTimingsMs,
     exitCode: obj.exitCode ?? null,
     primaryInstaller: obj.primaryInstaller ?? null,
     primaryInstallerSha256: obj.primaryInstallerSha256 ?? null,
@@ -90,37 +135,33 @@ function writeManifest(obj) {
 }
 
 /** Only accept real NSIS setup installers — never cargo deps intermediates. */
-function findPrimaryInstaller(dir) {
-  if (!existsSync(dir)) return null;
-  const hits = [];
-  function walk(d) {
-    for (const name of readdirSync(d)) {
-      const p = join(d, name);
-      let st;
-      try {
-        st = statSync(p);
-      } catch {
-        continue;
-      }
-      if (st.isDirectory()) {
-        if (name === "deps" || name === ".fingerprint" || name === "incremental") continue;
-        walk(p);
-      } else if (/setup\.exe$/i.test(name) || /_x64-setup\.exe$/i.test(name)) {
-        hits.push(p);
-      } else if (/\.msi$/i.test(name) && /pi/i.test(name)) {
-        hits.push(p);
-      }
-    }
+function findPrimaryInstaller(releaseDir) {
+  const candidates = [
+    {
+      dir: join(releaseDir, "bundle", "nsis"),
+      accepts: (name) => /(?:setup|_x64-setup)\.exe$/i.test(name),
+    },
+    {
+      dir: join(releaseDir, "bundle", "msi"),
+      accepts: (name) => /\.msi$/i.test(name) && /pi/i.test(name),
+    },
+  ];
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate.dir)) continue;
+    const hits = readdirSync(candidate.dir)
+      .map((name) => join(candidate.dir, name))
+      .filter((path) => {
+        try {
+          return statSync(path).isFile() && candidate.accepts(basename(path));
+        } catch {
+          return false;
+        }
+      })
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+    if (hits.length > 0) return hits[0];
   }
-  walk(dir);
-  // Prefer nsis folder
-  hits.sort((a, b) => {
-    const an = a.includes(`${join("bundle", "nsis")}`) ? 0 : 1;
-    const bn = b.includes(`${join("bundle", "nsis")}`) ? 0 : 1;
-    if (an !== bn) return an - bn;
-    return statSync(b).mtimeMs - statSync(a).mtimeMs;
-  });
-  return hits[0] ?? null;
+  return null;
 }
 
 const criticalResourcePaths = [
@@ -237,15 +278,39 @@ function validatePackagedRuntime(releaseDir, expectedResourceManifest) {
 }
 
 const startedAt = new Date().toISOString();
-run("pnpm", ["build"]);
-run("pnpm", ["package:sidecar:with-node"]);
-run("pnpm", ["validate:resources"]);
+let reusedSourceBuildCommit = null;
+try {
+  reusedSourceBuildCommit = verifiedSourceBuildCommit();
+} catch (error) {
+  writeManifest({
+    status: "failed",
+    startedAt,
+    exitCode: 1,
+    failedStep: "verify reused source build",
+    residualRisk: error instanceof Error ? error.message : String(error),
+  });
+  console.error("package:release FAIL", error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+if (reusedSourceBuildCommit) {
+  console.log(
+    `[package:release] reusing verify:p0 JavaScript build for ${reusedSourceBuildCommit}`,
+  );
+} else {
+  timedStage("build JavaScript packages", () => run("pnpm", ["build"]));
+}
+timedStage("stage controlled sidecar runtime", () =>
+  run("pnpm", ["package:sidecar:with-node"]),
+);
+timedStage("validate staged resources", () => run("pnpm", ["validate:resources"]));
 
 // Compact pi-host node_modules into a zip to avoid NSIS MAX_PATH failures (C1/C8)
-const compact = spawnSync(
-  process.execPath,
-  [join(root, "scripts/compact-pi-host-resources.mjs")],
-  { cwd: root, stdio: "inherit", shell: false },
+const compact = timedStage("compact Pi Host dependencies", () =>
+  spawnSync(
+    process.execPath,
+    [join(root, "scripts/compact-pi-host-resources.mjs")],
+    { cwd: root, stdio: "inherit", shell: false },
+  ),
 );
 if (compact.status !== 0) {
   writeManifest({
@@ -260,7 +325,9 @@ if (compact.status !== 0) {
 const stagedResourceDir = join(root, "apps", "desktop", "src-tauri", "resources");
 let resourceManifestProof;
 try {
-  resourceManifestProof = writeResourceManifest(stagedResourceDir);
+  resourceManifestProof = timedStage("write release resource manifest", () =>
+    writeResourceManifest(stagedResourceDir),
+  );
 } catch (error) {
   writeManifest({
     status: "failed",
@@ -291,38 +358,44 @@ const tauriArgs = existsSync(tauriCli)
   ? [tauriCli, "build", "--bundles", "nsis"]
   : null;
 
-let tauriStatus = 1;
-if (tauriArgs) {
-  console.log("\n=== node tauri build --bundles nsis ===");
-  const r = spawnSync(process.execPath, tauriArgs, {
-    cwd: join(root, "apps/desktop"),
-    stdio: "inherit",
-    shell: false,
-    env: process.env,
-  });
-  tauriStatus = r.status ?? 1;
-} else {
+const tauriStatus = timedStage("build Tauri NSIS candidate", () => {
+  if (tauriArgs) {
+    console.log("\n=== node tauri build --bundles nsis ===");
+    const r = spawnSync(process.execPath, tauriArgs, {
+      cwd: join(root, "apps/desktop"),
+      stdio: "inherit",
+      shell: false,
+      env: process.env,
+    });
+    return r.status ?? 1;
+  }
   const r = spawnSync(
     "pnpm",
     ["--filter", "@pideck/desktop", "exec", "tauri", "build", "--bundles", "nsis"],
     { cwd: root, stdio: "inherit", shell: true, env: process.env },
   );
-  tauriStatus = r.status ?? 1;
-}
+  return r.status ?? 1;
+});
 
 const desktopExecutable = join(bundleRoot, "pideck.exe");
-const installer = findPrimaryInstaller(bundleRoot);
-const packagedRuntimeErrors = validatePackagedRuntime(
-  bundleRoot,
-  resourceManifestProof.manifest,
+const installer = timedStage("locate primary bundle output", () =>
+  findPrimaryInstaller(bundleRoot),
+);
+const packagedRuntimeErrors = timedStage("validate packaged runtime", () =>
+  validatePackagedRuntime(bundleRoot, resourceManifestProof.manifest),
 );
 let installerProof = null;
 let installerStabilityError = null;
 let sourceInstallerIntegrity = null;
 if (installer && existsSync(installer)) {
   try {
-    installerProof = waitForStableFile(installer);
-    sourceInstallerIntegrity = inspectWindowsInstaller(installer);
+    ({ installerProof, sourceInstallerIntegrity } = timedStage(
+      "stabilize and inspect source installer",
+      () => ({
+        installerProof: waitForStableFile(installer),
+        sourceInstallerIntegrity: inspectWindowsInstaller(installer),
+      }),
+    ));
   } catch (error) {
     installerStabilityError = error instanceof Error ? error.message : String(error);
   }
@@ -389,7 +462,7 @@ const acceptedDir = join(outDir, "accepted");
 rmSync(acceptedDir, { recursive: true, force: true });
 mkdirSync(acceptedDir, { recursive: true });
 const acceptedInstaller = join(acceptedDir, basename(installer));
-copyFileSync(installer, acceptedInstaller);
+timedStage("copy accepted installer", () => copyFileSync(installer, acceptedInstaller));
 try {
   chmodSync(acceptedInstaller, 0o444);
 } catch {
@@ -400,12 +473,19 @@ let acceptedProof = null;
 let acceptedInstallerIntegrity = null;
 let acceptedInstallerError = null;
 try {
-  acceptedProof = waitForStableFile(acceptedInstaller, 10_000);
-  acceptedInstallerIntegrity = inspectWindowsInstaller(acceptedInstaller);
+  ({ acceptedProof, acceptedInstallerIntegrity } = timedStage(
+    "stabilize and inspect accepted installer",
+    () => ({
+      acceptedProof: waitForStableFile(acceptedInstaller, 10_000),
+      acceptedInstallerIntegrity: inspectWindowsInstaller(acceptedInstaller),
+    }),
+  ));
 } catch (error) {
   acceptedInstallerError = error instanceof Error ? error.message : String(error);
 }
-const sourceHashAfterCopy = sha256File(installer);
+const sourceHashAfterCopy = timedStage("rehash source installer", () =>
+  sha256File(installer),
+);
 const acceptedMatchesSource =
   Boolean(acceptedProof) &&
   sourceHashAfterCopy === installerProof.hash &&
@@ -463,6 +543,7 @@ const manifest = writeManifest({
   resourceManifestSha256: resourceManifestProof.sha256,
   resourceManifest: resourceManifestProof.manifest,
   residualRisk: null,
+  reusedSourceBuildCommit,
 });
 console.log("package:release OK", JSON.stringify(manifest, null, 2));
 process.exit(0);

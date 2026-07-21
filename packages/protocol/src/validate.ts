@@ -209,15 +209,9 @@ export function validateRequestParams<M extends HostMethod>(
         ? ok(params)
         : fail("invalid workspace.searchFiles params", { method });
     case "workspace.setCurrent":
-    case "workspace.getTrust":
       return exactObject(params, ["cwd"]) && isNonEmptyString(params.cwd)
         ? ok(params)
         : fail("params must be { cwd: string }", { method });
-    case "workspace.setTrust":
-      return exactObject(params, ["decision"]) &&
-        ["trustOnce", "trust", "deny"].includes(String(params.decision))
-        ? ok(params)
-        : fail("invalid workspace.setTrust params", { method });
     case "session.create":
       return exactObject(params, [], ["name"]) &&
         (params.name === undefined || isNonEmptyString(params.name))
@@ -302,6 +296,12 @@ export function validateRequestParams<M extends HostMethod>(
         !(params.apiKey !== undefined && params.clearApiKey === true)
         ? ok(params)
         : fail("invalid provider.save params", { method });
+    case "provider.setEnabled":
+      return exactObject(params, ["providerId", "enabled"]) &&
+        isNonEmptyString(params.providerId) &&
+        isBoolean(params.enabled)
+        ? ok(params)
+        : fail("invalid provider.setEnabled params", { method });
     case "provider.remove":
     case "provider.fetchModels":
       return exactObject(params, ["providerId"]) && isNonEmptyString(params.providerId)
@@ -381,15 +381,13 @@ export function validateRequestParams<M extends HostMethod>(
             "followUpMode",
             "autoCompaction",
             "autoRetry",
-            "defaultProjectTrust",
           ],
         ) ||
         (patch.defaultThinkingLevel !== undefined && !isString(patch.defaultThinkingLevel)) ||
         (patch.steeringMode !== undefined && !["all", "one-at-a-time"].includes(String(patch.steeringMode))) ||
         (patch.followUpMode !== undefined && !["all", "one-at-a-time"].includes(String(patch.followUpMode))) ||
         (patch.autoCompaction !== undefined && !isBoolean(patch.autoCompaction)) ||
-        (patch.autoRetry !== undefined && !isBoolean(patch.autoRetry)) ||
-        (patch.defaultProjectTrust !== undefined && !isString(patch.defaultProjectTrust))
+        (patch.autoRetry !== undefined && !isBoolean(patch.autoRetry))
       ) {
         return fail("invalid Pi settings patch", { method });
       }

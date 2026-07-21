@@ -729,7 +729,7 @@ export function SessionList({
       {collapsed ? null : (
         <>
       {!workspace?.servicesReady && (
-        <p className="px-1 text-xs text-muted">Select and trust a workspace first.</p>
+        <p className="px-1 text-xs text-muted">Select a workspace first.</p>
       )}
       {workspace?.servicesReady && (controlsOpen || Boolean(query) || filter !== "active") && (
         <div className="flex gap-1 px-1">

@@ -17,7 +17,6 @@ import type {
 import type {
   HostStatusSnapshot,
   WorkspaceSnapshot,
-  TrustOption,
   SessionSnapshot,
   SessionSummary,
   SessionStatsSnapshot,
@@ -51,9 +50,7 @@ export type HostContextMap = {
   "system.shutdown": HostContext;
   "workspace.setCurrent": WorkspaceContext;
   "workspace.getCurrent": WorkspaceContext;
-  "workspace.getTrust": WorkspaceContext;
   "workspace.searchFiles": WorkspaceContext;
-  "workspace.setTrust": WorkspaceContext;
   "session.list": WorkspaceContext;
   "session.create": NullableSessionContext;
   "session.open": NullableSessionContext;
@@ -84,6 +81,7 @@ export type HostContextMap = {
   "agent.getTools": ActiveSessionContext;
   "agent.setActiveTools": ToolMutationContext;
   "provider.list": HostContext;
+  "provider.setEnabled": HostContext;
   "provider.save": HostContext;
   "provider.remove": HostContext;
   "provider.fetchModels": HostContext;
@@ -114,9 +112,7 @@ export type HostRequestParams = {
   "system.shutdown": null;
   "workspace.setCurrent": { cwd: string };
   "workspace.getCurrent": null;
-  "workspace.getTrust": { cwd: string };
   "workspace.searchFiles": { query: string; limit?: number };
-  "workspace.setTrust": { decision: "trustOnce" | "trust" | "deny" };
   "session.list": null;
   "session.create": { name?: string };
   "session.open": { sessionPath: string };
@@ -154,6 +150,7 @@ export type HostRequestParams = {
   "agent.getTools": null;
   "agent.setActiveTools": { names: string[] };
   "provider.list": null;
+  "provider.setEnabled": { providerId: string; enabled: boolean };
   "provider.save": {
     originalId?: string;
     provider: ProviderDraft;
@@ -202,15 +199,12 @@ export type HostResultMap = {
   "workspace.setCurrent": {
     workspace: WorkspaceSnapshot;
     session?: SessionSnapshot;
-    trustOptions?: TrustOption[];
   };
   "workspace.getCurrent": WorkspaceSnapshot | null;
-  "workspace.getTrust": { workspace: WorkspaceSnapshot; options: TrustOption[] };
   "workspace.searchFiles": {
     files: { path: string; kind: "file" | "dir" }[];
     truncated: boolean;
   };
-  "workspace.setTrust": { workspace: WorkspaceSnapshot; session?: SessionSnapshot };
   "session.list": { workspaceId: string; items: SessionSummary[] };
   "session.create": SessionSnapshot;
   "session.open": SessionSnapshot;
@@ -247,6 +241,7 @@ export type HostResultMap = {
   "agent.getTools": ToolSnapshot;
   "agent.setActiveTools": ToolSnapshot;
   "provider.list": { providers: ProviderSnapshot[] };
+  "provider.setEnabled": { providerId: string; enabled: boolean };
   "provider.save": { provider: ProviderSnapshot };
   "provider.remove": { providerId: string; removed: true };
   "provider.fetchModels": {
@@ -256,6 +251,7 @@ export type HostResultMap = {
   "model.list": {
     models: ModelSummary[];
     current?: ModelSummary;
+    enabledProviders?: string[];
     thinkingLevels: string[];
     configHealth: ModelConfigHealth;
   };
@@ -288,10 +284,6 @@ export type HostEventPayloadMap = {
   "host.statusChanged": HostStatusSnapshot;
   "host.fatal": { error: HostError };
   "workspace.changed": WorkspaceSnapshot;
-  "workspace.trustRequired": {
-    workspace: WorkspaceSnapshot;
-    options: TrustOption[];
-  };
   "session.snapshot": SessionSnapshot | null;
   "session.infoChanged": { sessionId: string; name?: string };
   "session.runtimeChanged": {

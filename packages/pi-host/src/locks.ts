@@ -5,7 +5,6 @@
 export type GraphOperationKind =
   | "system.shutdown"
   | "workspace.setCurrent"
-  | "workspace.setTrust"
   | "session.create"
   | "session.open"
   | "session.reload"

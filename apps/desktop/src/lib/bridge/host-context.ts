@@ -117,7 +117,6 @@ export type WorkspaceAuthorization = {
   generation: RequestGeneration;
   workspaceId: string;
   workspaceRevision: number;
-  trustDecision: WorkspaceSnapshot["trust"]["decision"];
 };
 
 export function captureWorkspaceAuthorization(
@@ -128,7 +127,6 @@ export function captureWorkspaceAuthorization(
     generation: captureRequestGeneration(host),
     workspaceId: workspace.id,
     workspaceRevision: workspace.revision,
-    trustDecision: workspace.trust.decision,
   };
 }
 
@@ -136,18 +134,9 @@ export function isCurrentWorkspaceAuthorization(
   host: HostStatusSnapshot | null,
   workspace: WorkspaceSnapshot | null,
   authorization: WorkspaceAuthorization,
-  options: { requireTrusted?: boolean } = {},
 ): boolean {
   if (!workspace || workspace.id !== authorization.workspaceId) return false;
   if (workspace.revision !== authorization.workspaceRevision) return false;
-  if (workspace.trust.decision !== authorization.trustDecision) return false;
-  if (
-    options.requireTrusted &&
-    workspace.trust.decision !== "trusted" &&
-    workspace.trust.decision !== "session"
-  ) {
-    return false;
-  }
   return isCurrentRequestGeneration(host, authorization.generation, {
     session: true,
     packages: true,

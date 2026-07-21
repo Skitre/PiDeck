@@ -27,6 +27,8 @@ import { rebindCurrentSessionModel } from "./model-thinking.js";
 
 type JsonObject = Record<string, unknown>;
 type ModelsConfig = { root: JsonObject; providers: JsonObject; original: string | null };
+const ENABLED_PROVIDERS_KEY = "pideckEnabledProviders";
+const LEGACY_ACTIVE_PROVIDER_KEY = "pideckActiveProvider";
 
 const PROVIDER_APIS = new Set<ProviderApi>([
   "openai-completions",
@@ -145,10 +147,43 @@ async function readModelsConfig(path: string): Promise<ModelsConfig> {
   return { root: parsed, providers, original };
 }
 
+function resolveEnabledProviders(config: ModelsConfig, preferredProvider?: string): string[] {
+  const providerIds = Object.entries(config.providers)
+    .filter((entry): entry is [string, JsonObject] => isObject(entry[1]))
+    .map(([id]) => id);
+  if (providerIds.length === 0) return [];
+  const configured = config.root[ENABLED_PROVIDERS_KEY];
+  if (Array.isArray(configured)) {
+    return [...new Set(configured.filter((id): id is string => typeof id === "string" && providerIds.includes(id)))];
+  }
+  const legacyActive = config.root[LEGACY_ACTIVE_PROVIDER_KEY];
+  if (typeof legacyActive === "string" && providerIds.includes(legacyActive)) return [legacyActive];
+  if (preferredProvider && providerIds.includes(preferredProvider)) return [preferredProvider];
+  const fallback = providerIds.find((id) => {
+    const provider = config.providers[id];
+    return isObject(provider) && Array.isArray(provider.models) && provider.models.length > 0;
+  }) ?? providerIds[0];
+  return fallback ? [fallback] : [];
+}
+
+export async function getEnabledProviderIds(
+  agentDir: string,
+  preferredProvider?: string,
+): Promise<string[] | undefined> {
+  try {
+    const config = await readModelsConfig(join(agentDir, "models.json"));
+    if (!Object.values(config.providers).some(isObject)) return undefined;
+    return resolveEnabledProviders(config, preferredProvider);
+  } catch {
+    return undefined;
+  }
+}
+
 function providerSnapshot(
   id: string,
   raw: JsonObject,
   factory: WorkspaceGraphFactory,
+  enabled: boolean,
 ): ProviderSnapshot {
   const api =
     typeof raw.api === "string" && PROVIDER_APIS.has(raw.api as ProviderApi)
@@ -159,6 +194,7 @@ function providerSnapshot(
     : [];
   return {
     id,
+    enabled,
     name:
       typeof raw.name === "string" && raw.name.trim()
         ? raw.name.trim()
@@ -275,6 +311,22 @@ async function refreshRegistry(factory: WorkspaceGraphFactory, rebindCurrentMode
   rebindCurrentSessionModel(graph.agentSession, factory.deps.modelRegistry);
 }
 
+async function alignCurrentSessionModel(
+  factory: WorkspaceGraphFactory,
+  targetProvider: string | undefined,
+  preferredModelIds: string[] = [],
+): Promise<void> {
+  if (!targetProvider) return;
+  const session = factory.getGraph()?.agentSession;
+  if (!session?.isIdle || session.model?.provider === targetProvider) return;
+  const registry = factory.deps.modelRegistry;
+  const model = preferredModelIds
+    .map((id) => registry.find(targetProvider, id))
+    .find((item) => item !== undefined)
+    ?? registry.getAll().find((item) => item.provider === targetProvider);
+  if (model) await session.setModel(model);
+}
+
 async function discoverModels(
   provider: ProviderSnapshot,
   apiKey: string | undefined,
@@ -359,7 +411,7 @@ async function discoverModels(
 
 export function createProviderHandlers(
   factory: WorkspaceGraphFactory,
-): Partial<Record<"provider.list" | "provider.save" | "provider.remove" | "provider.fetchModels", MethodHandler>> {
+): Partial<Record<"provider.list" | "provider.setEnabled" | "provider.save" | "provider.remove" | "provider.fetchModels", MethodHandler>> {
   const modelsPath = join(factory.deps.agentDir, "models.json");
 
   return {
@@ -367,9 +419,13 @@ export function createProviderHandlers(
       try {
         await refreshRegistry(factory);
         const config = await readModelsConfig(modelsPath);
+        const enabledProviders = new Set(resolveEnabledProviders(
+          config,
+          factory.getGraph()?.agentSession?.model?.provider,
+        ));
         const providers = Object.entries(config.providers)
           .filter((entry): entry is [string, JsonObject] => isObject(entry[1]))
-          .map(([id, raw]) => providerSnapshot(id, raw, factory))
+          .map(([id, raw]) => providerSnapshot(id, raw, factory, enabledProviders.has(id)))
           .sort((left, right) => left.name.localeCompare(right.name));
         return { result: { providers } };
       } catch (error) {
@@ -379,6 +435,67 @@ export function createProviderHandlers(
             error instanceof Error ? error.message : "Could not read Provider configuration",
           ),
         };
+      }
+    },
+
+    "provider.setEnabled": async (ctx) => {
+      const { providerId, enabled } = ctx.params as { providerId: string; enabled: boolean };
+      if (factory.hasBusySessions()) {
+        return {
+          error: createHostError("AGENT_BUSY", "Stop running sessions before changing enabled Providers", {
+            retryable: true,
+          }),
+        };
+      }
+      const server = factory.getServer();
+      if (!server) return { error: createHostError("HOST_NOT_READY", "Server not bound") };
+      if (!server.serviceGraphLock.tryAcquire({ operationKind: "provider.mutation", requestId: ctx.id })) {
+        return { error: createHostError("SERVICE_GRAPH_BUSY", "Service graph busy", { retryable: true }) };
+      }
+      try {
+        const config = await readModelsConfig(modelsPath);
+        const raw = config.providers[providerId];
+        if (!isObject(raw)) {
+          return { error: createHostError("MODEL_NOT_FOUND", `Provider not found: ${providerId}`) };
+        }
+        const nextEnabled = new Set(resolveEnabledProviders(
+          config,
+          factory.getGraph()?.agentSession?.model?.provider,
+        ));
+        if (enabled) nextEnabled.add(providerId);
+        else nextEnabled.delete(providerId);
+        config.root[ENABLED_PROVIDERS_KEY] = [...nextEnabled];
+        delete config.root[LEGACY_ACTIVE_PROVIDER_KEY];
+        await commitModelsConfig(modelsPath, config.root, factory);
+        try {
+          await refreshRegistry(factory, true);
+          const currentProvider = factory.getGraph()?.agentSession?.model?.provider;
+          if (!currentProvider || !nextEnabled.has(currentProvider)) {
+            const targetProvider = enabled ? providerId : [...nextEnabled][0];
+            const targetRaw = targetProvider ? config.providers[targetProvider] : undefined;
+            const modelIds = isObject(targetRaw) && Array.isArray(targetRaw.models)
+              ? targetRaw.models
+                  .filter((model): model is JsonObject => isObject(model))
+                  .map((model) => model.id)
+                  .filter((id): id is string => typeof id === "string")
+              : [];
+            await alignCurrentSessionModel(factory, targetProvider, modelIds);
+          }
+        } catch (error) {
+          await restoreModelsConfig(modelsPath, config.original);
+          await refreshRegistry(factory, true);
+          throw error;
+        }
+        return { result: { providerId, enabled } };
+      } catch (error) {
+        return {
+          error: createHostError(
+            "SETTINGS_WRITE_FAILED",
+            error instanceof Error ? error.message : "Could not update enabled Providers",
+          ),
+        };
+      } finally {
+        server.serviceGraphLock.release(ctx.id);
       }
     },
 
@@ -407,6 +524,11 @@ export function createProviderHandlers(
       }
       try {
         const config = await readModelsConfig(modelsPath);
+        const enabledBefore = resolveEnabledProviders(
+          config,
+          factory.getGraph()?.agentSession?.model?.provider,
+        );
+        const wasFirstProvider = Object.keys(config.providers).length === 0;
         if (draft.id !== originalId && config.providers[draft.id] !== undefined) {
           return { error: createHostError("INVALID_REQUEST", `Provider already exists: ${draft.id}`) };
         }
@@ -422,6 +544,10 @@ export function createProviderHandlers(
         if (params.apiKey !== undefined || params.clearApiKey === true) delete merged.apiKey;
         if (draft.id !== originalId) delete config.providers[originalId];
         config.providers[draft.id] = merged;
+        const enabledAfter = enabledBefore.map((id) => id === originalId ? draft.id : id);
+        if (wasFirstProvider && !enabledAfter.includes(draft.id)) enabledAfter.push(draft.id);
+        config.root[ENABLED_PROVIDERS_KEY] = [...new Set(enabledAfter)];
+        delete config.root[LEGACY_ACTIVE_PROVIDER_KEY];
 
         const oldSourceCredential = factory.deps.authStorage.get(originalId);
         const oldTargetCredential = factory.deps.authStorage.get(draft.id);
@@ -436,6 +562,13 @@ export function createProviderHandlers(
           }
           if (draft.id !== originalId) factory.deps.authStorage.remove(originalId);
           await refreshRegistry(factory, true);
+          const currentProvider = factory.getGraph()?.agentSession?.model?.provider;
+          const targetProvider = currentProvider && enabledAfter.includes(currentProvider)
+            ? undefined
+            : enabledAfter[0];
+          await alignCurrentSessionModel(factory, targetProvider, targetProvider === draft.id
+            ? draft.models.map((model) => model.id)
+            : []);
         } catch (error) {
           await restoreModelsConfig(modelsPath, config.original);
           if (oldTargetCredential) factory.deps.authStorage.set(draft.id, oldTargetCredential);
@@ -446,7 +579,12 @@ export function createProviderHandlers(
           await refreshRegistry(factory, true);
           throw error;
         }
-        return { result: { provider: providerSnapshot(draft.id, merged, factory) } };
+        const enabledProviders = new Set(resolveEnabledProviders(config));
+        return {
+          result: {
+            provider: providerSnapshot(draft.id, merged, factory, enabledProviders.has(draft.id)),
+          },
+        };
       } catch (error) {
         return {
           error: createHostError(
@@ -476,7 +614,13 @@ export function createProviderHandlers(
         if (config.providers[providerId] === undefined) {
           return { error: createHostError("MODEL_NOT_FOUND", `Provider not found: ${providerId}`) };
         }
+        const enabledBefore = resolveEnabledProviders(
+          config,
+          factory.getGraph()?.agentSession?.model?.provider,
+        );
         delete config.providers[providerId];
+        config.root[ENABLED_PROVIDERS_KEY] = enabledBefore.filter((id) => id !== providerId);
+        delete config.root[LEGACY_ACTIVE_PROVIDER_KEY];
         const oldCredential = factory.deps.authStorage.get(providerId);
         await commitModelsConfig(modelsPath, config.root, factory);
         try {
@@ -509,7 +653,15 @@ export function createProviderHandlers(
         if (!isObject(raw)) {
           return { error: createHostError("MODEL_NOT_FOUND", `Provider not found: ${providerId}`) };
         }
-        const provider = providerSnapshot(providerId, raw, factory);
+        const provider = providerSnapshot(
+          providerId,
+          raw,
+          factory,
+          resolveEnabledProviders(
+            config,
+            factory.getGraph()?.agentSession?.model?.provider,
+          ).includes(providerId),
+        );
         if (!provider.baseUrl) {
           return { error: createHostError("INVALID_REQUEST", "Provider Base URL is required") };
         }

@@ -18,7 +18,6 @@ function mockFactory(opts: {
 }): WorkspaceGraphFactory {
   const g = {
     resourceReloadRequired: opts.resourceReloadRequired,
-    trustDecision: "notRequired" as const,
     agentSession: {
       reload: vi.fn(async () => {}),
       isIdle: true,

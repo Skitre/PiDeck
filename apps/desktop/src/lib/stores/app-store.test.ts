@@ -26,7 +26,6 @@ function host(id: string): HostStatusSnapshot {
     capabilities: {
       packageUpdateCheck: false,
       extensionUi: true,
-      projectTrust: true,
       sessionExport: false,
     },
     modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },
@@ -39,7 +38,6 @@ function workspace(id: string, rev: number): WorkspaceSnapshot {
     cwd: `/p/${id}`,
     canonicalCwd: `/p/${id}`,
     revision: rev,
-    trust: { required: false, decision: "notRequired" },
     servicesReady: true,
   };
 }
@@ -79,7 +77,6 @@ describe("app-store epoch wiring", () => {
       session: null,
       packages: null,
       tools: null,
-      trustOptions: null,
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
@@ -90,6 +87,7 @@ describe("app-store epoch wiring", () => {
       providerConfigRevision: 0,
       sessionCatalog: emptySessionCatalog(),
       sessionDrafts: {},
+      notifications: [],
       desynchronized: false,
       lastSequence: 0,
       hostFatal: null,
@@ -425,5 +423,21 @@ describe("app-store epoch wiring", () => {
 
     useAppStore.getState().applyWorkspaceSnapshot(workspace("w2", 2));
     expect(useAppStore.getState().sessionCatalog).toEqual(emptySessionCatalog());
+  });
+
+  it("retains a bounded notification history with dismiss and clear actions", () => {
+    for (let index = 0; index < 51; index += 1) {
+      useAppStore.getState().pushNotification(`message-${index}`, index === 50 ? "error" : "info");
+    }
+    const retained = useAppStore.getState().notifications;
+    expect(retained).toHaveLength(50);
+    expect(retained[0]?.message).toBe("message-1");
+    expect(retained.at(-1)).toMatchObject({ message: "message-50", level: "error" });
+    expect(typeof retained.at(-1)?.createdAt).toBe("number");
+
+    useAppStore.getState().dismissNotification(retained.at(-1)!.id);
+    expect(useAppStore.getState().notifications).toHaveLength(49);
+    useAppStore.getState().clearNotifications();
+    expect(useAppStore.getState().notifications).toEqual([]);
   });
 });

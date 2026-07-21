@@ -6,7 +6,6 @@ import {
   createAgentSession,
   DefaultPackageManager,
   DefaultResourceLoader,
-  hasTrustRequiringProjectResources,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -17,7 +16,6 @@ import {
   type SessionSnapshot,
   type SessionRuntimeState,
   type ToolSnapshot,
-  type TrustOption,
   type WorkspaceSnapshot,
   toJsonValue,
 } from "@pideck/protocol";
@@ -31,10 +29,8 @@ import { toolResultNeedsToolsRefresh } from "./tools-refresh.js";
 import { AgentOperationLock } from "./locks.js";
 export * from "./workspace-graph-types.js";
 import {
-  TRUST_OPTIONS,
   type BackgroundSessionRuntime,
   type GraphFactoryDeps,
-  type TrustDecisionUi,
   type WorkspaceGraph,
 } from "./workspace-graph-types.js";
 import {
@@ -78,10 +74,6 @@ export class WorkspaceGraphFactory {
 
   getServer(): PiHostServer | null {
     return this.server;
-  }
-
-  getTrustOptions(): TrustOption[] {
-    return TRUST_OPTIONS;
   }
 
   getSessionOperationLock(session: AgentSession): AgentOperationLock {
@@ -200,10 +192,6 @@ export class WorkspaceGraphFactory {
       cwd: g.cwd,
       canonicalCwd: g.canonicalCwd,
       revision: g.revision,
-      trust: {
-        required: g.trustDecision !== "notRequired",
-        decision: g.trustDecision,
-      },
       servicesReady: g.servicesReady,
     };
   }
@@ -543,8 +531,6 @@ export class WorkspaceGraphFactory {
    */
   private async tryReactivateRetainedGraph(args: {
     canonical: string;
-    requiresTrust: boolean;
-    stored: boolean | null | undefined;
     previousGraph: WorkspaceGraph | null;
     revision: number;
     sessionRevision: number;
@@ -558,16 +544,7 @@ export class WorkspaceGraphFactory {
     const g = this.takeRetainedGraph(args.canonical);
     if (!g) return null;
 
-    // Re-evaluate trust against the store; a retained trust-once ("session")
-    // grant remains valid for this host instance. Anything else mismatched
-    // (revoked, denied, not ready) discards the retained graph.
-    let trustDecision: TrustDecisionUi | null = null;
-    if (g.servicesReady && g.agentSession && args.stored !== false) {
-      if (!args.requiresTrust) trustDecision = "notRequired";
-      else if (args.stored === true) trustDecision = "trusted";
-      else if (g.trustDecision === "session" && g.projectTrusted) trustDecision = "session";
-    }
-    if (!trustDecision) {
+    if (!g.servicesReady || !g.agentSession) {
       await this.disposeGraph(g);
       return null;
     }
@@ -622,8 +599,6 @@ export class WorkspaceGraphFactory {
       await this.retainGraph(args.previousGraph);
     }
     g.revision = args.revision;
-    g.trustDecision = trustDecision;
-    g.projectTrusted = true;
     this.graph = g;
     server.identity.workspaceId = g.workspaceId;
     server.identity.workspaceRevision = args.revision;
@@ -664,7 +639,6 @@ export class WorkspaceGraphFactory {
     server.setPhase("ready");
     server.setLastError(undefined);
     const workspace = this.buildWorkspaceSnapshot(g);
-    workspace.trust.required = args.requiresTrust;
 
     server.emit("workspace.changed", workspace);
     if (g.packageSnapshot) {
@@ -706,8 +680,6 @@ export class WorkspaceGraphFactory {
     cwd: string;
     canonicalCwd: string;
     revision: number;
-    trustDecision: TrustDecisionUi;
-    projectTrusted: boolean;
     sessionRevision: number;
     packageRevision: number;
     error: HostError;
@@ -721,8 +693,6 @@ export class WorkspaceGraphFactory {
       cwd: args.cwd,
       canonicalCwd: args.canonicalCwd,
       revision: args.revision,
-      trustDecision: args.trustDecision,
-      projectTrusted: args.projectTrusted,
       servicesReady: false,
       settingsManager: null,
       packageManager: null,
@@ -764,7 +734,6 @@ export class WorkspaceGraphFactory {
     | {
         workspace: WorkspaceSnapshot;
         session?: SessionSnapshot;
-        trustOptions?: TrustOption[];
       }
     | { error: HostError }
   > {
@@ -810,17 +779,10 @@ export class WorkspaceGraphFactory {
       const candidateSessionRevision = invalidatedSessionRevision + 1;
       const candidatePackageRevision = server.identity.packageRevision + 1;
 
-      const requiresTrust = hasTrustRequiringProjectResources(canonical);
-      const stored = this.deps.trustStore.get(canonical);
-
       // Fast path: a graph retained from an earlier visit reactivates in
-      // milliseconds instead of a full rebuild. Trust is re-evaluated against
-      // the store; a retained "session" (trust-once) grant stays valid for
-      // the lifetime of this host instance.
+      // milliseconds instead of a full rebuild.
       const reactivated = await this.tryReactivateRetainedGraph({
         canonical,
-        requiresTrust,
-        stored,
         previousGraph,
         revision,
         sessionRevision: candidateSessionRevision,
@@ -828,72 +790,11 @@ export class WorkspaceGraphFactory {
       });
       if (reactivated) return reactivated;
 
-      let trustDecision: TrustDecisionUi;
-      let projectTrusted: boolean;
-
-      if (!requiresTrust) {
-        trustDecision = "notRequired";
-        projectTrusted = true;
-      } else if (stored === true) {
-        trustDecision = "trusted";
-        projectTrusted = true;
-      } else if (stored === false) {
-        trustDecision = "denied";
-        projectTrusted = false;
-      } else {
-        // Pending trust is a complete no-services candidate and still commits atomically.
-        const candidateGraph: WorkspaceGraph = {
-          workspaceId,
-          cwd,
-          canonicalCwd: canonical,
-          revision,
-          trustDecision: "pending",
-          projectTrusted: false,
-          servicesReady: false,
-          settingsManager: null,
-          packageManager: null,
-          resourceLoader: null,
-          sessionManager: null,
-          agentSession: null,
-          extensionsResult: null,
-          packageSnapshot: null,
-          sessionSnapshot: null,
-          toolRevision: 0,
-          resourceIdMap: new Map(),
-          unsubscribeAgent: null,
-          extensionUiActivate: null,
-          extensionUiCleanup: null,
-          extensionUiUpdateIdentity: null,
-          resourceReloadRequired: false,
-          backgroundSessions: new Map(),
-        };
-        if (previousGraph) {
-          await this.retainGraph(previousGraph);
-        }
-        this.graph = candidateGraph;
-        server.identity.workspaceId = workspaceId;
-        server.identity.workspaceRevision = revision;
-        server.identity.sessionId = null;
-        server.identity.sessionRevision = invalidatedSessionRevision;
-        server.setPhase("trustRequired");
-        server.setLastError(undefined);
-        const snap = this.buildWorkspaceSnapshot(candidateGraph);
-        snap.trust.required = true;
-        server.emit("workspace.trustRequired", {
-          workspace: snap,
-          options: TRUST_OPTIONS,
-        });
-        server.emit("workspace.changed", snap);
-        return { workspace: snap, trustOptions: TRUST_OPTIONS };
-      }
-
       const built = await this.buildServices({
         workspaceId,
         cwd,
         canonicalCwd: canonical,
         revision,
-        trustDecision,
-        projectTrusted,
         sessionRevision: candidateSessionRevision,
         packageRevision: candidatePackageRevision,
       });
@@ -905,8 +806,6 @@ export class WorkspaceGraphFactory {
           cwd,
           canonicalCwd: canonical,
           revision,
-          trustDecision,
-          projectTrusted,
           sessionRevision: invalidatedSessionRevision,
           packageRevision: candidatePackageRevision,
           error: built.error,
@@ -939,8 +838,6 @@ export class WorkspaceGraphFactory {
           cwd,
           canonicalCwd: canonical,
           revision,
-          trustDecision,
-          projectTrusted,
           sessionRevision: invalidatedSessionRevision,
           packageRevision: candidatePackageRevision,
           error,
@@ -951,7 +848,6 @@ export class WorkspaceGraphFactory {
       server.setPhase("ready");
       server.setLastError(undefined);
       const workspace = this.buildWorkspaceSnapshot(built.graph);
-      workspace.trust.required = requiresTrust;
 
       server.emit("workspace.changed", workspace);
       if (this.graph.packageSnapshot) {
@@ -972,174 +868,12 @@ export class WorkspaceGraphFactory {
     }
   }
 
-  async setTrust(
-    decision: "trustOnce" | "trust" | "deny",
-    requestId: string,
-  ): Promise<
-    | { workspace: WorkspaceSnapshot; session?: SessionSnapshot }
-    | { error: HostError }
-  > {
-    const server = this.server;
-    if (!server || !this.graph) {
-      return { error: createHostError("PROJECT_NOT_SELECTED", "No workspace selected") };
-    }
-
-    if (!server.serviceGraphLock.tryAcquire({ operationKind: "workspace.setTrust", requestId })) {
-      return {
-        error: createHostError("SERVICE_GRAPH_BUSY", "Service graph is busy", {
-          retryable: true,
-          details: {
-            operationKind: server.serviceGraphLock.getOwner()?.operationKind ?? null,
-          },
-        }),
-      };
-    }
-
-    try {
-      if (this.hasBusySessions()) {
-        return { error: createHostError("AGENT_BUSY", "Agent is busy", { retryable: true }) };
-      }
-
-      const g = this.graph;
-      const canonical = g.canonicalCwd;
-
-      let trustDecision: TrustDecisionUi;
-      let projectTrusted: boolean;
-
-      if (decision === "trustOnce") {
-        trustDecision = "session";
-        projectTrusted = true;
-      } else if (decision === "trust") {
-        trustDecision = "trusted";
-        projectTrusted = true;
-      } else {
-        trustDecision = "denied";
-        projectTrusted = false;
-      }
-
-      const revision = server.identity.workspaceRevision + 1;
-      const invalidatedSessionRevision =
-        server.identity.sessionRevision + (g.agentSession ? 1 : 0);
-      const candidateSessionRevision = invalidatedSessionRevision + 1;
-      const candidatePackageRevision = server.identity.packageRevision + 1;
-      const built = await this.buildServices({
-        workspaceId: g.workspaceId,
-        cwd: g.cwd,
-        canonicalCwd: canonical,
-        revision,
-        trustDecision,
-        projectTrusted,
-        sessionRevision: candidateSessionRevision,
-        packageRevision: candidatePackageRevision,
-      });
-
-      if ("error" in built) {
-        await this.commitWorkspaceFailure({
-          previousGraph: g,
-          workspaceId: g.workspaceId,
-          cwd: g.cwd,
-          canonicalCwd: canonical,
-          revision,
-          trustDecision,
-          projectTrusted,
-          sessionRevision: invalidatedSessionRevision,
-          packageRevision: candidatePackageRevision,
-          error: built.error,
-        });
-        return { error: built.error };
-      }
-
-      try {
-        if (decision === "trust") {
-          this.deps.trustStore.set(canonical, true);
-        } else if (decision === "deny") {
-          this.deps.trustStore.set(canonical, false);
-        }
-      } catch (err) {
-        await this.disposeGraph(built.graph);
-        const error = createHostError(
-          "WORKSPACE_SWITCH_FAILED",
-          err instanceof Error ? err.message : "Failed to persist trust decision",
-        );
-        await this.commitWorkspaceFailure({
-          previousGraph: g,
-          workspaceId: g.workspaceId,
-          cwd: g.cwd,
-          canonicalCwd: canonical,
-          revision,
-          trustDecision,
-          projectTrusted,
-          sessionRevision: invalidatedSessionRevision,
-          packageRevision: candidatePackageRevision,
-          error,
-        });
-        return { error };
-      }
-
-      await this.disposeGraph(g);
-      this.graph = built.graph;
-      server.identity.workspaceId = g.workspaceId;
-      server.identity.workspaceRevision = revision;
-      server.identity.sessionId = built.graph.sessionSnapshot?.sessionId ?? null;
-      server.identity.sessionRevision = candidateSessionRevision;
-      server.identity.packageRevision = candidatePackageRevision;
-
-      let publishExtensionUi = () => {};
-      try {
-        publishExtensionUi = await this.activateExtensionUi(this.graph);
-      } catch (err) {
-        const error = createHostError(
-          "WORKSPACE_SWITCH_FAILED",
-          err instanceof Error ? err.message : "Extension bind failed",
-        );
-        await this.disposeGraph(this.graph);
-        await this.commitWorkspaceFailure({
-          previousGraph: null,
-          workspaceId: g.workspaceId,
-          cwd: g.cwd,
-          canonicalCwd: canonical,
-          revision,
-          trustDecision,
-          projectTrusted,
-          sessionRevision: invalidatedSessionRevision,
-          packageRevision: candidatePackageRevision,
-          error,
-        });
-        return { error };
-      }
-
-      server.setPhase("ready");
-      server.setLastError(undefined);
-
-      const workspace = this.buildWorkspaceSnapshot(this.graph);
-      workspace.trust.required = true;
-
-      server.emit("workspace.changed", workspace);
-      if (this.graph.packageSnapshot) {
-        server.emit("package.snapshot", this.graph.packageSnapshot);
-      }
-      if (this.graph.sessionSnapshot) {
-        server.emit("session.snapshot", this.graph.sessionSnapshot);
-        server.emit("agent.toolsChanged", this.graph.sessionSnapshot.tools);
-      }
-      publishExtensionUi();
-
-      return {
-        workspace,
-        ...(this.graph.sessionSnapshot ? { session: this.graph.sessionSnapshot } : {}),
-      };
-    } finally {
-      server.serviceGraphLock.release(requestId);
-    }
-  }
 
   private async buildServices(args: {
     workspaceId: string;
     cwd: string;
     canonicalCwd: string;
     revision: number;
-    trustDecision: TrustDecisionUi;
-    projectTrusted: boolean;
     sessionRevision: number;
     packageRevision: number;
   }): Promise<{ graph: WorkspaceGraph } | { error: HostError }> {
@@ -1160,7 +894,7 @@ export class WorkspaceGraphFactory {
     try {
       // Explicit projectTrusted — never rely on SDK default true
       const settingsManager = SettingsManager.create(args.canonicalCwd, agentDir, {
-        projectTrusted: args.projectTrusted,
+        projectTrusted: true,
       });
 
       const packageManager = new DefaultPackageManager({
@@ -1177,7 +911,6 @@ export class WorkspaceGraphFactory {
       await resourceLoader.reload();
       markStep("resourceLoader.reload");
 
-      // Create a new session for this workspace
       const sessionManager = SessionManager.create(args.canonicalCwd);
 
       await Promise.resolve(this.deps.refreshModelHealth());
@@ -1203,8 +936,6 @@ export class WorkspaceGraphFactory {
         cwd: args.cwd,
         canonicalCwd: args.canonicalCwd,
         revision: args.revision,
-        trustDecision: args.trustDecision,
-        projectTrusted: args.projectTrusted,
         servicesReady: true,
         settingsManager,
         packageManager,

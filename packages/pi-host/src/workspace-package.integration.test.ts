@@ -9,7 +9,6 @@ import {
   writeFileSync,
   rmSync,
   existsSync,
-  readFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
@@ -125,7 +124,7 @@ function emptyProject(root: string, name: string): string {
   return dir;
 }
 
-function projectWithTrustResource(root: string, name: string): string {
+function projectWithResource(root: string, name: string): string {
   const dir = emptyProject(root, name);
   mkdirSync(join(dir, ".pi", "extensions"), { recursive: true });
   writeFileSync(
@@ -141,20 +140,19 @@ function sessionDirFor(agentDir: string, cwd: string): string {
   return join(resolve(agentDir), "sessions", safePath);
 }
 
-describe("trust + package + workspace integration", () => {
+describe("package + workspace integration", () => {
   let root: string;
   let agentDir: string;
   let host: HostProcess;
   let hostId: string;
 
   beforeAll(async () => {
-    root = mkdtempSync(join(tmpdir(), "pideck-trust-pkg-"));
+    root = mkdtempSync(join(tmpdir(), "pideck-package-workspace-"));
     agentDir = join(root, "agent");
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(join(agentDir, "auth.json"), "{}");
     writeFileSync(join(agentDir, "models.json"), "{}");
     writeFileSync(join(agentDir, "settings.json"), "{}");
-    writeFileSync(join(agentDir, "trust.json"), "{}");
 
     host = new HostProcess(agentDir);
     await host.waitForEvent("host.ready");
@@ -219,115 +217,33 @@ describe("trust + package + workspace integration", () => {
     expect(list2.packageRevision).toBe(revAfter1);
   }, 90_000);
 
-  it("trust pending blocks services; trustOnce enables; notRequired project install → PROJECT_NOT_TRUSTED", async () => {
-    const trustProj = projectWithTrustResource(root, "trust-gate");
-    // Reset workspace from previous test
-    const set = await host.request(
+  it("loads project resources immediately when a workspace is selected", async () => {
+    const project = projectWithResource(root, "project-resources");
+    const statusResponse = await host.request(
+      "system.getStatus",
+      { expectedHostInstanceId: hostId },
+      null,
+    );
+    const status = statusResponse.result as {
+      workspaceId: string | null;
+      workspaceRevision: number;
+    };
+    const selected = await host.request(
       "workspace.setCurrent",
       {
         expectedHostInstanceId: hostId,
-        expectedWorkspaceId: null,
-        expectedWorkspaceRevision: 0,
+        expectedWorkspaceId: status.workspaceId,
+        expectedWorkspaceRevision: status.workspaceRevision,
       },
-      { cwd: trustProj },
+      { cwd: project },
       60_000,
     );
-    // may fail STALE if we have workspace — use current identity
-    let res = set;
-    if (!set.ok) {
-      // get status for identity
-      const st = await host.request(
-        "system.getStatus",
-        { expectedHostInstanceId: hostId },
-        null,
-      );
-      const status = st.result as {
-        workspaceId: string | null;
-        workspaceRevision: number;
-      };
-      res = await host.request(
-        "workspace.setCurrent",
-        {
-          expectedHostInstanceId: hostId,
-          expectedWorkspaceId: status.workspaceId,
-          expectedWorkspaceRevision: status.workspaceRevision,
-        },
-        { cwd: trustProj },
-        60_000,
-      );
-    }
-    expect(res.ok).toBe(true);
-    const result = res.result as {
-      workspace: {
-        id: string;
-        revision: number;
-        servicesReady: boolean;
-        trust: { decision: string };
-      };
-    };
-    expect(result.workspace.trust.decision).toBe("pending");
-    expect(result.workspace.servicesReady).toBe(false);
-
-    const trust = await host.request(
-      "workspace.setTrust",
-      {
-        expectedHostInstanceId: hostId,
-        expectedWorkspaceId: result.workspace.id,
-        expectedWorkspaceRevision: result.workspace.revision,
-      },
-      { decision: "trustOnce" },
-      90_000,
-    );
-    expect(trust.ok).toBe(true);
-    const trusted = trust.result as {
-      workspace: { id: string; revision: number; servicesReady: boolean; trust: { decision: string } };
-    };
-    expect(trusted.workspace.trust.decision).toBe("session");
-    expect(trusted.workspace.servicesReady).toBe(true);
-
-    // trustOnce must not write trust.json true for this path
-    const trustJson = JSON.parse(readFileSync(join(agentDir, "trust.json"), "utf8")) as Record<
-      string,
-      unknown
-    >;
-    const trueValues = Object.values(trustJson).filter((v) => v === true);
-    // session trust must not persist
-    expect(trueValues.length).toBe(0);
-
-    // Switch to empty project (notRequired) and try project install
-    const empty = emptyProject(root, "not-required-install");
-    const setEmpty = await host.request(
-      "workspace.setCurrent",
-      {
-        expectedHostInstanceId: hostId,
-        expectedWorkspaceId: trusted.workspace.id,
-        expectedWorkspaceRevision: trusted.workspace.revision,
-      },
-      { cwd: empty },
-      60_000,
-    );
-    expect(setEmpty.ok).toBe(true);
-    const emptyWs = (setEmpty.result as { workspace: { id: string; revision: number; trust: { decision: string }; servicesReady: boolean } })
-      .workspace;
-    expect(emptyWs.trust.decision).toBe("notRequired");
-    expect(emptyWs.servicesReady).toBe(true);
-
-    const install = await host.request(
-      "package.install",
-      {
-        expectedHostInstanceId: hostId,
-        expectedWorkspaceId: emptyWs.id,
-        expectedWorkspaceRevision: emptyWs.revision,
-        expectedSessionId: setEmpty.sessionId,
-        expectedSessionRevision: setEmpty.sessionRevision,
-        expectedPackageRevision: setEmpty.packageRevision,
-      },
-      { source: fixturePkg, scope: "project" },
-      60_000,
-    );
-    expect(install.ok).toBe(false);
-    expect((install.error as { code: string }).code).toBe("PROJECT_NOT_TRUSTED");
-  }, 180_000);
+    expect(selected.ok).toBe(true);
+    expect(
+      (selected.result as { workspace: { servicesReady: boolean } }).workspace.servicesReady,
+    ).toBe(true);
+    expect(selected.sessionId).toEqual(expect.any(String));
+  }, 90_000);
 
   it("installs local fixture package in user scope, lists it, removes it", async () => {
     expect(existsSync(fixturePkg)).toBe(true);
@@ -419,6 +335,76 @@ describe("trust + package + workspace integration", () => {
     expect(removeResult.packageSnapshot.configured.some((c) => c.id === installed!.id)).toBe(
       false,
     );
+  }, 300_000);
+
+  it("installs and removes a local project package after workspace selection", async () => {
+    const project = emptyProject(root, "project-pkg-remove");
+    const statusResponse = await host.request(
+      "system.getStatus",
+      { expectedHostInstanceId: hostId },
+      null,
+    );
+    const status = statusResponse.result as {
+      workspaceId: string | null;
+      workspaceRevision: number;
+    };
+    const selected = await host.request(
+      "workspace.setCurrent",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: status.workspaceId,
+        expectedWorkspaceRevision: status.workspaceRevision,
+      },
+      { cwd: project },
+      60_000,
+    );
+    expect(selected.ok).toBe(true);
+    const workspace = (selected.result as {
+      workspace: { id: string; revision: number; servicesReady: boolean };
+    }).workspace;
+    expect(workspace.servicesReady).toBe(true);
+
+    const install = await host.request(
+      "package.install",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: workspace.id,
+        expectedWorkspaceRevision: workspace.revision,
+        expectedSessionId: selected.sessionId,
+        expectedSessionRevision: selected.sessionRevision,
+        expectedPackageRevision: selected.packageRevision,
+      },
+      { source: fixturePkg, scope: "project" },
+      120_000,
+    );
+    expect(install.ok).toBe(true);
+    const installed = (install.result as {
+      packageSnapshot: { configured: Array<{ id: string; source: string; scope: string }> };
+    }).packageSnapshot.configured.find(
+      (pkg) =>
+        pkg.scope === "project" &&
+        (pkg.source === fixturePkg || pkg.source.includes("full-package")),
+    );
+    expect(installed).toBeTruthy();
+
+    const remove = await host.request(
+      "package.remove",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: workspace.id,
+        expectedWorkspaceRevision: workspace.revision,
+        expectedSessionId: install.sessionId,
+        expectedSessionRevision: install.sessionRevision,
+        expectedPackageRevision: install.packageRevision,
+      },
+      { packageId: installed!.id },
+      120_000,
+    );
+    expect(remove.ok, JSON.stringify(remove.error)).toBe(true);
+    const after = (remove.result as {
+      packageSnapshot: { configured: Array<{ id: string }> };
+    }).packageSnapshot;
+    expect(after.configured.some((pkg) => pkg.id === installed!.id)).toBe(false);
   }, 300_000);
 
   it("workspace A → B → A invalidates old context (STALE_REVISION) and does not reuse revisions", async () => {

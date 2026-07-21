@@ -34,7 +34,6 @@ const hostStatus = {
   capabilities: {
     packageUpdateCheck: false,
     extensionUi: true,
-    projectTrust: true,
     sessionExport: false,
   },
   modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },

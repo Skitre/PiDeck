@@ -8,10 +8,10 @@ Outbound backpressure (`packages/pi-host/src/outbound-queue.ts`): all output flo
 
 Every Host process has a new `hostInstanceId`. Monotonic:
 
-- `workspaceRevision` — workspace graph replace / trust rebuild  
-- `sessionRevision` — session create/open/reload/dispose  
-- `packageRevision` — package snapshot publish  
-- `ToolSnapshot.revision` — within a session generation, starts at 1  
+- `workspaceRevision` — workspace graph replacement
+- `sessionRevision` — session create/open/reload/dispose
+- `packageRevision` — package snapshot publish
+- `ToolSnapshot.revision` — within a session generation, starts at 1
 
 Frontend **must drop** events/responses with mismatched `hostInstanceId`. Stale expected identity returns `STALE_REVISION`.
 
@@ -20,7 +20,7 @@ Frontend **must drop** events/responses with mismatched `hostInstanceId`. Stale 
 Implemented in `packages/protocol` + handlers in `packages/pi-host`:
 
 - `system.hello` / `getStatus` / `shutdown`
-- `workspace.setCurrent` / `getCurrent` / `getTrust` / `setTrust`
+- `workspace.setCurrent` / `getCurrent`
 - `session.*` (list, create, open, snapshot, name, entries, tree, stats)
 - `agent.*` (prompt, steer, followUp, abort, queue, compact, tools, …)
 - `model.list` / `setCurrent` / `setThinkingLevel`
@@ -38,7 +38,7 @@ stays outside Host identity/revision epochs, so restarting Pi Host does not term
 See `HOST_EVENT_NAMES` in `packages/protocol/src/events.ts`. Notable:
 
 - `host.ready`, `host.statusChanged`, `host.fatal`
-- `workspace.changed`, `workspace.trustRequired`
+- `workspace.changed`
 - `session.snapshot`, `agent.event`, `agent.toolsChanged`
 - `package.progress`, `package.snapshot`
 - `extensionUi.request` / status / widget / notification

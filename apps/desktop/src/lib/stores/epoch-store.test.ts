@@ -24,7 +24,6 @@ const host = (id: string): HostStatusSnapshot =>
     capabilities: {
       packageUpdateCheck: false,
       extensionUi: true,
-      projectTrust: true,
       sessionExport: false,
     },
     modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },
@@ -51,7 +50,6 @@ describe("epoch-store", () => {
       cwd: "/a",
       canonicalCwd: "/a",
       revision: 1,
-      trust: { required: false, decision: "notRequired" },
       servicesReady: true,
     });
     s = applySessionSnapshot(s, {
@@ -83,7 +81,6 @@ describe("epoch-store", () => {
       cwd: "/b",
       canonicalCwd: "/b",
       revision: 2,
-      trust: { required: false, decision: "notRequired" },
       servicesReady: true,
     });
     expect(s.session).toBeNull();

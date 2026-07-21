@@ -1,4 +1,4 @@
-use crate::desktop_settings::DesktopSettings;
+use crate::desktop_settings::{DesktopSettings, DesktopSettingsSnapshot};
 use crate::shell_terminal::{ShellTerminalCreateResult, ShellTerminalEvent};
 use crate::AppState;
 use serde_json::Value;
@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use tauri::{ipc::Channel, State};
 
 #[tauri::command]
-pub async fn desktop_settings_get(state: State<'_, AppState>) -> Result<DesktopSettings, String> {
+pub async fn desktop_settings_get(
+    state: State<'_, AppState>,
+) -> Result<DesktopSettingsSnapshot, String> {
     let store = state.settings.lock().await;
-    Ok(store.settings.clone())
+    Ok(store.snapshot())
 }
 
 #[tauri::command]

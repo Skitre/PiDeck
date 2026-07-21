@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   AuthStorage,
   ModelRegistry,
-  ProjectTrustStore,
 } from "@earendil-works/pi-coding-agent";
 import type { ModelConfigHealth, ProviderDraft } from "@pideck/protocol";
 import { createProviderHandlers } from "./provider-controller.js";
@@ -38,7 +37,6 @@ function setup(initialModels: unknown) {
     agentDir: layout.agentDir,
     authStorage,
     modelRegistry,
-    trustStore: new ProjectTrustStore(layout.agentDir),
     getModelConfigHealth: () => health,
     refreshModelHealth: () => {
       modelRegistry.refresh();
@@ -58,7 +56,6 @@ function setup(initialModels: unknown) {
     capabilities: {
       packageUpdateCheck: false,
       extensionUi: true,
-      projectTrust: true,
       sessionExport: false,
     },
     handlers: {},
@@ -84,6 +81,65 @@ function draft(models: ProviderDraft["models"]): ProviderDraft {
 }
 
 describe("Provider controller", () => {
+  it("migrates the active Provider and enables multiple Providers without clearing models", async () => {
+    const { layout, handlers } = setup({
+      pideckActiveProvider: "other",
+      providers: {
+        other: {
+          name: "Other",
+          baseUrl: "https://other.example/v1",
+          api: "openai-completions",
+          models: [{ id: "other-model" }],
+        },
+        custom: {
+          name: "Custom",
+          baseUrl: "https://custom.example/v1",
+          api: "openai-responses",
+          models: [{ id: "custom-model" }],
+        },
+      },
+    });
+
+    const save = await handlers["provider.save"]!({
+      id: "save-custom",
+      params: {
+        originalId: "custom",
+        provider: draft([
+          {
+            id: "custom-model",
+            name: "Custom model",
+            reasoning: false,
+            input: ["text"],
+            contextWindow: 128_000,
+            maxTokens: 16_384,
+          },
+        ]),
+      },
+    } as never);
+    expect("error" in save ? save.error.message : null).toBeNull();
+    const afterSave = JSON.parse(readFileSync(join(layout.agentDir, "models.json"), "utf8"));
+    expect(afterSave.pideckEnabledProviders).toEqual(["other"]);
+    expect(afterSave.pideckActiveProvider).toBeUndefined();
+
+    const enable = await handlers["provider.setEnabled"]!({
+      id: "enable-custom",
+      params: { providerId: "custom", enabled: true },
+    } as never);
+    expect("error" in enable ? enable.error.message : null).toBeNull();
+
+    const persisted = JSON.parse(readFileSync(join(layout.agentDir, "models.json"), "utf8"));
+    expect(persisted.pideckEnabledProviders).toEqual(["other", "custom"]);
+    expect(persisted.providers.other.models).toEqual([{ id: "other-model" }]);
+
+    const list = await handlers["provider.list"]!({ id: "list-providers", params: null } as never);
+    expect("error" in list).toBe(false);
+    if (!("error" in list)) {
+      const providers = (list.result as { providers: Array<{ id: string; enabled: boolean }> }).providers;
+      expect(providers.filter((provider) => provider.enabled).map((provider) => provider.id).sort())
+        .toEqual(["custom", "other"]);
+    }
+  });
+
   it("preserves unrelated configuration and keeps API keys out of models.json", async () => {
     const { layout, authStorage, handlers } = setup({
       version: 1,

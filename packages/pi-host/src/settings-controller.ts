@@ -77,7 +77,6 @@ export function createSettingsHandlers(
             followUpMode?: "all" | "one-at-a-time";
             autoCompaction?: boolean;
             autoRetry?: boolean;
-            defaultProjectTrust?: string;
           };
         };
         const sm = g.settingsManager as unknown as Record<string, (...args: unknown[]) => unknown>;

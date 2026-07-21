@@ -9,7 +9,6 @@ import type {
   SessionSnapshot,
   ToolSnapshot,
   WorkspaceSnapshot,
-  TrustOption,
   HostEventPayloadMap,
   JsonValue,
   SessionSummary,
@@ -103,6 +102,13 @@ export type ExtensionTerminalState = {
   context: ActiveSessionContext;
 };
 
+export type AppNotification = {
+  id: string;
+  message: string;
+  level: string;
+  createdAt: number;
+};
+
 /**
  * Close the extension terminal panel, restoring the dock to its pre-panel
  * state unless the user toggled the dock manually while the panel was open.
@@ -128,7 +134,6 @@ function resetExtensionTerminal(state: {
 export type AppState = EpochState & {
   page: NavPage;
   desktopSettings: DesktopSettings | null;
-  trustOptions: TrustOption[] | null;
   extensionUiRequest: ExtensionUiRequestState | null;
   extensionUiQueue: ExtensionUiRequestState[];
   extensionStatus: string | null;
@@ -144,7 +149,7 @@ export type AppState = EpochState & {
   providerConfigRevision: number;
   sessionCatalog: SessionCatalogState;
   sessionDrafts: Record<string, string>;
-  notifications: Array<{ id: string; message: string; level: string }>;
+  notifications: AppNotification[];
   hostFatal: string | null;
   connecting: boolean;
   rehydrating: boolean;
@@ -162,7 +167,6 @@ export type AppState = EpochState & {
   setPackages: (p: PackageSnapshot | null) => void;
   setTools: (t: ToolSnapshot | null) => void;
   setDesktopSettings: (d: DesktopSettings | null) => void;
-  setTrustOptions: (o: TrustOption[] | null) => void;
   setExtensionUiRequest: (r: ExtensionUiRequestState | null) => void;
   enqueueExtensionUiRequest: (r: ExtensionUiRequestState) => void;
   openExtensionTerminal: (t: ExtensionTerminalState) => void;
@@ -185,6 +189,8 @@ export type AppState = EpochState & {
   ) => void;
   setSessionDraft: (sessionId: string, text: string) => void;
   pushNotification: (message: string, level?: string) => void;
+  dismissNotification: (id: string) => void;
+  clearNotifications: () => void;
   setHostFatal: (msg: string | null) => void;
   setConnecting: (v: boolean) => void;
   setRehydrating: (v: boolean) => void;
@@ -219,7 +225,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   page: "chat",
   ...emptyEpoch(),
   desktopSettings: null,
-  trustOptions: null,
   extensionUiRequest: null,
   extensionUiQueue: [],
   extensionStatus: null,
@@ -243,7 +248,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     const next = epochBeginHost(epochSlice(get()), host);
     set({
       ...next,
-      trustOptions: null,
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
@@ -287,7 +291,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(clearedSession ? { sessionCatalog: emptySessionCatalog() } : {}),
       ...(clearedSession
         ? {
-            trustOptions: null,
             extensionUiRequest: null,
             extensionUiQueue: [],
             extensionStatus: null,
@@ -306,7 +309,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       ...next,
       sessionCatalog: emptySessionCatalog(),
-      trustOptions: null,
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
@@ -429,7 +431,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setTools: (tools) => set({ tools }),
   setDesktopSettings: (desktopSettings) => set({ desktopSettings }),
-  setTrustOptions: (trustOptions) => set({ trustOptions }),
   setExtensionUiRequest: (request) =>
     set((state) => {
       const now = Date.now();
@@ -562,10 +563,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   pushNotification: (message, level = "info") =>
     set((s) => ({
       notifications: [
-        ...s.notifications.slice(-20),
-        { id: crypto.randomUUID(), message, level },
+        ...s.notifications.slice(-49),
+        { id: crypto.randomUUID(), message, level, createdAt: Date.now() },
       ],
     })),
+  dismissNotification: (id) =>
+    set((state) => ({
+      notifications: state.notifications.filter((notification) => notification.id !== id),
+    })),
+  clearNotifications: () => set({ notifications: [] }),
   setHostFatal: (hostFatal) => set({ hostFatal }),
   setConnecting: (connecting) => set({ connecting }),
   setRehydrating: (rehydrating) => set({ rehydrating }),
@@ -621,7 +627,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearHostEpoch: (reason) => {
     set({
       ...emptyEpoch(),
-      trustOptions: null,
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,

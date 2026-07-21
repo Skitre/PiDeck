@@ -72,7 +72,6 @@ function createMockTransport(): HostTransport {
               capabilities: {
                 packageUpdateCheck: false,
                 extensionUi: true,
-                projectTrust: true,
                 sessionExport: false,
               },
               modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },

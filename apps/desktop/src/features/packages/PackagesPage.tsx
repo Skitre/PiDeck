@@ -13,11 +13,13 @@ import {
   type WorkspaceAuthorization,
 } from "../../lib/bridge/host-context";
 import type {
+  HostStatusSnapshot,
   HostRequestParams,
   PackageMutationResult,
   PackageRecord,
   PackageResource,
   TopLevelResource,
+  WorkspaceSnapshot,
 } from "@pideck/protocol";
 
 type MutationMethod =
@@ -29,13 +31,22 @@ type MutationMethod =
   | "resource.setTopLevelEnabled"
   | "package.reloadResources";
 
-type PendingProjectMutation = {
+export type PendingProjectMutation = {
   method: MutationMethod;
   params: HostRequestParams[MutationMethod];
   allowReconcileRetry?: boolean;
-  step: "trust" | "confirm";
   authorization: WorkspaceAuthorization;
 };
+
+export function reconcileProjectGateAuthorization(
+  host: HostStatusSnapshot | null,
+  workspace: WorkspaceSnapshot | null,
+  projectGate: PendingProjectMutation,
+): PendingProjectMutation | null {
+  return isCurrentWorkspaceAuthorization(host, workspace, projectGate.authorization)
+    ? projectGate
+    : null;
+}
 
 export function PackagesPage() {
   const host = useAppStore((s) => s.host);
@@ -53,7 +64,6 @@ export function PackagesPage() {
   const [installScope, setInstallScope] = useState<"user" | "project">("user");
   const [busy, setBusy] = useState(false);
   const [projectGate, setProjectGate] = useState<PendingProjectMutation | null>(null);
-  const [projectGateBusy, setProjectGateBusy] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const refreshRequest = useRef(0);
   const projectGateDialogRef = useRef<HTMLDivElement>(null);
@@ -124,7 +134,7 @@ export function PackagesPage() {
       );
     focusable()[0]?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !projectGateBusy) {
+      if (event.key === "Escape") {
         setProjectGate(null);
         return;
       }
@@ -146,39 +156,12 @@ export function PackagesPage() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [projectGate, projectGateBusy]);
+  }, [projectGate]);
 
   useEffect(() => {
     if (!projectGate) return;
-    if (
-      isCurrentWorkspaceAuthorization(host, workspace, projectGate.authorization, {
-        requireTrusted: projectGate.step === "confirm",
-      })
-    ) {
-      return;
-    }
-    // A trust transition rebuilds the workspace service graph, so revisions
-    // advance right after the setTrust reply. Re-bind the gate to the moved
-    // revisions while workspace identity and the trust decision are unchanged
-    // (confirm still requires an active trust grant); only a real identity or
-    // trust flip closes the dialog. confirmProjectMutation re-validates the
-    // captured authorization at click time.
-    const trustActive =
-      workspace?.trust.decision === "trusted" || workspace?.trust.decision === "session";
-    if (
-      host &&
-      workspace &&
-      workspace.id === projectGate.authorization.workspaceId &&
-      workspace.trust.decision === projectGate.authorization.trustDecision &&
-      (projectGate.step !== "confirm" || trustActive)
-    ) {
-      setProjectGate({
-        ...projectGate,
-        authorization: captureWorkspaceAuthorization(host, workspace),
-      });
-      return;
-    }
-    setProjectGate(null);
+    const reconciled = reconcileProjectGateAuthorization(host, workspace, projectGate);
+    if (reconciled !== projectGate) setProjectGate(reconciled);
   }, [host, workspace, projectGate]);
 
   const selected: PackageRecord | undefined = packages?.configured.find(
@@ -243,13 +226,10 @@ export function PackagesPage() {
     if (!host || !workspace) return;
     if (isProjectMutation(method, params)) {
       if (!options?.projectAuthorization) {
-        const trusted =
-          workspace.trust.decision === "trusted" || workspace.trust.decision === "session";
         setProjectGate({
           method,
           params: params as HostRequestParams[MutationMethod],
           allowReconcileRetry: options?.allowReconcileRetry,
-          step: trusted ? "confirm" : "trust",
           authorization: captureWorkspaceAuthorization(host, workspace),
         });
         return;
@@ -259,10 +239,9 @@ export function PackagesPage() {
           useAppStore.getState().host,
           useAppStore.getState().workspace,
           options.projectAuthorization,
-          { requireTrusted: true },
         )
       ) {
-        pushNotification("Project authorization expired; review trust and confirm again", "warning");
+        pushNotification("Project confirmation expired; review and confirm again", "warning");
         return;
       }
     }
@@ -317,73 +296,20 @@ export function PackagesPage() {
     }
   }
 
-  async function decideProjectTrust(decision: "trustOnce" | "trust") {
-    if (!host || !workspace || !projectGate || projectGateBusy) return;
-    const expectedHostId = host.hostInstanceId;
-    const expectedWorkspaceId = workspace.id;
-    setProjectGateBusy(true);
-    try {
-      const res = await hostClient.request(
-        "workspace.setTrust",
-        workspaceContext(host, workspace),
-        { decision },
-        60_000,
-      );
-      const current = useAppStore.getState();
-      if (
-        current.host?.hostInstanceId !== expectedHostId ||
-        (current.workspace?.id !== expectedWorkspaceId &&
-          current.workspace?.id !== res.workspaceId)
-      ) {
-        return;
-      }
-      if (!res.ok) {
-        pushNotification(res.error?.message ?? "Trust decision failed", "error");
-        return;
-      }
-      current.applyWorkspaceSnapshot(res.result.workspace);
-      if (res.result.session) current.applySessionSnapshot(res.result.session);
-      const currentHost = useAppStore.getState().host;
-      if (currentHost) {
-        const nextHost = mergeHostIdentity(currentHost, res);
-        if (nextHost) useAppStore.getState().setHost(nextHost);
-      }
-      const authorizedState = useAppStore.getState();
-      if (!authorizedState.host || !authorizedState.workspace) {
-        setProjectGate(null);
-        return;
-      }
-      setProjectGate((pending) =>
-        pending
-          ? {
-              ...pending,
-              step: "confirm",
-              authorization: captureWorkspaceAuthorization(
-                authorizedState.host!,
-                authorizedState.workspace!,
-              ),
-            }
-          : null,
-      );
-    } finally {
-      setProjectGateBusy(false);
-    }
-  }
 
   function confirmProjectMutation() {
     const pending = projectGate;
-    if (!pending || projectGateBusy) return;
+    if (!pending) return;
     const current = useAppStore.getState();
     if (
       !isCurrentWorkspaceAuthorization(
         current.host,
         current.workspace,
         pending.authorization,
-        { requireTrusted: true },
       )
     ) {
       setProjectGate(null);
-      pushNotification("Project authorization expired; review trust and confirm again", "warning");
+      pushNotification("Project confirmation expired; review and confirm again", "warning");
       return;
     }
     setProjectGate(null);
@@ -459,66 +385,28 @@ export function PackagesPage() {
             className="w-full max-w-md rounded-lg border border-border bg-surface-raised p-5 shadow-xl"
           >
             <h2 id="project-package-gate-title" className="text-base font-semibold">
-              {projectGate.step === "trust" ? "Trust project packages" : "Confirm executable code"}
+              Confirm executable code
             </h2>
-            {projectGate.step === "trust" ? (
-              <>
-                <p className="mt-2 text-sm text-muted">
-                  Project packages can load workspace extensions, skills, prompts, and themes. Choose how this workspace may load them before continuing.
-                </p>
-                <p className="mt-2 truncate font-mono text-xs" title={workspace.canonicalCwd}>
-                  {workspace.canonicalCwd}
-                </p>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-border px-3 py-1.5 text-sm hover:bg-surface-overlay"
-                    disabled={projectGateBusy}
-                    onClick={() => setProjectGate(null)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-border px-3 py-1.5 text-sm hover:bg-surface-overlay disabled:opacity-50"
-                    disabled={projectGateBusy}
-                    onClick={() => void decideProjectTrust("trustOnce")}
-                  >
-                    Trust once
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded bg-accent px-3 py-1.5 text-sm text-white disabled:opacity-50"
-                    disabled={projectGateBusy}
-                    onClick={() => void decideProjectTrust("trust")}
-                  >
-                    Always trust
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="mt-2 text-sm text-muted">
-                  Extensions execute local code, and skills or prompts can direct local operations. Continue only if you trust the package source and its dependencies.
-                </p>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-border px-3 py-1.5 text-sm hover:bg-surface-overlay"
-                    onClick={() => setProjectGate(null)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded bg-accent px-3 py-1.5 text-sm text-white"
-                    onClick={confirmProjectMutation}
-                  >
-                    Continue
-                  </button>
-                </div>
-              </>
-            )}
+            <p className="mt-2 text-sm text-muted">
+              Extensions execute local code, and skills or prompts can direct local operations.
+              Continue only if you trust the package source and its dependencies.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded border border-border px-3 py-1.5 text-sm hover:bg-surface-overlay"
+                onClick={() => setProjectGate(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded bg-accent px-3 py-1.5 text-sm text-white"
+                onClick={confirmProjectMutation}
+              >
+                Continue
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -10,10 +10,15 @@ import { join } from "node:path";
 import {
   AuthStorage,
   ModelRegistry,
-  ProjectTrustStore,
   VERSION as SDK_VERSION,
   DefaultPackageManager,
 } from "@earendil-works/pi-coding-agent";
+import {
+  createFauxCore,
+  fauxAssistantMessage,
+  fauxText,
+  fauxToolCall,
+} from "@earendil-works/pi-ai";
 import type { HostCapabilities } from "@pideck/protocol";
 import { buildModelConfigHealth } from "./model-health.js";
 import { logger } from "./logger.js";
@@ -42,6 +47,78 @@ function resolveInitialCwd(): string | null {
   return value ? value : null;
 }
 
+/**
+ * Deterministic core-release model. It is opt-in and never enabled for a
+ * normal Host process; the desktop E2E runner sets PIDECK_TEST_FAUX=1.
+ */
+function installTestFauxProvider(modelRegistry: ModelRegistry): void {
+  if (process.env.PIDECK_TEST_FAUX !== "1") return;
+
+  const faux = createFauxCore({
+    api: "pideck-faux-api",
+    provider: "pideck-faux",
+    models: [
+      {
+        id: "pideck-core",
+        name: "PiDeck Core Test Model",
+        reasoning: false,
+        input: ["text"],
+        contextWindow: 128_000,
+        maxTokens: 16_384,
+      },
+    ],
+    tokensPerSecond: 24,
+    tokenSize: { min: 1, max: 4 },
+  });
+
+  // prompt: tool call -> tool result turn -> final answer -> title refinement
+  // abort: a deliberately long response that remains observable while stopping
+  faux.setResponses([
+    fauxAssistantMessage(
+      fauxToolCall("read", { path: "pideck-core-e2e.txt" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage(
+      [
+        fauxText(
+          "PIDECK_STREAM_START Core chat stream completed after a deterministic tool call. PIDECK_CORE_CHAT_COMPLETE",
+        ),
+      ],
+      { stopReason: "stop" },
+    ),
+    fauxAssistantMessage(fauxText("Core chat smoke"), { stopReason: "stop" }),
+    fauxAssistantMessage(
+      fauxText(
+        "PIDECK_ABORT_STREAM " +
+          "This deterministic response is intentionally long enough to exercise the Stop action and abort recovery. ".repeat(24),
+      ),
+      { stopReason: "stop" },
+    ),
+    fauxAssistantMessage(fauxText("PIDECK_ABORT_RECOVERED"), {
+      stopReason: "stop",
+    }),
+  ]);
+
+  modelRegistry.registerProvider("pideck-faux", {
+    name: "PiDeck Core Test Model",
+    api: faux.api,
+    apiKey: "pideck-e2e",
+    baseUrl: "http://pideck-faux.invalid",
+    streamSimple: faux.streamSimple,
+    models: faux.models.map((model) => ({
+      id: model.id,
+      name: model.name,
+      api: model.api,
+      reasoning: model.reasoning,
+      input: model.input,
+      cost: model.cost,
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+    })),
+  });
+  logger.info("Installed deterministic faux provider for core E2E");
+}
+
 async function main(): Promise<void> {
   const agentDir = resolveAgentDir();
   mkdirSync(agentDir, { recursive: true });
@@ -55,8 +132,7 @@ async function main(): Promise<void> {
   // Cwd-independent services (PROJECT_SPEC §8.1)
   const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
   const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
-  const trustStore = new ProjectTrustStore(agentDir);
-
+  installTestFauxProvider(modelRegistry);
   modelRegistry.refresh();
   applyKnownThinkingProfiles(modelRegistry);
   let modelConfigHealth = buildModelConfigHealth(modelRegistry.getError());
@@ -69,7 +145,6 @@ async function main(): Promise<void> {
   const capabilities: HostCapabilities = {
     packageUpdateCheck,
     extensionUi: true,
-    projectTrust: true,
     sessionExport: false,
   };
 
@@ -77,7 +152,6 @@ async function main(): Promise<void> {
     agentDir,
     authStorage,
     modelRegistry,
-    trustStore,
     getModelConfigHealth: () => modelConfigHealth,
     refreshModelHealth: async () => {
       await modelRegistry.refresh();

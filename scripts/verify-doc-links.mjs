@@ -54,6 +54,8 @@ for (const p of mdRoots) {
 // Explicit contract paths that must exist
 for (const rel of [
   "docs/README.md",
+  "docs/operations/p0-scope.md",
+  "docs/operations/p0-status.json",
   "docs/operations/remediation-report.md",
 ]) {
   checked += 1;
@@ -62,32 +64,29 @@ for (const rel of [
   }
 }
 
-// Forbid false completion language in status docs (C0 / B-DOC-01)
-// Allowed only when a verify-p0 evidence file records p0Complete=true (same-run gate).
-function latestVerifyP0Complete() {
-  const art = join(root, "artifacts", "p0");
-  if (!existsSync(art)) return false;
-  const dirs = readdirSync(art)
-    .map((n) => join(art, n))
-    .filter((p) => {
-      try {
-        return statSync(p).isDirectory() && existsSync(join(p, "verify-p0.json"));
-      } catch {
-        return false;
-      }
-    })
-    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  for (const d of dirs) {
-    try {
-      const v = JSON.parse(readFileSync(join(d, "verify-p0.json"), "utf8"));
-      if (v.p0Complete === true && v.exitCode === 0 && v.status === "passed") return true;
-    } catch {
-      /* ignore */
-    }
+// Completion claims are authorized only by tracked release status. Ignored
+// local artifacts are evidence outputs, not mutable documentation authority.
+let p0GatePassed = false;
+try {
+  const status = JSON.parse(
+    readFileSync(join(root, "docs", "operations", "p0-status.json"), "utf8"),
+  );
+  const completionClaimed = status.claimStatus === "complete";
+  p0GatePassed =
+    status.schemaVersion === 1 &&
+    completionClaimed &&
+    typeof status.acceptedRelease?.commit === "string" &&
+    /^[0-9a-f]{40}$/i.test(status.acceptedRelease.commit) &&
+    ["core", "full"].includes(status.acceptedRelease?.profile) &&
+    status.acceptedRelease?.candidateBound === true &&
+    status.acceptedRelease?.p0Complete === true &&
+    typeof status.acceptedRelease?.evidencePath === "string";
+  if (completionClaimed && !p0GatePassed) {
+    errors.push("docs/operations/p0-status.json: incomplete accepted release claim");
   }
-  return false;
+} catch {
+  errors.push("docs/operations/p0-status.json: invalid tracked P0 status");
 }
-const p0GatePassed = latestVerifyP0Complete();
 const statusFiles = [
   join(root, "docs/operations/remediation-report.md"),
   join(root, "docs/README.md"),
@@ -106,7 +105,7 @@ for (const f of statusFiles) {
   for (const re of forbiddenComplete) {
     if (re.test(text) && !/not\s+complete|P0\s+Not\s+Complete/i.test(text)) {
       if (!p0GatePassed) {
-        errors.push(`${f}: forbidden completion claim matching ${re} (no verify-p0 p0Complete evidence)`);
+        errors.push(`${f}: forbidden completion claim matching ${re} (P0 claimStatus is not complete)`);
       }
     }
   }

@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-21",
+  "claimStatus": "not-complete",
+  "acceptedRelease": null,
+  "requirements": [
+    {
+      "id": "desktop-lifecycle",
+      "implementationStatus": "implemented",
+      "evidence": ["apps/desktop/src-tauri/src/pi_host_tests.rs"]
+    },
+    {
+      "id": "workspace-selection",
+      "implementationStatus": "implemented",
+      "evidence": ["packages/pi-host/src/workspace-package.integration.test.ts"]
+    },
+    {
+      "id": "settings-durability",
+      "implementationStatus": "implemented",
+      "evidence": ["apps/desktop/src-tauri/src/desktop_settings.rs"]
+    },
+    {
+      "id": "session-lifecycle",
+      "implementationStatus": "implemented",
+      "evidence": ["packages/pi-host/src/session-file-lifecycle.test.ts", "packages/pi-host/src/session-controller.test.ts"]
+    },
+    {
+      "id": "core-chat",
+      "implementationStatus": "implemented",
+      "evidence": ["packages/pi-host/src/host.integration.test.ts"]
+    },
+    {
+      "id": "recovery",
+      "implementationStatus": "implemented",
+      "evidence": ["apps/desktop/src/lib/stores/epoch-store.test.ts", "apps/desktop/src/lib/bridge/rehydrate.test.ts"]
+    },
+    {
+      "id": "error-visibility",
+      "implementationStatus": "implemented",
+      "evidence": ["apps/desktop/src/components/NotificationCenter.test.tsx"]
+    },
+    {
+      "id": "package-safety",
+      "implementationStatus": "implemented",
+      "evidence": ["packages/pi-host/src/workspace-package.integration.test.ts"]
+    }
+  ]
+}

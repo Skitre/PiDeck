@@ -37,7 +37,6 @@ export function WorkspacePicker() {
   );
   const setWorkspace = useAppStore((s) => s.setWorkspace);
   const setSession = useAppStore((s) => s.setSession);
-  const setTrustOptions = useAppStore((s) => s.setTrustOptions);
   const pushNotification = useAppStore((s) => s.pushNotification);
   const [pending, setPending] = useState(false);
   const [collapsed, setCollapsed] = useState(() =>
@@ -101,7 +100,6 @@ export function WorkspacePicker() {
       const result = res.result;
       setWorkspace(result.workspace);
       if (result.session) setSession(result.session);
-      if (result.trustOptions) setTrustOptions(result.trustOptions);
       useAppStore.getState().setHost({
         ...host,
         workspaceId: res.workspaceId,

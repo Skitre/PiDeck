@@ -41,6 +41,28 @@ where
     Ok(bytes_read)
 }
 
+pub(crate) async fn read_bounded_lossy_line<R>(
+    reader: &mut R,
+    buffer: &mut String,
+    max_bytes: usize,
+) -> std::io::Result<usize>
+where
+    R: AsyncBufRead + Unpin,
+{
+    let mut bytes = Vec::new();
+    let mut limited = reader.take((max_bytes as u64).saturating_add(1));
+    let bytes_read = limited.read_until(b'\n', &mut bytes).await?;
+    if bytes_read > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("line exceeds {max_bytes} byte limit"),
+        ));
+    }
+    buffer.clear();
+    buffer.push_str(&String::from_utf8_lossy(&bytes));
+    Ok(bytes_read)
+}
+
 #[cfg(windows)]
 pub(crate) struct WindowsHostJob {
     handle: OwnedHandle,
@@ -650,7 +672,7 @@ impl PiHostManager {
             let mut reader = BufReader::new(stderr);
             let mut line = String::new();
             loop {
-                match read_bounded_utf8_line(&mut reader, &mut line, MAX_HOST_STDERR_LINE_BYTES)
+                match read_bounded_lossy_line(&mut reader, &mut line, MAX_HOST_STDERR_LINE_BYTES)
                     .await
                 {
                     Ok(0) => break,

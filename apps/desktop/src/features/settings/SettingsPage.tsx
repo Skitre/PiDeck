@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { applyTheme } from "../../lib/theme";
 import { hostClient } from "../../lib/bridge/host-client";
-import { mergeHostIdentity, workspaceContext } from "../../lib/bridge/host-context";
 import { ArrowLeft, ChartColumn, KeyRound, Package, Settings2 } from "lucide-react";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { PackagesPage } from "../packages/PackagesPage";
@@ -12,9 +11,7 @@ function GeneralSettings() {
   const host = useAppStore((s) => s.host);
   const desktopSettings = useAppStore((s) => s.desktopSettings);
   const setDesktopSettings = useAppStore((s) => s.setDesktopSettings);
-  const workspace = useAppStore((s) => s.workspace);
   const pushNotification = useAppStore((s) => s.pushNotification);
-  const [trustPending, setTrustPending] = useState(false);
 
   async function patchDesktop(patch: Record<string, unknown>) {
     try {
@@ -62,48 +59,6 @@ function GeneralSettings() {
     }
   }
 
-  async function setProjectTrust(decision: "trustOnce" | "trust" | "deny") {
-    if (!host || !workspace || trustPending) return;
-    const expectedHostId = host.hostInstanceId;
-    const expectedWorkspaceId = workspace.id;
-    setTrustPending(true);
-    try {
-      const res = await hostClient.request(
-        "workspace.setTrust",
-        workspaceContext(host, workspace),
-        { decision },
-        60_000,
-      );
-      const current = useAppStore.getState();
-      if (
-        current.host?.hostInstanceId !== expectedHostId ||
-        (current.workspace?.id !== expectedWorkspaceId &&
-          current.workspace?.id !== res.workspaceId)
-      ) {
-        return;
-      }
-      if (!res.ok) {
-        pushNotification(res.error?.message ?? "Trust update failed", "error");
-        return;
-      }
-      current.applyWorkspaceSnapshot(res.result.workspace);
-      if (res.result.session) current.applySessionSnapshot(res.result.session);
-      const currentHost = useAppStore.getState().host;
-      if (currentHost) {
-        const nextHost = mergeHostIdentity(currentHost, res);
-        if (nextHost) useAppStore.getState().setHost(nextHost);
-      }
-      pushNotification(
-        decision === "deny"
-          ? "Project resources denied"
-          : decision === "trustOnce"
-            ? "Project trusted for this Host session"
-            : "Project trust saved",
-      );
-    } finally {
-      setTrustPending(false);
-    }
-  }
 
   return (
     <div className="min-h-0 flex-1 overflow-auto p-6">
@@ -210,55 +165,12 @@ function GeneralSettings() {
           </div>
         </section>
 
-        <section>
-          <h2 className="mb-2 text-sm font-medium text-muted">Project trust</h2>
-          <div className="rounded-lg border border-border p-4 text-sm">
-            {workspace ? (
-              <>
-                <p className="font-mono text-xs">{workspace.canonicalCwd}</p>
-                <p className="mt-1 text-muted">
-                  Decision: <strong className="text-foreground">{workspace.trust.decision}</strong>
-                  {workspace.trust.required ? " (trust resources present)" : " (not required)"}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-border px-2 py-1 text-xs hover:bg-surface-overlay disabled:opacity-50"
-                    disabled={trustPending}
-                    onClick={() => void setProjectTrust("trustOnce")}
-                  >
-                    Trust once
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-border px-2 py-1 text-xs hover:bg-surface-overlay disabled:opacity-50"
-                    disabled={trustPending}
-                    onClick={() => void setProjectTrust("trust")}
-                  >
-                    Always trust
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded border border-danger/40 px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-50"
-                    disabled={trustPending}
-                    onClick={() => void setProjectTrust("deny")}
-                  >
-                    Deny
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="text-muted">No workspace selected.</p>
-            )}
-          </div>
-        </section>
 
         <section>
           <h2 className="mb-2 text-sm font-medium text-muted">Capabilities</h2>
           <ul className="rounded-lg border border-border p-4 text-xs text-muted">
             <li>packageUpdateCheck: {String(host?.capabilities.packageUpdateCheck)}</li>
             <li>extensionUi: {String(host?.capabilities.extensionUi)}</li>
-            <li>projectTrust: {String(host?.capabilities.projectTrust)}</li>
           </ul>
         </section>
       </div>

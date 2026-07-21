@@ -1,7 +1,8 @@
 # Source map
 
 Paths are relative to `PiDesktop/`. **Only paths that exist on disk** are listed.  
-Layers map to implementation paths. P0 Windows completion is recorded in `docs/operations/remediation-report.md` after `pnpm verify:release` exit 0.
+Layers map to implementation paths. Current development verification follows
+`docs/operations/p0-scope.md`; release-grade automation is deferred.
 
 ## Packages
 
@@ -11,9 +12,9 @@ Layers map to implementation paths. P0 Windows completion is recorded in `docs/o
 | Error codes | `packages/protocol/src/errors.ts` | via validate tests |
 | Method context scopes | `packages/protocol/src/methods.ts` | coverage in validate.test.ts |
 | Contracts maps | `packages/protocol/src/contracts.ts` | protocol-coverage + deep validateSuccessResult/EventPayload |
-| Pi Host entry | `packages/pi-host/src/main.ts` | `host.integration.test.ts`, `trust-package.integration.test.ts` |
+| Pi Host entry | `packages/pi-host/src/main.ts` | `host.integration.test.ts`, `workspace-package.integration.test.ts` |
 | Protocol server | `packages/pi-host/src/server.ts` | integration (shutdown after cleanup) |
-| Workspace graph factory | `packages/pi-host/src/workspace-graph-factory.ts` | integration (candidate-commit) |
+| Workspace graph factory | `packages/pi-host/src/workspace-graph-factory.ts` | integration (candidate-commit, immediate project-resource load) |
 | Workspace graph types | `packages/pi-host/src/workspace-graph-types.ts` | via factory tests |
 | Session lifecycle ops | `packages/pi-host/src/session-lifecycle.ts` | `session-file-lifecycle`, session-controller integration |
 | Package filters | `packages/pi-host/src/package-filters.ts` | `package-filters.test.ts` |
@@ -28,9 +29,7 @@ Layers map to implementation paths. P0 Windows completion is recorded in `docs/o
 | Tools refresh | `packages/pi-host/src/tools-refresh.ts` | `tools-refresh.test.ts` |
 | Event normalize | `packages/pi-host/src/event-normalize.ts` | `event-normalize.test.ts` |
 | Transcript reducer | `apps/desktop/src/lib/chat/transcript-reducer.ts` | `transcript-reducer.test.ts` |
-| Evidence helper | `scripts/p0-evidence.mjs` | `pnpm p0:baseline` |
 | Release stage | `scripts/package-release-sidecar.mjs` | frozen deploy + hoist + compact zip |
-| Release host smoke | `scripts/smoke-release-host.mjs` | `pnpm smoke:release-host` |
 | Doc link check | `scripts/verify-doc-links.mjs` | `pnpm verify:docs` |
 
 ## Desktop UI
@@ -45,23 +44,23 @@ Layers map to implementation paths. P0 Windows completion is recorded in `docs/o
 | Chat | `apps/desktop/src/features/chat/` | `transcript-model.test.ts` (row build + stable-row reuse) |
 | Packages | `apps/desktop/src/features/packages/PackagesPage.tsx` | atomic mutation apply |
 | Settings | `apps/desktop/src/features/settings/SettingsPage.tsx` | — |
-| Trust modal | `apps/desktop/src/features/workspaces/TrustModal.tsx` | — |
+| Global notification/error center | `apps/desktop/src/components/NotificationCenter.tsx` | `NotificationCenter.test.tsx` |
 
 ## Rust
 
 | Feature | Source | Tests |
 |---|---|---|
 | Entry | `apps/desktop/src-tauri/src/main.rs`, `lib.rs` | via cargo |
-| Desktop settings | `apps/desktop/src-tauri/src/desktop_settings.rs` | — |
+| Desktop settings | `apps/desktop/src-tauri/src/desktop_settings.rs` | versioning, migration, corruption recovery, atomic replace unit tests |
 | Host process | `apps/desktop/src-tauri/src/pi_host.rs` | `pi_host_tests.rs` (auto-restart, reap) |
 | Commands | `apps/desktop/src-tauri/src/commands.rs` | open-path validation unit tests |
 
-## Release gating scripts
+## Verification and packaging
 
 | Feature | Source | Command |
 |---|---|---|
-| Aggregate release gate | `scripts/verify-p0.mjs` | `pnpm verify:release` |
+| Quick source gate | root `package.json` | `pnpm verify:quick` |
+| P0 pull-request gate | root `package.json` | `pnpm verify:p0` |
+| Tracked P0 implementation state | `docs/operations/p0-status.json` | `pnpm verify:docs` |
 | Release packaging + integrity | `scripts/package-release.mjs`, `scripts/windows-installer-integrity.mjs` | `pnpm package:release` |
-| Real desktop E2E (WebView2 CDP) | `scripts/run-e2e.mjs` | `pnpm test:e2e` |
-| M0 production-path Extension proof | `scripts/verify-m0-release-extension.mjs` | `pnpm verify:m0-release-extension` |
-| Installed-app smoke | `scripts/smoke-release.mjs` | `pnpm smoke:release` |
+| Pull-request CI | `.github/workflows/p0.yml` | `pnpm verify:p0` |

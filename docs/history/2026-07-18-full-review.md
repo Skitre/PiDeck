@@ -1,5 +1,9 @@
 # Pi Desktop Manager 全项目 Review 报告
 
+> Historical review. The Project trust architecture described here was later
+> replaced by immediate project-resource loading on workspace selection; see
+> [current P0 scope](../operations/p0-scope.md).
+
 > **日期**：2026-07-18
 > **范围**：protocol / pi-host / React 前端 / Rust-Tauri / 脚本-发布-文档（约 2 万行源码 + 全部测试与发布脚本）
 > **方法**：5 个方向并行深审 + 高危发现逐条人工复核 + 客观门槛实跑验证

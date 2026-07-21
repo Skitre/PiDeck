@@ -55,13 +55,7 @@ async function main(): Promise<void> {
   cpSync(fixturePath, destExt);
   console.log(`[spike] Copied fixture extension to ${destExt}`);
 
-  // Trust the project so project resources load
-  writeFileSync(
-    join(agentDir, "trust.json"),
-    JSON.stringify({ [projectDir.replace(/\\/g, "/")]: true }, null, 2),
-  );
-
-  // Explicit projectTrusted
+  // PiDeck treats selecting a workspace as authorization to load project resources.
   const settingsManager = SettingsManager.create(projectDir, agentDir, {
     projectTrusted: true,
   });

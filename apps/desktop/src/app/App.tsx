@@ -6,9 +6,9 @@ import { fullRehydrate } from "../lib/bridge/rehydrate";
 import { Sidebar } from "../components/Sidebar";
 import { RightDock } from "../components/RightDock";
 import { WindowControls } from "../components/WindowControls";
+import { NotificationCenter } from "../components/NotificationCenter";
 import { ChatPage } from "../features/chat/ChatPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
-import { TrustModal } from "../features/workspaces/TrustModal";
 import { ExtensionUiModal } from "../features/chat/ExtensionUiModal";
 import { applyTheme } from "../lib/theme";
 import {
@@ -23,6 +23,7 @@ import { mergeHostIdentity, nullableSessionContext } from "../lib/bridge/host-co
 import {
   persistDesktopSettings,
   persistRecentDesktopLocation,
+  type DesktopSettingsSnapshot,
 } from "../lib/desktop-settings";
 import {
   clearExtensionTerminal as clearExtensionTerminalFrames,
@@ -151,9 +152,9 @@ function handleHostEvent(
       break;
     }
     case "host.fatal": {
-      store.setHostFatal(
-        event.payload.error?.message ?? "Host fatal",
-      );
+      const message = event.payload.error?.message ?? "Host fatal";
+      store.setHostFatal(message);
+      store.pushNotification(`Host unavailable: ${message}`, "error");
       store.setConnecting(false);
       break;
     }
@@ -166,17 +167,6 @@ function handleHostEvent(
         return;
       }
       store.applyWorkspaceSnapshot(event.payload);
-      break;
-    case "workspace.trustRequired":
-      if (
-        event.payload.workspace.id !== event.workspaceId ||
-        event.payload.workspace.revision !== event.workspaceRevision
-      ) {
-        requestRecovery("workspace.trustRequired payload generation mismatch");
-        return;
-      }
-      store.applyWorkspaceSnapshot(event.payload.workspace);
-      store.setTrustOptions(event.payload.options);
       break;
     case "session.snapshot":
       if (
@@ -377,6 +367,7 @@ function handleHostEvent(
               ? event.payload.event.message
               : "Agent error";
         useAppStore.getState().setSessionRuntimeState(event.sessionId, "error", message);
+        useAppStore.getState().pushNotification(`Session failed: ${message}`, "error");
       }
       break;
     }
@@ -427,6 +418,9 @@ export function App() {
   const rehydrating = useAppStore((s) => s.rehydrating);
   const desynchronized = useAppStore((s) => s.desynchronized);
   const desktopSettings = useAppStore((s) => s.desktopSettings);
+  const hostInstanceId = useAppStore((s) => s.host?.hostInstanceId ?? "");
+  const sessionId = useAppStore((s) => s.session?.sessionId ?? "");
+  const sessionRevision = useAppStore((s) => s.session?.revision ?? 0);
   const workspacePath = useAppStore((s) => s.workspace?.canonicalCwd);
   const activeSessionPath = useAppStore((s) => s.session?.sessionPath);
 
@@ -441,18 +435,30 @@ export function App() {
       try {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
-          const settings = await invoke<typeof desktopSettings>("desktop_settings_get");
-          if (!cancelled && settings) {
-            store.setDesktopSettings(settings);
-            applyTheme(settings.theme);
+          const snapshot = await invoke<DesktopSettingsSnapshot>("desktop_settings_get");
+          if (!cancelled && snapshot.settings) {
+            store.setDesktopSettings(snapshot.settings);
+            applyTheme(snapshot.settings.theme);
+            if (snapshot.warning) {
+              store.pushNotification(
+                snapshot.recoveredFrom
+                  ? `${snapshot.warning}. Backup: ${snapshot.recoveredFrom}`
+                  : snapshot.warning,
+                "warning",
+              );
+            }
           }
-        } catch {
+        } catch (error) {
           store.setDesktopSettings({
             theme: "dark",
             restoreLastSession: true,
             autoRestartHostOnce: true,
           });
           applyTheme("dark");
+          store.pushNotification(
+            `Desktop settings could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+            "error",
+          );
         }
 
         const transport = await createTauriTransport();
@@ -597,6 +603,7 @@ export function App() {
               if (lastError && !pendingRecoveryHostId && !cancelled) {
                 const message = lastError instanceof Error ? lastError.message : String(lastError);
                 useAppStore.getState().setHostFatal(message);
+                useAppStore.getState().pushNotification(`Host recovery failed: ${message}`, "error");
                 useAppStore.getState().setConnecting(false);
               }
             }
@@ -634,7 +641,9 @@ export function App() {
         }, 1500);
       } catch (err) {
         if (!cancelled) {
-          store.setHostFatal(err instanceof Error ? err.message : String(err));
+          const message = err instanceof Error ? err.message : String(err);
+          store.setHostFatal(message);
+          store.pushNotification(`Desktop startup failed: ${message}`, "error");
           store.setConnecting(false);
         }
       }
@@ -673,10 +682,19 @@ export function App() {
   ]);
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden bg-surface text-foreground">
+    <div
+      className="relative flex h-full flex-col overflow-hidden bg-surface text-foreground"
+      data-pideck-app
+      data-host-instance-id={hostInstanceId}
+      data-session-id={sessionId}
+      data-session-revision={sessionRevision}
+      data-rehydrating={rehydrating ? "true" : "false"}
+      data-desynchronized={desynchronized ? "true" : "false"}
+    >
       <div className="absolute right-0 top-0 z-50">
         <WindowControls />
       </div>
+      <NotificationCenter />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col">
@@ -698,7 +716,6 @@ export function App() {
       {page !== "chat" && (
         <SettingsOverlay section={page === "packages" ? "packages" : "general"} />
       )}
-      <TrustModal />
       <ExtensionUiModal />
     </div>
   );

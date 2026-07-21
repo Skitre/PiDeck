@@ -25,14 +25,6 @@ export function ChatPage() {
     );
   }
 
-  if (workspace.trust.decision === "pending") {
-    return (
-      <div className="flex flex-1 items-center justify-center p-8 text-muted">
-        Waiting for project trust decision…
-      </div>
-    );
-  }
-
   if (!workspace.servicesReady) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-muted">

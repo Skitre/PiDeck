@@ -136,7 +136,6 @@ export function isHostStatusSnapshot(value: unknown): boolean {
   const phases = [
     "booting",
     "waitingForWorkspace",
-    "trustRequired",
     "ready",
     "agentBusy",
     "packageBusy",
@@ -154,10 +153,9 @@ export function isHostStatusSnapshot(value: unknown): boolean {
     isString(value.agentDir) &&
     phases.includes(String(value.phase)) &&
     isPlainObject(caps) &&
-    hasExactKeys(caps, ["packageUpdateCheck", "extensionUi", "projectTrust", "sessionExport"]) &&
+    hasExactKeys(caps, ["packageUpdateCheck", "extensionUi", "sessionExport"]) &&
     isBoolean(caps.packageUpdateCheck) &&
     caps.extensionUi === true &&
-    caps.projectTrust === true &&
     isBoolean(caps.sessionExport) &&
     isModelConfigHealth(value.modelConfigHealth) &&
     (value.lastError === undefined || isHostErrorRecord(value.lastError)) &&
@@ -165,32 +163,15 @@ export function isHostStatusSnapshot(value: unknown): boolean {
   );
 }
 
-export function isTrustOption(value: unknown): boolean {
-  return (
-    isPlainObject(value) &&
-    hasExactKeys(value, ["id", "label", "trusted", "persisted"]) &&
-    ["trustOnce", "trust", "deny"].includes(String(value.id)) &&
-    isString(value.label) &&
-    isBoolean(value.trusted) &&
-    isBoolean(value.persisted)
-  );
-}
-
 export function isWorkspaceSnapshot(value: unknown): boolean {
-  if (!isPlainObject(value) || !hasExactKeys(value, ["id", "cwd", "canonicalCwd", "revision", "trust", "servicesReady"])) {
+  if (!isPlainObject(value) || !hasExactKeys(value, ["id", "cwd", "canonicalCwd", "revision", "servicesReady"])) {
     return false;
   }
-  const trust = value.trust;
   return (
     isUuid(value.id) &&
     isString(value.cwd) &&
     isString(value.canonicalCwd) &&
     isSafeRevision(value.revision) &&
-    isPlainObject(trust) &&
-    hasExactKeys(trust, ["required", "decision"], ["persistedAtPath"]) &&
-    isBoolean(trust.required) &&
-    ["trusted", "denied", "session", "pending", "notRequired"].includes(String(trust.decision)) &&
-    isOptionalString(trust.persistedAtPath) &&
     isBoolean(value.servicesReady)
   );
 }
@@ -287,9 +268,10 @@ function isProviderAuthStatus(value: unknown): boolean {
 function isProviderSnapshot(value: unknown): boolean {
   return (
     isPlainObject(value) &&
-    hasExactKeys(value, ["id", "name", "baseUrl", "api", "authHeader", "headers", "models", "auth"]) &&
+    hasExactKeys(value, ["id", "enabled", "name", "baseUrl", "api", "authHeader", "headers", "models", "auth"]) &&
     isString(value.id) &&
     value.id.trim().length > 0 &&
+    isBoolean(value.enabled) &&
     isString(value.name) &&
     value.name.trim().length > 0 &&
     isString(value.baseUrl) &&
@@ -725,15 +707,14 @@ function isPiSettingsSnapshot(value: unknown): boolean {
     hasExactKeys(
       value,
       ["steeringMode", "followUpMode", "autoCompaction", "autoRetry"],
-      ["defaultModel", "defaultThinkingLevel", "defaultProjectTrust"],
+      ["defaultModel", "defaultThinkingLevel"],
     ) &&
     (value.defaultModel === undefined || isModelSummary(value.defaultModel)) &&
     isOptionalString(value.defaultThinkingLevel) &&
     ["all", "one-at-a-time"].includes(String(value.steeringMode)) &&
     ["all", "one-at-a-time"].includes(String(value.followUpMode)) &&
     isBoolean(value.autoCompaction) &&
-    isBoolean(value.autoRetry) &&
-    isOptionalString(value.defaultProjectTrust)
+    isBoolean(value.autoRetry)
   );
 }
 
@@ -786,30 +767,13 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
       return exactAccepted() ? null : "shutdown result must be { accepted: true }";
     case "workspace.setCurrent":
       return isPlainObject(result) &&
-        hasExactKeys(result, ["workspace"], ["session", "trustOptions"]) &&
-        isWorkspaceSnapshot(result.workspace) &&
-        (result.session === undefined || isSessionSnapshot(result.session)) &&
-        (result.trustOptions === undefined ||
-          (Array.isArray(result.trustOptions) && result.trustOptions.every(isTrustOption)))
-        ? null
-        : "invalid workspace.setCurrent result";
-    case "workspace.getCurrent":
-      return result === null || isWorkspaceSnapshot(result) ? null : "invalid workspace snapshot";
-    case "workspace.getTrust":
-      return isPlainObject(result) &&
-        hasExactKeys(result, ["workspace", "options"]) &&
-        isWorkspaceSnapshot(result.workspace) &&
-        Array.isArray(result.options) &&
-        result.options.every(isTrustOption)
-        ? null
-        : "invalid workspace.getTrust result";
-    case "workspace.setTrust":
-      return isPlainObject(result) &&
         hasExactKeys(result, ["workspace"], ["session"]) &&
         isWorkspaceSnapshot(result.workspace) &&
         (result.session === undefined || isSessionSnapshot(result.session))
         ? null
-        : "invalid workspace.setTrust result";
+        : "invalid workspace.setCurrent result";
+    case "workspace.getCurrent":
+      return result === null || isWorkspaceSnapshot(result) ? null : "invalid workspace snapshot";
     case "session.list":
       return isPlainObject(result) &&
         hasExactKeys(result, ["workspaceId", "items"]) &&
@@ -977,6 +941,13 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         isProviderSnapshot(result.provider)
         ? null
         : "invalid provider.save result";
+    case "provider.setEnabled":
+      return isPlainObject(result) &&
+        hasExactKeys(result, ["providerId", "enabled"]) &&
+        isString(result.providerId) &&
+        isBoolean(result.enabled)
+        ? null
+        : "invalid provider.setEnabled result";
     case "provider.remove":
       return isPlainObject(result) &&
         hasExactKeys(result, ["providerId", "removed"]) &&
@@ -994,10 +965,12 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         : "invalid provider.fetchModels result";
     case "model.list":
       return isPlainObject(result) &&
-        hasExactKeys(result, ["models", "thinkingLevels", "configHealth"], ["current"]) &&
+        hasExactKeys(result, ["models", "thinkingLevels", "configHealth"], ["current", "enabledProviders"]) &&
         Array.isArray(result.models) &&
         result.models.every(isModelSummary) &&
         (result.current === undefined || isModelSummary(result.current)) &&
+        (result.enabledProviders === undefined ||
+          (Array.isArray(result.enabledProviders) && result.enabledProviders.every(isString))) &&
         isStringArray(result.thinkingLevels) &&
         isModelConfigHealth(result.configHealth)
         ? null
@@ -1070,14 +1043,6 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
         : "invalid host.fatal payload";
     case "workspace.changed":
       return isWorkspaceSnapshot(payload) ? null : "invalid workspace.changed payload";
-    case "workspace.trustRequired":
-      return isPlainObject(payload) &&
-        hasExactKeys(payload, ["workspace", "options"]) &&
-        isWorkspaceSnapshot(payload.workspace) &&
-        Array.isArray(payload.options) &&
-        payload.options.every(isTrustOption)
-        ? null
-        : "invalid workspace.trustRequired payload";
     case "session.snapshot":
       return payload === null || isSessionSnapshot(payload) ? null : "invalid session.snapshot payload";
     case "session.infoChanged":

@@ -13,6 +13,7 @@ import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { buildSessionSnapshot, buildToolSnapshot } from "./session-snapshot.js";
 import { rebindCurrentSessionModel } from "./model-thinking.js";
+import { getEnabledProviderIds } from "./provider-controller.js";
 import { createProvisionalSessionTitle } from "./session-title.js";
 import { withStableGraphRead } from "./stable-graph-read.js";
 import {
@@ -737,10 +738,18 @@ export function createAgentHandlers(
           const registry = factory.deps.modelRegistry;
           rebindCurrentSessionModel(g.agentSession, registry);
           const all = registry.getAvailable?.() ?? [];
-          const models: ModelSummary[] = all.map((model: Model<any>) => summarizeModel(model));
           const current = g.agentSession.model;
+          const enabledProviders = await getEnabledProviderIds(
+            factory.deps.agentDir,
+            current?.provider,
+          );
+          const enabledProviderSet = enabledProviders ? new Set(enabledProviders) : undefined;
+          const models: ModelSummary[] = all
+            .filter((model: Model<any>) => !enabledProviderSet || enabledProviderSet.has(model.provider))
+            .map((model: Model<any>) => summarizeModel(model));
           return {
             models,
+            ...(enabledProviders ? { enabledProviders } : {}),
             current: current
               ? {
                   provider: current.provider,
@@ -791,6 +800,18 @@ export function createAgentHandlers(
 
         const params = ctx.params as { provider: string; modelId: string };
         const registry = factory.deps.modelRegistry;
+        const enabledProviders = await getEnabledProviderIds(
+          factory.deps.agentDir,
+          g.agentSession.model?.provider,
+        );
+        if (enabledProviders && !enabledProviders.includes(params.provider)) {
+          return {
+            error: createHostError(
+              "INVALID_REQUEST",
+              `Provider ${params.provider} is disabled; enable it before selecting one of its models`,
+            ),
+          };
+        }
         const all = registry.getAvailable?.() ?? [];
         const model = all.find(
           (m: { provider: string; id: string }) =>

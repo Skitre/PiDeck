@@ -17,6 +17,7 @@ import {
   writeFileSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   readdirSync,
   statSync,
@@ -36,6 +37,19 @@ const nodeDir = join(root, "apps/desktop/src-tauri/resources/node");
 const gitDir = join(root, "apps/desktop/src-tauri/resources/git");
 const lockPath = join(root, "scripts/release-runtime.lock.json");
 const pnpmLock = join(root, "pnpm-lock.yaml");
+const stageTimingsMs = {};
+
+function timedStage(label, operation) {
+  const started = Date.now();
+  console.log(`[package-sidecar] ${label} started`);
+  try {
+    return operation();
+  } finally {
+    const elapsed = Date.now() - started;
+    stageTimingsMs[label] = elapsed;
+    console.log(`[package-sidecar] ${label} finished in ${elapsed}ms`);
+  }
+}
 
 function die(msg) {
   console.error("[package-sidecar]", msg);
@@ -75,11 +89,13 @@ if (process.argv.includes("--prepare-runtime") || process.argv.includes("--copy-
       "[package-sidecar] --copy-system-node is not allowed for release; running prepare-release-runtime.mjs",
     );
   }
-  const prep = spawnSync(process.execPath, [join(root, "scripts/prepare-release-runtime.mjs")], {
-    cwd: root,
-    stdio: "inherit",
-    env: process.env,
-  });
+  const prep = timedStage("prepare controlled runtimes", () =>
+    spawnSync(process.execPath, [join(root, "scripts/prepare-release-runtime.mjs")], {
+      cwd: root,
+      stdio: "inherit",
+      env: process.env,
+    }),
+  );
   if (prep.status !== 0) die("prepare-release-runtime failed");
 }
 
@@ -123,19 +139,26 @@ if (gitProbe.status !== 0 || !String(gitProbe.stdout).includes("git version")) {
   die(`controlled Portable Git probe failed: ${gitProbe.stderr || gitProbe.stdout}`);
 }
 
-function proveSdkImport(hostDir) {
+function proveRuntimeImports(hostDir) {
   const nodeExe = join(nodeDir, process.platform === "win32" ? "node.exe" : "node");
+  const modules = [
+    "@earendil-works/pi-ai",
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-tui",
+    "@pideck/protocol",
+  ];
   const prove = spawnSync(
     nodeExe,
     [
       "-e",
-      "import('@earendil-works/pi-coding-agent').then(()=>console.log('SDK_OK')).catch(e=>{console.error(e);process.exit(1)})",
+      `Promise.all(${JSON.stringify(modules)}.map((name) => import(name)))` +
+        ".then(()=>console.log('RUNTIME_IMPORTS_OK')).catch(e=>{console.error(e);process.exit(1)})",
     ],
     { cwd: hostDir, encoding: "utf8", shell: false },
   );
-  return prove.status === 0 && (prove.stdout || "").includes("SDK_OK")
+  return prove.status === 0 && (prove.stdout || "").includes("RUNTIME_IMPORTS_OK")
     ? null
-    : prove.stderr || prove.stdout || "SDK import failed";
+    : prove.stderr || prove.stdout || "release runtime imports failed";
 }
 
 /**
@@ -148,10 +171,12 @@ function stageHostWithDeploy() {
   try {
     rmSync(deployedFrom, { recursive: true, force: true });
     console.log("[package-sidecar] pnpm deploy --prod ->", deployedFrom);
-    const deploy = spawnSync(
-      "pnpm",
-      ["--filter", "@pideck/pi-host", "deploy", "--prod", deployedFrom],
-      { cwd: root, encoding: "utf8", shell: true, env: process.env },
+    const deploy = timedStage("pnpm deploy production Host", () =>
+      spawnSync(
+        "pnpm",
+        ["--filter", "@pideck/pi-host", "deploy", "--prod", deployedFrom],
+        { cwd: root, encoding: "utf8", shell: true, env: process.env },
+      ),
     );
     if (
       deploy.status !== 0 ||
@@ -164,27 +189,51 @@ function stageHostWithDeploy() {
       );
     }
 
-    const deployImportError = proveSdkImport(deployedFrom);
-    if (deployImportError) die(`deploy SDK import failed: ${deployImportError}`);
+    const deployImportError = proveRuntimeImports(deployedFrom);
+    if (deployImportError) die(`deploy runtime import failed: ${deployImportError}`);
 
     console.log("[package-sidecar] hoisting pnpm store packages to top-level (real files)...");
-    hoistPnpmPackages(join(deployedFrom, "node_modules"));
-    const hoistedImportError = proveSdkImport(deployedFrom);
-    if (hoistedImportError) die(`SDK import failed after hoist: ${hoistedImportError}`);
+    timedStage("hoist production dependencies", () =>
+      hoistPnpmPackages(join(deployedFrom, "node_modules")),
+    );
+    timedStage("remove redundant pnpm virtual store", () =>
+      rmSync(join(deployedFrom, "node_modules", ".pnpm"), {
+        recursive: true,
+        force: true,
+      }),
+    );
+    const hoistedImportError = proveRuntimeImports(deployedFrom);
+    if (hoistedImportError) die(`runtime import failed after hoist: ${hoistedImportError}`);
 
     rmSync(dest, { recursive: true, force: true });
     mkdirSync(dest, { recursive: true });
-    cpSync(join(deployedFrom, "node_modules"), join(dest, "node_modules"), {
-      recursive: true,
-      dereference: true,
+    const sourceNodeModules = join(deployedFrom, "node_modules");
+    const stagedNodeModules = join(dest, "node_modules");
+    let dependencyTransfer = "same-volume-rename";
+    timedStage("transfer production dependencies", () => {
+      try {
+        renameSync(sourceNodeModules, stagedNodeModules);
+      } catch (error) {
+        dependencyTransfer = "dereferenced-copy-fallback";
+        console.warn(
+          "[package-sidecar] dependency rename unavailable; falling back to copy:",
+          error instanceof Error ? error.message : String(error),
+        );
+        cpSync(sourceNodeModules, stagedNodeModules, {
+          recursive: true,
+          dereference: true,
+        });
+      }
     });
 
-    const stagedImportError = proveSdkImport(dest);
-    if (stagedImportError) die(`SDK import failed after clean dependency copy: ${stagedImportError}`);
-    return "pnpm-deploy-temp-node-modules-only-hoisted";
+    const stagedImportError = proveRuntimeImports(dest);
+    if (stagedImportError) die(`runtime import failed after dependency transfer: ${stagedImportError}`);
+    return `pnpm-deploy-temp-node-modules-only-hoisted-${dependencyTransfer}`;
   } finally {
     try {
-      rmSync(deployedFrom, { recursive: true, force: true });
+      timedStage("clean temporary deploy", () =>
+        rmSync(deployedFrom, { recursive: true, force: true }),
+      );
     } catch {
       /* best-effort temp cleanup */
     }
@@ -290,8 +339,8 @@ if (!existsSync(join(dest, "model-health.js"))) die("model-health.js missing —
 
 // Re-prove after overlay (node_modules untouched)
 {
-  const err = proveSdkImport(dest);
-  if (err) die(`SDK import failed after host overlay: ${err}`);
+  const err = proveRuntimeImports(dest);
+  if (err) die(`runtime import failed after host overlay: ${err}`);
 }
 
 for (const forbidden of ["src", "apps", ".staging-host-deploy", "tsconfig.json", "vitest.config.ts"]) {
@@ -385,13 +434,18 @@ writeFileSync(join(dest, "STAGING.json"), JSON.stringify(staging, null, 2));
 
 // Always compact node_modules → zip for NSIS MAX_PATH (C1/C8)
 console.log("[package-sidecar] compacting node_modules for NSIS...");
-const compact = spawnSync(process.execPath, [join(root, "scripts/compact-pi-host-resources.mjs")], {
-  cwd: root,
-  stdio: "inherit",
-  env: process.env,
-});
+const compact = timedStage("compact production dependencies", () =>
+  spawnSync(process.execPath, [join(root, "scripts/compact-pi-host-resources.mjs")], {
+    cwd: root,
+    stdio: "inherit",
+    env: process.env,
+  }),
+);
 if (compact.status !== 0) {
   die("compact-pi-host-resources failed");
 }
 
-console.log("[package-sidecar] OK", JSON.stringify(staging, null, 2));
+const finalStaging = JSON.parse(readFileSync(join(dest, "STAGING.json"), "utf8"));
+finalStaging.stageTimingsMs = stageTimingsMs;
+writeFileSync(join(dest, "STAGING.json"), JSON.stringify(finalStaging, null, 2));
+console.log("[package-sidecar] OK", JSON.stringify(finalStaging, null, 2));

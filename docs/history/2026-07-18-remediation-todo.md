@@ -1,5 +1,10 @@
 # 2026-07-18 Review Remediation TODO
 
+> Historical remediation record. Current P0/P1/P2 scope and verification
+> layers are defined in [P0 scope and verification](../operations/p0-scope.md).
+> The former Project trust state machine was removed after this review;
+> trust-related entries below describe the old product contract.
+
 Source: [Full review](./2026-07-18-full-review.md) · Second-round verification: [Round 2 review](./2026-07-18-review-round2.md)
 
 This list uses verified scope and severity rather than copying the review labels verbatim.

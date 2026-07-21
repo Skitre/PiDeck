@@ -80,9 +80,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "system.shutdown": null,
   "workspace.setCurrent": { cwd: "C:/tmp" },
   "workspace.getCurrent": null,
-  "workspace.getTrust": { cwd: "C:/tmp" },
   "workspace.searchFiles": { query: "src" },
-  "workspace.setTrust": { decision: "trust" },
   "session.list": null,
   "session.create": {},
   "session.open": { sessionPath: "/s.jsonl" },
@@ -113,6 +111,7 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "agent.getTools": null,
   "agent.setActiveTools": { names: ["read"] },
   "provider.list": null,
+  "provider.setEnabled": { providerId: "local", enabled: true },
   "provider.save": {
     provider: {
       id: "local",
@@ -214,12 +213,9 @@ function invalidParams(method: HostMethod): unknown {
     case "piSettings.get":
       return {}; // must be null
     case "workspace.setCurrent":
-    case "workspace.getTrust":
       return { path: "x" }; // missing cwd
     case "workspace.searchFiles":
       return { query: 1 };
-    case "workspace.setTrust":
-      return { decision: "maybe" };
     case "session.create":
       return "nope";
     case "session.open":
@@ -249,6 +245,8 @@ function invalidParams(method: HostMethod): unknown {
       return { names: "read" }; // not array
     case "provider.save":
       return { provider: { id: "" } };
+    case "provider.setEnabled":
+      return { providerId: "local", enabled: "yes" };
     case "provider.remove":
     case "provider.fetchModels":
       return { providerId: "" };
@@ -362,7 +360,6 @@ describe("protocol coverage — events", () => {
       capabilities: {
         packageUpdateCheck: false,
         extensionUi: true,
-        projectTrust: true,
         sessionExport: false,
       },
       modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },
@@ -377,7 +374,6 @@ describe("protocol coverage — events", () => {
       capabilities: {
         packageUpdateCheck: false,
         extensionUi: true,
-        projectTrust: true,
         sessionExport: false,
       },
       modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },
@@ -390,19 +386,7 @@ describe("protocol coverage — events", () => {
       revision: 1,
       cwd: "/p",
       canonicalCwd: "/p",
-      trust: { required: false, decision: "notRequired" },
       servicesReady: true,
-    },
-    "workspace.trustRequired": {
-      workspace: {
-        id: WORKSPACE_ID,
-        revision: 1,
-        cwd: "/p",
-        canonicalCwd: "/p",
-        trust: { required: true, decision: "pending" },
-        servicesReady: false,
-      },
-      options: [{ id: "trust", label: "Trust", trusted: true, persisted: true }],
     },
     "session.snapshot": null,
     "session.infoChanged": { sessionId: SESSION_ID, name: "n" },
@@ -550,7 +534,6 @@ describe("protocol coverage — response discrimination", () => {
       capabilities: {
         packageUpdateCheck: false,
         extensionUi: true,
-        projectTrust: true,
         sessionExport: false,
       },
       modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },

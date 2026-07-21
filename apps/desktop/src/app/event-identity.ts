@@ -30,7 +30,6 @@ export function expectedIdentityForEvent(
     case "host.statusChanged":
     case "host.fatal":
     case "workspace.changed":
-    case "workspace.trustRequired":
     case "extensionUi.request":
     case "extensionUi.customStarted":
     case "extensionUi.customFrame":

@@ -6,8 +6,9 @@ mod tests {
     use crate::pi_host::WindowsHostJob;
     use crate::pi_host::{
         build_shutdown_line, drain_complete_lines, extract_host_instance_id, finish_monitor_task,
-        is_current_child_generation, push_stderr_tail, read_bounded_utf8_line, should_auto_restart,
-        strip_verbatim_prefix, AutoRestartEpoch, HostChildSession, MAX_HOST_STDOUT_LINE_BYTES,
+        is_current_child_generation, push_stderr_tail, read_bounded_lossy_line,
+        read_bounded_utf8_line, should_auto_restart, strip_verbatim_prefix, AutoRestartEpoch,
+        HostChildSession, MAX_HOST_STDOUT_LINE_BYTES,
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -21,7 +22,7 @@ process.stdout.write(JSON.stringify({
   protocolVersion:1,event:'host.ready',sequence:1,timestamp:Date.now(),
   hostInstanceId:'test-host',workspaceId:null,workspaceRevision:0,
   sessionId:null,sessionRevision:0,packageRevision:0,
-  payload:{hostInstanceId:'test-host',workspaceId:null,workspaceRevision:0,sessionId:null,sessionRevision:0,packageRevision:0,protocolVersion:1,sdkVersion:'0.80.7',nodeVersion:process.version,agentDir:'/tmp',phase:'waitingForWorkspace',capabilities:{packageUpdateCheck:false,extensionUi:true,projectTrust:true,sessionExport:false},modelConfigHealth:{state:'ok',source:'ModelRegistry.getError'}}
+  payload:{hostInstanceId:'test-host',workspaceId:null,workspaceRevision:0,sessionId:null,sessionRevision:0,packageRevision:0,protocolVersion:1,sdkVersion:'0.80.7',nodeVersion:process.version,agentDir:'/tmp',phase:'waitingForWorkspace',capabilities:{packageUpdateCheck:false,extensionUi:true,sessionExport:false},modelConfigHealth:{state:'ok',source:'ModelRegistry.getError'}}
 })+'\n');
 rl.on('line', (line) => {
   try {
@@ -31,7 +32,7 @@ rl.on('line', (line) => {
         protocolVersion:1,id:req.id,method:'system.hello',ok:true,
         hostInstanceId:'test-host',workspaceId:null,workspaceRevision:0,
         sessionId:null,sessionRevision:0,packageRevision:0,
-        result:{hostInstanceId:'test-host',workspaceId:null,workspaceRevision:0,sessionId:null,sessionRevision:0,packageRevision:0,protocolVersion:1,sdkVersion:'0.80.7',nodeVersion:process.version,agentDir:'/tmp',phase:'waitingForWorkspace',capabilities:{packageUpdateCheck:false,extensionUi:true,projectTrust:true,sessionExport:false},modelConfigHealth:{state:'ok',source:'ModelRegistry.getError'}}
+        result:{hostInstanceId:'test-host',workspaceId:null,workspaceRevision:0,sessionId:null,sessionRevision:0,packageRevision:0,protocolVersion:1,sdkVersion:'0.80.7',nodeVersion:process.version,agentDir:'/tmp',phase:'waitingForWorkspace',capabilities:{packageUpdateCheck:false,extensionUi:true,sessionExport:false},modelConfigHealth:{state:'ok',source:'ModelRegistry.getError'}}
       })+'\n');
     } else if (req.method === 'system.shutdown') {
       const expected = req.context && req.context.expectedHostInstanceId;
@@ -156,6 +157,36 @@ rl.on('line', (line) => {
             .expect_err("oversize JSONL line must fail");
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("8 byte limit"));
+        write_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn bounded_stderr_reader_replaces_invalid_utf8_and_keeps_reading() {
+        let (mut writer, reader) = tokio::io::duplex(64);
+        let write_task = tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            writer
+                .write_all(&[b'b', b'a', b'd', 0xff, b'\n', b'o', b'k', b'\n'])
+                .await
+                .unwrap();
+        });
+        let mut reader = tokio::io::BufReader::new(reader);
+        let mut line = String::new();
+
+        assert_eq!(
+            read_bounded_lossy_line(&mut reader, &mut line, 16)
+                .await
+                .unwrap(),
+            5
+        );
+        assert_eq!(line, "bad\u{fffd}\n");
+        assert_eq!(
+            read_bounded_lossy_line(&mut reader, &mut line, 16)
+                .await
+                .unwrap(),
+            3
+        );
+        assert_eq!(line, "ok\n");
         write_task.await.unwrap();
     }
 

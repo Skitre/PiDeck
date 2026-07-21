@@ -34,10 +34,22 @@ proposing it upstream.
 | `pnpm typecheck` | Typecheck protocol, pi-host, desktop |
 | `pnpm test` | Unit + host integration tests |
 | `pnpm build` | Build all JS packages |
+| `pnpm verify:quick` | Docs + typecheck + unit/Host integration tests for local iteration |
+| `pnpm verify:p0` | Pull-request P0 gate: quick + production frontend build + Rust tests |
+| `pnpm package:release` | Build a development installer candidate |
 | `pnpm dev:host` | Run Pi Host (JSONL on stdio) |
 | `pnpm spike:sidecar` | M0 Extension load spike |
 | `pnpm dev:desktop` | Vite UI only |
 | `pnpm --filter @pideck/desktop tauri:dev` | Full desktop |
+
+`verify:p0` is intentionally broader than the lightweight local gate, but it
+is still not installer evidence. Release-grade automation is deferred during
+initial development; see [P0 scope](./p0-scope.md).
+
+The Rust gate uses the isolated
+`apps/desktop/src-tauri/target/verify-rust` directory. This keeps P0
+verification repeatable while a development build from the default target
+directory is open.
 
 ## Temporary agent directory
 

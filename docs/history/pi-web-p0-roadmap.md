@@ -1,5 +1,10 @@
 # PiDeck 与 pi-web 对照及 P0 路线图
 
+> Historical planning record (2026-07). It no longer defines product P0.
+> Current scope and gates: [P0 scope and verification](../operations/p0-scope.md).
+> References to workspace trust are also historical; selected workspaces now
+> load project resources immediately.
+
 ## 目标
 
 PiDeck 已经完成 Pi SDK、模型与 thinking level、Session 恢复、流式消息、Pi Packages 和 Extension UI 的基础接入。下一阶段的目标不是复制 pi-web 的服务器界面，而是把当前的单会话桌面 GUI 升级为能够可靠监督多个 Pi Session 的本地工作台。

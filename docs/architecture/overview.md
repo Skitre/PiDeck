@@ -26,7 +26,7 @@
 
 ## Workspace service graph
 
-When a workspace is trusted (or trust is not required), Host creates a **cwd-bound** graph:
+When a workspace is selected, Host immediately creates a **cwd-bound** graph:
 
 - `SettingsManager` (explicit `projectTrusted`)
 - `DefaultPackageManager`
@@ -36,7 +36,7 @@ When a workspace is trusted (or trust is not required), Host creates a **cwd-bou
 
 Switching workspace **retains** the outgoing idle graph in an LRU pool (max 3)
 and reactivates it in milliseconds on return (stable workspace id, advancing
-revisions); graphs that cannot be safely parked, trust changes, and LRU
+revisions); graphs that cannot be safely parked and LRU
 eviction dispose and rebuild the graph under `serviceGraphLock`.
 
 ## Fact sources
@@ -46,7 +46,7 @@ eviction dispose and rebuild the graph under `serviceGraphLock`.
 | Messages / tools / compaction | AgentSession |
 | Sessions on disk | SessionManager |
 | Packages | DefaultPackageManager + SettingsManager |
-| Project trust | ProjectTrustStore |
+| Workspace selection policy | Pi Host (`projectTrusted: true`) |
 | Desktop theme, agentDir bootstrap | Rust DesktopSettingsStore |
 | Protocol validation | packages/protocol |
 

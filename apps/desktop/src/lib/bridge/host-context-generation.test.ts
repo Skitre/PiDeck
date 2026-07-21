@@ -21,19 +21,18 @@ function host(overrides: Partial<HostStatusSnapshot> = {}): HostStatusSnapshot {
     nodeVersion: process.version,
     agentDir: "C:/agent",
     phase: "ready",
-    capabilities: { packageUpdateCheck: true, extensionUi: true, projectTrust: true, sessionExport: true },
+    capabilities: { packageUpdateCheck: true, extensionUi: true, sessionExport: true },
     modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },
     ...overrides,
   };
 }
 
-function workspace(decision: WorkspaceSnapshot["trust"]["decision"]): WorkspaceSnapshot {
+function workspace(): WorkspaceSnapshot {
   return {
     id: "w1",
     revision: 1,
     cwd: "C:/workspace",
     canonicalCwd: "C:/workspace",
-    trust: { required: true, decision },
     servicesReady: true,
   };
 }
@@ -59,10 +58,11 @@ describe("response generation convergence", () => {
     expect(merged?.packageRevision).toBe(3);
   });
 
-  it("invalidates project authorization on trust or generation changes", () => {
-    const authorization = captureWorkspaceAuthorization(host(), workspace("trusted"));
-    expect(isCurrentWorkspaceAuthorization(host(), workspace("trusted"), authorization, { requireTrusted: true })).toBe(true);
-    expect(isCurrentWorkspaceAuthorization(host(), workspace("denied"), authorization, { requireTrusted: true })).toBe(false);
-    expect(isCurrentWorkspaceAuthorization(host({ packageRevision: 2 }), workspace("trusted"), authorization, { requireTrusted: true })).toBe(false);
+  it("invalidates project authorization on generation changes", () => {
+    const authorization = captureWorkspaceAuthorization(host(), workspace());
+    expect(isCurrentWorkspaceAuthorization(host(), workspace(), authorization)).toBe(true);
+    expect(
+      isCurrentWorkspaceAuthorization(host({ packageRevision: 2 }), workspace(), authorization),
+    ).toBe(false);
   });
 });

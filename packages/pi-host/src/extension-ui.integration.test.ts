@@ -72,7 +72,6 @@ describe("extension UI real loader + bindExtensions path", () => {
     writeFileSync(join(agentDir, "auth.json"), "{}");
     writeFileSync(join(agentDir, "models.json"), "{}");
     writeFileSync(join(agentDir, "settings.json"), "{}");
-    writeFileSync(join(agentDir, "trust.json"), "{}");
 
     const extDest = join(agentDir, "extensions", "ui-blocking-extension.ts");
     cpSync(uiFixtureSrc, extDest);
