@@ -34,6 +34,22 @@ function baseSession(): SessionSnapshot {
 }
 
 describe("applyAgentEvent", () => {
+  it("settles the previous assistant before a new run starts", () => {
+    const session = baseSession();
+    session.messages = [
+      { role: "assistant", content: [{ type: "text", text: "Previous answer" }] },
+    ];
+
+    const next = applyAgentEvent(
+      session,
+      { runId: "next-run", event: { type: "agent_start" } },
+      250,
+    )!;
+
+    expect(next.messages[0]).toMatchObject({ endedAt: 250 });
+    expect(next.isStreaming).toBe(true);
+  });
+
   it("streams assistant text deltas onto the last assistant message", () => {
     let s = baseSession();
     s = applyAgentEvent(s, {
@@ -79,6 +95,13 @@ describe("applyAgentEvent", () => {
     s = applyAgentEvent(s, {
       runId: "r1",
       event: { type: "agent_end" },
+    })!;
+    expect(s.isIdle).toBe(false);
+    expect(s.isStreaming).toBe(true);
+
+    s = applyAgentEvent(s, {
+      runId: "r1",
+      event: { type: "agent_settled" },
     })!;
     expect(s.isIdle).toBe(true);
     expect(s.isStreaming).toBe(false);
@@ -360,6 +383,81 @@ describe("applyAgentEvent", () => {
     expect(parts.find((part) => part.id === "call-abort")?.status).toBe("aborted");
   });
 
+  it("maps Pi's standard error-shaped tool cancellation to aborted", () => {
+    let s = applyAgentEvent(baseSession(), {
+      runId: "r1",
+      event: {
+        type: "tool_execution_start",
+        toolCallId: "call-sdk-abort",
+        toolName: "read",
+        args: { path: "large.txt" },
+      },
+    })!;
+    s = applyAgentEvent(s, {
+      runId: "r1",
+      event: {
+        type: "tool_execution_end",
+        toolCallId: "call-sdk-abort",
+        toolName: "read",
+        result: {
+          content: [{ type: "text", text: "Operation aborted" }],
+          details: {},
+        },
+        isError: true,
+      },
+    })!;
+
+    const toolMessage = s.messages.find((message) => message.role === "tool");
+    const part = Array.isArray(toolMessage?.content) ? toolMessage.content[0] : undefined;
+    expect(part).toMatchObject({
+      id: "call-sdk-abort",
+      status: "aborted",
+      result: "Operation aborted",
+      resultBlocks: [{ type: "text", text: "Operation aborted" }],
+      details: {},
+    });
+  });
+
+  it("keeps structured tool result content and details during realtime updates", () => {
+    let s = applyAgentEvent(baseSession(), {
+      runId: "r1",
+      event: {
+        type: "tool_execution_start",
+        toolCallId: "call-image",
+        toolName: "capture",
+        args: { path: "screen.png" },
+      },
+    })!;
+    s = applyAgentEvent(s, {
+      runId: "r1",
+      event: {
+        type: "tool_execution_end",
+        toolCallId: "call-image",
+        toolName: "capture",
+        result: {
+          content: [
+            { type: "text", text: "captured" },
+            { type: "image", data: "aW1n", mimeType: "image/png" },
+          ],
+          details: { width: 10 },
+        },
+      },
+    })!;
+
+    const toolMessage = s.messages.find((message) => message.role === "tool");
+    const part = Array.isArray(toolMessage?.content) ? toolMessage.content[0] : undefined;
+    expect(part).toMatchObject({
+      id: "call-image",
+      status: "done",
+      result: "captured",
+      resultBlocks: [
+        { type: "text", text: "captured" },
+        { type: "image", data: "aW1n", mimeType: "image/png" },
+      ],
+      details: { width: 10 },
+    });
+  });
+
   it("aborts unfinished tools when the agent settles", () => {
     let s = baseSession();
     s = applyAgentEvent(s, {
@@ -383,6 +481,78 @@ describe("applyAgentEvent", () => {
     expect(s.isIdle).toBe(true);
   });
 
+  it("keeps tools active across agent runs until the whole turn settles", () => {
+    let s = baseSession();
+    s = applyAgentEvent(s, {
+      runId: "r1",
+      event: {
+        type: "tool_execution_start",
+        toolCallId: "call-before-continuation",
+        toolName: "read",
+        args: { path: "first.ts" },
+      },
+    })!;
+    s = applyAgentEvent(
+      s,
+      {
+        runId: "r1",
+        event: { type: "agent_end" },
+      },
+      200,
+    )!;
+
+    const afterAgentEnd = s.messages.find((message) => message.role === "tool");
+    const firstPart = Array.isArray(afterAgentEnd?.content)
+      ? afterAgentEnd.content[0]
+      : undefined;
+    expect(firstPart).toMatchObject({
+      id: "call-before-continuation",
+      status: "running",
+    });
+    expect(firstPart?.endedAt).toBeUndefined();
+    expect(s.isIdle).toBe(false);
+    expect(s.isStreaming).toBe(true);
+
+    s = applyAgentEvent(s, {
+      runId: "r1",
+      event: {
+        type: "tool_execution_start",
+        toolCallId: "call-in-continuation",
+        toolName: "read",
+        args: { path: "second.ts" },
+      },
+    })!;
+    const continuationTools = s.messages.flatMap((message) =>
+      message.role === "tool" && Array.isArray(message.content) ? message.content : [],
+    );
+    expect(continuationTools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "call-before-continuation", status: "running" }),
+        expect.objectContaining({ id: "call-in-continuation", status: "running" }),
+      ]),
+    );
+
+    s = applyAgentEvent(
+      s,
+      {
+        runId: "r1",
+        event: { type: "agent_settled" },
+      },
+      300,
+    )!;
+    const settledTools = s.messages.flatMap((message) =>
+      message.role === "tool" && Array.isArray(message.content) ? message.content : [],
+    );
+    expect(settledTools).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "call-before-continuation", status: "aborted", endedAt: 300 }),
+        expect.objectContaining({ id: "call-in-continuation", status: "aborted", endedAt: 300 }),
+      ]),
+    );
+    expect(s.isIdle).toBe(true);
+    expect(s.isStreaming).toBe(false);
+  });
+
   it("aborts a tool call that never reached execution start", () => {
     let s = baseSession();
     s = applyAgentEvent(s, {
@@ -397,7 +567,7 @@ describe("applyAgentEvent", () => {
     })!;
     s = applyAgentEvent(s, {
       runId: "r1",
-      event: { type: "agent_end" },
+      event: { type: "agent_settled" },
     })!;
 
     const content = s.messages[0]?.content;
@@ -418,5 +588,47 @@ describe("applyAgentEvent", () => {
     } as AgentEventEnvelope)!;
     expect(s.pending.steering).toEqual(["steer-1"]);
     expect(s.pending.followUp).toEqual(["fu-1"]);
+  });
+
+  it("appends live extension entries only when they extend the active branch", () => {
+    const session = baseSession();
+    session.entries = [
+      { id: "entry-1", type: "message", parentId: null, message: { role: "user", content: "hi" } },
+    ];
+    session.leafId = "entry-1";
+
+    const next = applyAgentEvent(session, {
+      runId: "r1",
+      event: {
+        type: "entry_appended",
+        entry: {
+          id: "entry-2",
+          type: "custom",
+          parentId: "entry-1",
+          customType: "plan",
+          data: { status: "active" },
+        },
+      },
+    })!;
+
+    expect(next.entries).toHaveLength(2);
+    expect(next.leafId).toBe("entry-2");
+  });
+
+  it("waits for a full snapshot when an entry does not extend the active branch", () => {
+    const session = baseSession();
+    session.entries = [{ id: "entry-1", type: "custom", parentId: null }];
+    session.leafId = "entry-1";
+
+    const next = applyAgentEvent(session, {
+      runId: "r1",
+      event: {
+        type: "entry_appended",
+        entry: { id: "branch-entry", type: "custom", parentId: "other" },
+      },
+    })!;
+
+    expect(next.entries).toEqual(session.entries);
+    expect(next.leafId).toBe("entry-1");
   });
 });

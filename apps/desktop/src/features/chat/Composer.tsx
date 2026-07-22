@@ -5,6 +5,7 @@ import {
   FolderSearch,
   PencilLine,
   Plus,
+  Puzzle,
   Send,
   Square,
   TestTube,
@@ -16,7 +17,10 @@ import type { SerializableImage } from "@pideck/protocol";
 import { buildAttachedFileBlock } from "./transcript-model";
 import { ContextUsageRing, ModelControls } from "./ModelControls";
 import { QueuePanel } from "./QueuePanel";
-import { ExtensionWidgets } from "./ExtensionWidgets";
+import {
+  ExtensionWidgetPanel,
+  ExtensionWidgetsButton,
+} from "./ExtensionWidgets";
 import { PiMark } from "../../components/PiMark";
 import {
   activeSessionContext,
@@ -51,6 +55,25 @@ const STARTER_PROMPTS = [
     icon: PencilLine,
   },
 ] as const;
+
+function ExtensionStatusStrip() {
+  const statuses = useAppStore((state) => state.extensionStatuses);
+  const entries = Object.entries(statuses);
+  if (entries.length === 0) return null;
+  return (
+    <div className="mb-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-2 text-[10px] text-muted">
+      {entries.map(([key, text]) => (
+        <span key={key} className="flex min-w-0 items-center gap-1.5" title={text}>
+          <Puzzle size={11} className="shrink-0 text-accent" />
+          <span className="max-w-[18rem] truncate">
+            {key !== "default" && <span className="mr-1 text-foreground/70">{key}</span>}
+            {text}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 type PendingImage = SerializableImage & { id: string };
 type PendingFile = { id: string; name: string; size: number; text: string };
@@ -155,6 +178,7 @@ export function Composer({
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [completion, setCompletion] = useState<CompletionState | null>(null);
+  const [extensionWidgetsOpen, setExtensionWidgetsOpen] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const templatesRef = useRef<{ key: string; items: CompletionItem[] } | null>(null);
@@ -173,6 +197,7 @@ export function Composer({
     setFiles([]);
     setDragOver(false);
     setCompletion(null);
+    setExtensionWidgetsOpen(true);
     fileSnapshotRef.current = null;
   }, [sessionId]);
 
@@ -488,8 +513,13 @@ export function Composer({
         </div>
       )}
       <QueuePanel />
-      {/* Anchor for the floating widget drawer — the input card never moves. */}
-      <div className="relative mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-3xl">
+        <ExtensionStatusStrip />
+        <ExtensionWidgetPanel
+          placement="aboveEditor"
+          open={extensionWidgetsOpen}
+          onClose={() => setExtensionWidgetsOpen(false)}
+        />
         <div
           className={`rounded-xl border bg-surface-raised p-2 shadow-sm transition-colors ${
             dragOver ? "border-accent" : "border-border"
@@ -672,7 +702,10 @@ export function Composer({
           </button>
           <ModelControls />
           <div className="ml-auto flex items-center gap-1.5">
-            <ExtensionWidgets />
+            <ExtensionWidgetsButton
+              open={extensionWidgetsOpen}
+              onToggle={() => setExtensionWidgetsOpen((current) => !current)}
+            />
             <ContextUsageRing />
             {busy ? (
               canSend ? (
@@ -711,6 +744,11 @@ export function Composer({
           </div>
           </div>
         </div>
+        <ExtensionWidgetPanel
+          placement="belowEditor"
+          open={extensionWidgetsOpen}
+          onClose={() => setExtensionWidgetsOpen(false)}
+        />
       </div>
       {welcomeWorkspaceName && (
         <div

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   ChevronRight,
   FileCode2,
@@ -11,6 +11,8 @@ import {
   formatDuration,
   statusLabel,
   ToolCard,
+  ToolDetailsDisclosure,
+  useToolDisclosure,
   type ToolCardProps,
 } from "./ToolCard";
 
@@ -84,21 +86,15 @@ function ToolRow({
   summary,
   props,
   children,
-  defaultOpen = false,
 }: {
   icon: LucideIcon;
   label: string;
   summary: string;
   props: ToolCardProps;
   children?: ReactNode;
-  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useToolDisclosure(props);
   const canExpand = children !== undefined;
-
-  useEffect(() => {
-    if (props.status === "running" || props.status === "error") setOpen(true);
-  }, [props.status]);
 
   return (
     <div className="min-w-0 max-w-full">
@@ -108,7 +104,7 @@ function ToolRow({
           canExpand ? "hover:bg-surface-overlay/60" : "cursor-default"
         }`}
         onClick={() => {
-          if (canExpand) setOpen((current) => !current);
+          if (canExpand) setOpen(!open);
         }}
         aria-expanded={canExpand ? open : undefined}
       >
@@ -130,7 +126,12 @@ function ToolRow({
           />
         )}
       </button>
-      {open && canExpand && <div className="mb-2 ml-[22px] mt-1">{children}</div>}
+      {open && canExpand && (
+        <div className="mb-2 ml-[22px] mt-1">
+          {children}
+          <ToolDetailsDisclosure details={props.details} />
+        </div>
+      )}
     </div>
   );
 }
@@ -197,7 +198,6 @@ export function ShellToolCard(props: ToolCardProps) {
       label="Run"
       summary={command.split("\n")[0] ?? command}
       props={props}
-      defaultOpen={props.status === "running"}
     >
       <div className="overflow-hidden rounded-md bg-[#171918] text-[#cbd5cc]">
         <div className="border-b border-white/10 px-3 py-2 font-mono text-[11px] leading-5 text-[#e3e8e4]">
@@ -265,7 +265,6 @@ export function FileMutationToolCard(props: ToolCardProps) {
       label={write ? "Write" : "Edit"}
       summary={path}
       props={props}
-      defaultOpen={props.status === "running"}
     >
       <div className="overflow-hidden rounded-md border border-border bg-surface-overlay/30">
         <div className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[10px] text-muted">

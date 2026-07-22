@@ -333,7 +333,11 @@ export type HostEventPayloadMap = {
   };
   "extensionUi.request": ExtensionUiRequest;
   "extensionUi.statusChanged": { key?: string; text: string };
-  "extensionUi.widgetChanged": { key?: string; widget: JsonValue };
+  "extensionUi.widgetChanged": {
+    key?: string;
+    widget: JsonValue;
+    placement?: "aboveEditor" | "belowEditor";
+  };
   "extensionUi.notification": { message: string; level: string };
   "extensionUi.customStarted": {
     requestId: string;

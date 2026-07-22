@@ -102,6 +102,49 @@ describe("extension-ui-bridge", () => {
     expect(events.some((x) => x.e === "extensionUi.notification")).toBe(true);
   });
 
+  it("preserves below-editor widget placement", () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+
+    ui.setWidget("progress", ["working"], { placement: "belowEditor" });
+
+    expect(events.at(-1)).toEqual({
+      e: "extensionUi.widgetChanged",
+      p: { key: "progress", widget: ["working"], placement: "belowEditor" },
+    });
+  });
+
+  it("clears a prior same-key widget when a replacement factory fails", () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+
+    ui.setWidget("progress", ["old"]);
+    ui.setWidget("progress", () => {
+      throw new Error("factory failed");
+    });
+
+    const widgets = events
+      .filter((event) => event.e === "extensionUi.widgetChanged")
+      .map((event) => event.p);
+    expect(widgets).toEqual([
+      { key: "progress", widget: ["old"] },
+      { key: "progress", widget: null },
+    ]);
+    expect(
+      events.some(
+        (event) =>
+          event.e === "package.diagnostic" &&
+          String((event.p as { message?: unknown }).message).includes("factory failed"),
+      ),
+    ).toBe(true);
+  });
+
   it("strips VT controls from requests, status, widget keys, and nested content", async () => {
     const events: Array<{ e: HostEventName; p: unknown }> = [];
     const ui = createExtensionUiContext({
@@ -407,7 +450,7 @@ describe("extension-ui-bridge", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 30));
 
-    let widget = events.find((x) => x.e === "extensionUi.widgetChanged")?.p as {
+    let widget = events.filter((x) => x.e === "extensionUi.widgetChanged").at(-1)?.p as {
       key: string;
       widget: string[];
     };
@@ -419,7 +462,8 @@ describe("extension-ui-bridge", () => {
     requestRender?.();
     await new Promise((resolve) => setTimeout(resolve, 30));
     const updates = events.filter((x) => x.e === "extensionUi.widgetChanged");
-    expect(updates).toHaveLength(2);
+    expect(updates).toHaveLength(3);
+    expect(updates[0]?.p).toEqual({ key: "tasks", widget: null });
     widget = updates.at(-1)?.p as { key: string; widget: string[] };
     expect(widget.widget).toEqual(["updated", "line two"]);
 
@@ -432,14 +476,14 @@ describe("extension-ui-bridge", () => {
 
     requestRender?.();
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(3);
+    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(4);
 
     ui.setWidget("tasks", undefined);
     expect(events.at(-1)).toEqual({
       e: "extensionUi.widgetChanged",
       p: { key: "tasks", widget: null },
     });
-    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(4);
+    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(5);
   });
 
   it("binding cleanup disposes live setWidget factories", async () => {

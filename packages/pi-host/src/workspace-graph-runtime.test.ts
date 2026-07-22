@@ -40,6 +40,38 @@ function fakeSession(isIdle: boolean, sessionId = "session"): AgentSession {
   } as unknown as AgentSession;
 }
 
+function fakeSessionSnapshot(
+  sessionId: string,
+  revision: number,
+  isIdle: boolean,
+): BackgroundSessionRuntime["sessionSnapshot"] {
+  return {
+    sessionId,
+    sessionPath: `C:/sessions/${sessionId}.jsonl`,
+    cwd: "C:/workspace",
+    revision,
+    isStreaming: !isIdle,
+    isIdle,
+    isCompacting: false,
+    isRetrying: false,
+    thinkingLevel: "off",
+    autoCompactionEnabled: true,
+    autoRetryEnabled: true,
+    steeringMode: "all",
+    followUpMode: "all",
+    pending: { steering: [], followUp: [] },
+    messages: [],
+    tools: {
+      revision: 1,
+      workspaceId: WORKSPACE_ID,
+      sessionId,
+      sessionRevision: revision,
+      tools: [],
+      active: [],
+    },
+  } as BackgroundSessionRuntime["sessionSnapshot"];
+}
+
 describe("WorkspaceGraphFactory multi-Session routing", () => {
   it("uses independent operation locks for different AgentSession instances", () => {
     const factory = new WorkspaceGraphFactory({} as GraphFactoryDeps);
@@ -137,6 +169,126 @@ describe("WorkspaceGraphFactory multi-Session routing", () => {
         state: "running",
       },
     });
+  });
+
+  it("keeps active snapshots running at agent_end and idle at agent_settled", () => {
+    const events: Array<{ event: HostEventName; payload: unknown }> = [];
+    const identity: HostIdentity = {
+      hostInstanceId: HOST_ID,
+      workspaceId: WORKSPACE_ID,
+      workspaceRevision: 1,
+      sessionId: ACTIVE_SESSION_ID,
+      sessionRevision: 5,
+      packageRevision: 1,
+    };
+    const server = {
+      getIdentity: () => identity,
+      emitForIdentity: vi.fn((_identity: HostIdentity, event: HostEventName, payload: unknown) => {
+        events.push({ event, payload });
+      }),
+      setPhase: vi.fn(),
+    } as unknown as PiHostServer;
+    const factory = new WorkspaceGraphFactory({} as GraphFactoryDeps);
+    factory.bindServer(server);
+    const activeSession = fakeSession(false, ACTIVE_SESSION_ID);
+    const graph = {
+      workspaceId: WORKSPACE_ID,
+      canonicalCwd: "C:/workspace",
+      agentSession: activeSession,
+      sessionManager: {},
+      sessionSnapshot: fakeSessionSnapshot(ACTIVE_SESSION_ID, 5, false),
+      toolRevision: 1,
+      backgroundSessions: new Map(),
+    } as unknown as WorkspaceGraph;
+    Reflect.set(factory, "graph", graph);
+
+    const internal = factory as unknown as {
+      handleAgentEvent: (graph: WorkspaceGraph, session: AgentSession, event: unknown) => void;
+    };
+    internal.handleAgentEvent(graph, activeSession, { type: "agent_end" });
+
+    const runningSnapshot = events.find((entry) => entry.event === "session.snapshot")
+      ?.payload as { isIdle: boolean; isStreaming: boolean };
+    expect(runningSnapshot).toMatchObject({ isIdle: false, isStreaming: true });
+
+    Reflect.set(activeSession, "isIdle", true);
+    internal.handleAgentEvent(graph, activeSession, { type: "agent_settled" });
+
+    const snapshots = events
+      .filter((entry) => entry.event === "session.snapshot")
+      .map((entry) => entry.payload as { isIdle: boolean; isStreaming: boolean });
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots.at(-1)).toMatchObject({ isIdle: true, isStreaming: false });
+  });
+
+  it("disposes a background session only after agent_settled", async () => {
+    vi.useFakeTimers();
+    try {
+      const identity: HostIdentity = {
+        hostInstanceId: HOST_ID,
+        workspaceId: WORKSPACE_ID,
+        workspaceRevision: 1,
+        sessionId: ACTIVE_SESSION_ID,
+        sessionRevision: 5,
+        packageRevision: 1,
+      };
+      const server = {
+        getIdentity: () => identity,
+        getPhase: vi.fn(() => "agentBusy"),
+        emitForIdentity: vi.fn(),
+        setPhase: vi.fn(),
+      } as unknown as PiHostServer;
+      const factory = new WorkspaceGraphFactory({} as GraphFactoryDeps);
+      factory.bindServer(server);
+      const activeSession = fakeSession(true, ACTIVE_SESSION_ID);
+      const backgroundSession = fakeSession(false, BACKGROUND_SESSION_ID);
+      const background = {
+        sessionId: BACKGROUND_SESSION_ID,
+        sessionRevision: 3,
+        agentSession: backgroundSession,
+        sessionManager: {},
+        resourceLoader: {},
+        extensionsResult: null,
+        toolRevision: 1,
+        sessionSnapshot: fakeSessionSnapshot(BACKGROUND_SESSION_ID, 3, false),
+        unsubscribeAgent: vi.fn(),
+        extensionUiActivate: null,
+        extensionUiCleanup: vi.fn(),
+        extensionUiUpdateIdentity: null,
+      } as unknown as BackgroundSessionRuntime;
+      const graph = {
+        workspaceId: WORKSPACE_ID,
+        canonicalCwd: "C:/workspace",
+        agentSession: activeSession,
+        backgroundSessions: new Map([[BACKGROUND_SESSION_ID, background]]),
+      } as unknown as WorkspaceGraph;
+      Reflect.set(factory, "graph", graph);
+
+      const internal = factory as unknown as {
+        handleAgentEvent: (graph: WorkspaceGraph, session: AgentSession, event: unknown) => void;
+      };
+      internal.handleAgentEvent(graph, backgroundSession, { type: "agent_end" });
+      await vi.runAllTimersAsync();
+
+      expect(graph.backgroundSessions.get(BACKGROUND_SESSION_ID)).toBe(background);
+      expect(backgroundSession.abort).not.toHaveBeenCalled();
+      expect(backgroundSession.dispose).not.toHaveBeenCalled();
+      expect(background.sessionSnapshot).toMatchObject({ isIdle: false, isStreaming: true });
+      expect(server.setPhase).not.toHaveBeenCalled();
+
+      Reflect.set(backgroundSession, "isIdle", true);
+      internal.handleAgentEvent(graph, backgroundSession, { type: "agent_settled" });
+      expect(graph.backgroundSessions.get(BACKGROUND_SESSION_ID)).toBe(background);
+
+      await vi.runAllTimersAsync();
+
+      expect(graph.backgroundSessions.has(BACKGROUND_SESSION_ID)).toBe(false);
+      expect(backgroundSession.abort).not.toHaveBeenCalled();
+      expect(backgroundSession.dispose).toHaveBeenCalledTimes(1);
+      expect(server.setPhase).toHaveBeenCalledWith("ready");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("promotes a running background Runtime without reopening its Session file", async () => {

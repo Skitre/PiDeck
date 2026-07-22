@@ -1123,7 +1123,7 @@ export class WorkspaceGraphFactory {
       snapshot.isStreaming = !sourceSession.isIdle;
       if (eventType === "agent_end" || eventType === "agent_settled") {
         if (!this.hasBusySessions()) server.setPhase("ready");
-        const settledSnapshot = buildSessionSnapshot({
+        const lifecycleSnapshot = buildSessionSnapshot({
           session: sourceSession,
           sessionManager,
           cwd: graph.canonicalCwd,
@@ -1133,13 +1133,23 @@ export class WorkspaceGraphFactory {
           toolRevision: active ? graph.toolRevision : background!.toolRevision,
         });
         if (active) {
-          graph.sessionSnapshot = settledSnapshot;
-          server.emitForIdentity(eventIdentity, "session.snapshot", settledSnapshot);
+          graph.sessionSnapshot = lifecycleSnapshot;
+          server.emitForIdentity(eventIdentity, "session.snapshot", lifecycleSnapshot);
         } else if (background) {
-          background.sessionSnapshot = settledSnapshot;
-          setTimeout(() => {
-            void this.disposeBackgroundRuntime(graph, background);
-          }, 0);
+          background.sessionSnapshot = lifecycleSnapshot;
+          if (eventType === "agent_settled") {
+            setTimeout(() => {
+              void this.disposeBackgroundRuntime(graph, background).then(() => {
+                if (
+                  this.graph === graph &&
+                  server.getPhase() === "agentBusy" &&
+                  !this.hasBusySessions()
+                ) {
+                  server.setPhase("ready");
+                }
+              });
+            }, 0);
+          }
         }
       }
     }

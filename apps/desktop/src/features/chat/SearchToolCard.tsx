@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ChevronRight, ExternalLink, Search } from "lucide-react";
 import { isSafeExternalUrl } from "./markdown-utils";
 import {
   formatDuration,
   statusLabel,
   ToolCard,
+  ToolDetailsDisclosure,
+  useToolDisclosure,
   type ToolCardProps,
 } from "./ToolCard";
 
@@ -157,18 +159,15 @@ async function openSearchResult(url: string) {
 
 export function SearchToolCard(props: ToolCardProps) {
   const results = useMemo(() => extractSearchResults(props.result), [props.result]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useToolDisclosure(props);
   const query = searchQuery(props.args);
-
-  useEffect(() => {
-    if (props.status === "error") setOpen(true);
-  }, [props.status]);
 
   if ((props.result !== undefined && results.length === 0) || props.status === "error") {
     return <ToolCard {...props} />;
   }
 
-  const canExpand = results.length > 0;
+  const canExpand =
+    results.length > 0 || (props.details !== undefined && props.details !== null);
   const statusClass =
     props.status === "running"
       ? "text-warning"
@@ -184,7 +183,7 @@ export function SearchToolCard(props: ToolCardProps) {
           canExpand ? "hover:bg-surface-overlay/60" : "cursor-default"
         }`}
         onClick={() => {
-          if (canExpand) setOpen((current) => !current);
+          if (canExpand) setOpen(!open);
         }}
         aria-expanded={canExpand ? open : undefined}
       >
@@ -193,7 +192,7 @@ export function SearchToolCard(props: ToolCardProps) {
         <span className="min-w-0 flex-1 truncate text-xs text-foreground/75" title={query}>
           {query || props.name}
         </span>
-        <span className="shrink-0 text-[10px] text-muted">
+        <span className="shrink-0 text-[10px] text-muted max-[520px]:hidden">
           {formatDuration(props.startedAt, props.endedAt)}
         </span>
         <span className={`shrink-0 text-[10px] ${statusClass}`}>
@@ -233,6 +232,7 @@ export function SearchToolCard(props: ToolCardProps) {
               )}
             </a>
           ))}
+          <ToolDetailsDisclosure details={props.details} />
         </div>
       )}
     </div>

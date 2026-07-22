@@ -1,7 +1,10 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   extractSearchResults,
   isWebSearchTool,
+  SearchToolCard,
   searchQuery,
 } from "./SearchToolCard";
 import { selectToolRenderer } from "./ToolView";
@@ -54,5 +57,18 @@ describe("search tool renderer", () => {
   it("reads common query argument shapes", () => {
     expect(searchQuery('{"query":"agent architecture"}')).toBe("agent architecture");
     expect(searchQuery({ queries: ["one", "two"] })).toBe("one, two");
+  });
+
+  it("keeps a details-only structured result expandable", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SearchToolCard, {
+        name: "web_search",
+        status: "done",
+        details: { results: [], requestId: "search-1" },
+      }),
+    );
+
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain("lucide-chevron-right");
   });
 });

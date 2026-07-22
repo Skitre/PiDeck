@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
+  Braces,
   ChevronRight,
   FileCode2,
   Search,
@@ -8,19 +9,26 @@ import {
 } from "lucide-react";
 import type { ToolTraceStatus } from "./transcript-model";
 
+function limitToolText(value: string): string {
+  const limit = 100_000;
+  return value.length <= limit
+    ? value
+    : `${value.slice(0, limit)}\n... [tool data truncated]`;
+}
+
 export function toolValueText(value: unknown): string {
   if (value === undefined) return "";
   if (typeof value === "string") {
     try {
-      return JSON.stringify(JSON.parse(value), null, 2);
+      return limitToolText(JSON.stringify(JSON.parse(value), null, 2));
     } catch {
-      return value;
+      return limitToolText(value);
     }
   }
   try {
-    return JSON.stringify(value, null, 2) ?? "null";
+    return limitToolText(JSON.stringify(value, null, 2) ?? "null");
   } catch {
-    return String(value);
+    return limitToolText(String(value));
   }
 }
 
@@ -84,16 +92,35 @@ export type ToolCardProps = {
   name: string;
   args?: unknown;
   result?: unknown;
+  resultContent?: ReactNode;
   details?: unknown;
   status: ToolTraceStatus;
   startedAt?: number;
   endedAt?: number;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 };
 
+export function useToolDisclosure(
+  props: Pick<ToolCardProps, "expanded" | "onExpandedChange">,
+): [boolean, (expanded: boolean) => void] {
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const expanded = props.expanded ?? localExpanded;
+  const setExpanded = (next: boolean) => {
+    if (props.expanded === undefined) setLocalExpanded(next);
+    props.onExpandedChange?.(next);
+  };
+  return [expanded, setExpanded];
+}
+
 export function ToolCard(props: ToolCardProps) {
-  const [open, setOpen] = useState(props.status === "error");
+  const [open, setOpen] = useToolDisclosure(props);
   const Icon = toolIcon(props.name);
-  const canExpand = props.args !== undefined || props.result !== undefined;
+  const canExpand =
+    props.args !== undefined ||
+    props.result !== undefined ||
+    props.resultContent !== undefined ||
+    props.details !== undefined;
   const summary = toolSummary(props.args);
   const statusClass =
     props.status === "running"
@@ -104,38 +131,39 @@ export function ToolCard(props: ToolCardProps) {
           ? "text-success"
           : "text-muted";
 
-  useEffect(() => {
-    if (props.status === "error") setOpen(true);
-  }, [props.status]);
-
   return (
     <div className="group/tool min-w-0 max-w-full">
       <button
         type="button"
-        className={`flex h-8 w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors ${
+        className={`flex h-8 min-w-0 w-full items-center gap-2 rounded-md px-1.5 text-left transition-colors ${
           canExpand ? "hover:bg-surface-overlay/60" : "cursor-default"
         }`}
         onClick={() => {
-          if (canExpand) setOpen((current) => !current);
+          if (canExpand) setOpen(!open);
         }}
         aria-expanded={canExpand ? open : undefined}
       >
         <Icon size={14} className="shrink-0 text-muted" />
-        <span className="shrink-0 text-xs font-medium text-foreground/80">{props.name}</span>
+        <span
+          className="min-w-0 max-w-[42%] truncate text-xs font-medium text-foreground/80"
+          title={props.name}
+        >
+          {props.name}
+        </span>
         {summary && (
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted" title={summary}>
             {summary}
           </span>
         )}
         {!summary && <span className="flex-1" />}
-        <span className="text-[10px] text-muted">
+        <span className="shrink-0 text-[10px] text-muted max-[520px]:hidden">
           {formatDuration(props.startedAt, props.endedAt)}
         </span>
-        <span className={`text-[10px] ${statusClass}`}>{statusLabel(props.status)}</span>
+        <span className={`shrink-0 text-[10px] ${statusClass}`}>{statusLabel(props.status)}</span>
         {canExpand && (
           <ChevronRight
             size={13}
-            className={`text-muted transition-transform ${open ? "rotate-90" : ""}`}
+            className={`shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`}
           />
         )}
       </button>
@@ -151,6 +179,25 @@ export function ToolCard(props: ToolCardProps) {
               error={props.status === "error"}
               terminal={props.name.toLocaleLowerCase().includes("bash")}
             />
+          )}
+          {props.resultContent !== undefined && (
+            <section>
+              <div className="mb-1 text-[10px] font-medium text-muted">
+                {props.status === "error" ? "Error" : "Result"}
+              </div>
+              <div
+                className={
+                  props.status === "error"
+                    ? "max-h-56 min-w-0 overflow-auto rounded-md bg-danger/10 px-3 py-2 text-danger"
+                    : "max-h-56 min-w-0 overflow-auto rounded-md bg-surface-overlay/35 px-3 py-2 text-foreground/80"
+                }
+              >
+                {props.resultContent}
+              </div>
+            </section>
+          )}
+          {props.details !== undefined && (
+            <ToolSection label="Details" value={props.details} />
           )}
         </div>
       )}
@@ -184,6 +231,28 @@ function ToolSection({
         {toolValueText(value)}
       </pre>
     </section>
+  );
+}
+
+export function ToolDetailsDisclosure({ details }: { details?: unknown }) {
+  const [open, setOpen] = useState(false);
+  if (details === undefined || details === null) return null;
+  return (
+    <details
+      className="mt-2 text-[10px] text-muted"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-1 hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <Braces size={12} />
+        <span>Details</span>
+      </summary>
+      {open && (
+        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-overlay/50 px-2 py-1.5 font-mono text-[11px] leading-5 text-foreground/70">
+          {toolValueText(details)}
+        </pre>
+      )}
+    </details>
   );
 }
 

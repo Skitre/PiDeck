@@ -1,5 +1,21 @@
-import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, Brain, ChevronRight, Copy, FileText, LoaderCircle } from "lucide-react";
+import { lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowDown,
+  Ban,
+  Bot,
+  Brain,
+  Braces,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  Copy,
+  FileText,
+  FoldVertical,
+  GitBranch,
+  ListTree,
+  Puzzle,
+  Terminal,
+} from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { sanitizeAgentText } from "./markdown-utils";
 import { ToolView } from "./ToolView";
@@ -8,8 +24,11 @@ import { formatTokenCount } from "../../lib/format-token-count";
 import { PiMark } from "../../components/PiMark";
 import {
   buildTranscriptRows,
+  executionTraceIsActive,
+  findStreamingAssistantKey,
   parseUserAttachments,
   reuseStableRows,
+  type TranscriptContentBlock,
   type TranscriptBlock,
   type TranscriptRow,
 } from "./transcript-model";
@@ -59,14 +78,19 @@ export function Transcript() {
   const prevRowsRef = useRef<TranscriptRow[] | null>(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rows = useMemo(
-    () => reuseStableRows(prevRowsRef.current, buildTranscriptRows(messages)),
-    [messages],
+    () =>
+      reuseStableRows(
+        prevRowsRef.current,
+        buildTranscriptRows(messages, {
+          entries: session?.entries,
+          leafId: session?.leafId,
+        }),
+      ),
+    [messages, session?.entries, session?.leafId],
   );
   prevRowsRef.current = rows;
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
-  const rowModes = useRef(new Set<string>());
-  const modeSessionId = useRef<string | null>(null);
   const [following, setFollowing] = useState(true);
 
   // Top-anchored window: `hidden` rows stay unmounted above the fold. New
@@ -115,15 +139,24 @@ export function Transcript() {
     element.scrollTop = anchor.prevTop + (element.scrollHeight - anchor.prevHeight);
   }, [hidden]);
 
-  if (modeSessionId.current !== (session?.sessionId ?? null)) {
-    modeSessionId.current = session?.sessionId ?? null;
-    rowModes.current.clear();
-  }
-
-  const lastAssistantKey = [...rows]
+  const lastAssistantRow = [...rows]
     .reverse()
-    .find((row) => row.role === "assistant")?.key;
-  if (session?.isStreaming && lastAssistantKey) rowModes.current.add(lastAssistantKey);
+    .find((row) => row.role === "assistant");
+  const streamingAssistantKey = findStreamingAssistantKey(
+    rows,
+    messages,
+    session?.isStreaming === true,
+  );
+  const hasRunningTool = lastAssistantRow?.blocks.some(
+    (block) =>
+      block.kind === "tool" &&
+      (block.tool.status === "running" || block.tool.status === "waiting"),
+  );
+  const tailRow = rows[rows.length - 1];
+  const workingHeaderKey =
+    session && !session.isIdle && tailRow?.role === "assistant"
+      ? tailRow.key
+      : undefined;
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -169,7 +202,7 @@ export function Transcript() {
     <div className="relative min-h-0 flex-1">
       <div
         ref={scrollRef}
-        className="h-full overflow-y-auto px-6 py-5"
+        className="h-full overflow-y-auto px-3 py-4 sm:px-6 sm:py-5"
         onScroll={(event) => {
           const element = event.currentTarget;
           const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
@@ -181,7 +214,7 @@ export function Transcript() {
           setFollowing(shouldFollow);
         }}
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-6">
+        <div className="mx-auto flex max-w-3xl flex-col gap-5 sm:gap-6">
           {hidden > 0 && (
             <button
               type="button"
@@ -192,18 +225,23 @@ export function Transcript() {
             </button>
           )}
           {visibleRows.map((row) => {
-            const streaming = session?.isStreaming && row.key === lastAssistantKey;
+            const streaming = row.key === streamingAssistantKey;
             return (
               <div className="transcript-row" key={`${session?.sessionId ?? "session"}:${row.key}`}>
                 <TranscriptRowView
                   row={row}
-                  mode={rowModes.current.has(row.key) ? "streaming" : "static"}
+                  mode={streaming ? "streaming" : "static"}
                   showCaret={Boolean(streaming)}
+                  working={row.key === workingHeaderKey}
                 />
               </div>
             );
           })}
-          {session && !session.isIdle && !lastAssistantKey && (
+          {session &&
+            !session.isIdle &&
+            !workingHeaderKey &&
+            !streamingAssistantKey &&
+            !hasRunningTool && (
             <div className="flex items-center gap-3 text-xs text-muted">
               <AssistantAvatar />
               <span>Pi is working...</span>
@@ -262,10 +300,12 @@ const TranscriptRowView = memo(function TranscriptRowView({
   row,
   mode,
   showCaret,
+  working,
 }: {
   row: TranscriptRow;
   mode: "streaming" | "static";
   showCaret: boolean;
+  working: boolean;
 }) {
   if (row.role === "user") {
     const images = row.blocks.filter(
@@ -274,7 +314,7 @@ const TranscriptRowView = memo(function TranscriptRowView({
     );
     const parsed = parseUserAttachments(row.copyText);
     return (
-      <div className="group relative ml-auto w-fit max-w-[78%]">
+      <div className="group relative ml-auto w-fit max-w-[92%] sm:max-w-[78%]">
         {images.length > 0 && (
           <div className="mb-1 flex flex-wrap justify-end gap-1.5">
             {images.map((image, index) => (
@@ -323,16 +363,27 @@ const TranscriptRowView = memo(function TranscriptRowView({
   if (row.role === "error") {
     return (
       <div className="flex items-start gap-3">
-        <AssistantAvatar />
-        <div className="min-w-0 flex-1 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+        <CircleAlert className="mt-1 size-5 shrink-0 text-danger" />
+        <div className="min-w-0 flex-1 rounded-md border border-danger/25 bg-danger/10 px-3 py-2 text-sm text-danger">
           {row.copyText}
         </div>
       </div>
     );
   }
 
-  const sections = row.sections;
-  if (!sections) return null;
+  if (row.role === "custom") return <CustomMessageRow row={row} />;
+  if (row.role === "bash") return <BashExecutionRow row={row} />;
+  if (row.role === "summary") return <SummaryRow row={row} />;
+  if (row.role === "event") return <SessionEventRow row={row} />;
+
+  const sections = row.sections ?? {
+    ordered: row.blocks,
+    initialThinking: [],
+    intro: [],
+    activity: row.blocks,
+    final: [],
+    stepCount: row.blocks.filter((block) => block.kind === "tool").length,
+  };
   const lastTextBlock = [...row.blocks]
     .reverse()
     .find((block): block is Extract<TranscriptBlock, { kind: "text" }> =>
@@ -343,43 +394,18 @@ const TranscriptRowView = memo(function TranscriptRowView({
     <div className="group/assistant relative w-full">
       <div className="flex h-7 items-center gap-2">
         <AssistantAvatar />
+        {working && <span className="text-[11px] text-muted">Pi is working...</span>}
       </div>
       <div className="mt-2 min-w-0 space-y-3">
-        {sections.initialThinking.length > 0 && (
-          <ThinkingBlock
-            content={sections.initialThinking.map((block) => block.text).join("\n\n")}
-            label="Thought process"
-            defaultOpen
-          />
-        )}
-        {sections.intro.map((block, index) => (
-          <AssistantBlock
-            key={`intro:${index}`}
-            block={block}
-            mode={mode}
-            showCaret={showCaret && block === lastTextBlock}
-          />
-        ))}
-        {sections.stepCount > 0 && (
-          <ExecutionTrace
-            blocks={sections.activity}
-            stepCount={sections.stepCount}
-            mode={mode}
-            showCaret={showCaret}
-            lastTextBlock={lastTextBlock}
-          />
-        )}
-        {sections.final.length > 0 && (
-          <div className={sections.stepCount > 0 ? "pt-1" : ""}>
-            {sections.final.map((block, index) => (
-              <AssistantBlock
-                key={`final:${index}`}
-                block={block}
-                mode={mode}
-                showCaret={showCaret && block === lastTextBlock}
-              />
-            ))}
-          </div>
+        <AssistantOrderedContent
+          blocks={sections.ordered}
+          mode={mode}
+          showCaret={showCaret}
+          lastTextBlock={lastTextBlock}
+          turnActive={working}
+        />
+        {row.outcome && (row.outcome.status === "error" || row.outcome.status === "aborted") && (
+          <AssistantOutcome outcome={row.outcome} />
         )}
       </div>
       <div className="mt-2 flex h-7 items-center gap-2">
@@ -399,37 +425,130 @@ const TranscriptRowView = memo(function TranscriptRowView({
   );
 });
 
-function ExecutionTrace({
+/**
+ * Keep assistant content in the order emitted by Pi. Reasoning and tool calls
+ * are grouped only while they are adjacent, so a provider's text/thinking/tool
+ * interleaving remains visible instead of being reclassified by position.
+ */
+export function AssistantOrderedContent({
+  blocks,
+  mode,
+  showCaret,
+  lastTextBlock,
+  turnActive,
+}: {
+  blocks: TranscriptBlock[];
+  mode: "streaming" | "static";
+  showCaret: boolean;
+  lastTextBlock?: Extract<TranscriptBlock, { kind: "text" }>;
+  turnActive: boolean;
+}) {
+  const content: ReactNode[] = [];
+  let workBlocks: TranscriptBlock[] = [];
+  let workIndex = 0;
+
+  const flushWork = (traceActive = false) => {
+    if (workBlocks.length === 0) return;
+    const hasTool = workBlocks.some((block) => block.kind === "tool");
+    if (hasTool) {
+      content.push(
+        <ExecutionTrace
+          key={`ordered-trace:${workIndex}`}
+          blocks={workBlocks}
+          stepCount={workBlocks.filter((block) => block.kind === "tool").length}
+          mode={mode}
+          showCaret={showCaret}
+          lastTextBlock={lastTextBlock}
+          turnActive={traceActive}
+        />,
+      );
+    } else {
+      workBlocks.forEach((block, index) => {
+        if (block.kind === "thinking") {
+          content.push(
+            <ThinkingBlock
+              key={`ordered-thinking:${workIndex}:${index}`}
+              content={block.text}
+              label="Thought process"
+              defaultOpen={mode === "streaming"}
+            />,
+          );
+        } else {
+          content.push(
+            <AssistantBlock
+              key={`ordered-work:${workIndex}:${index}`}
+              block={block}
+              mode={mode}
+              showCaret={false}
+            />,
+          );
+        }
+      });
+    }
+    workBlocks = [];
+    workIndex += 1;
+  };
+
+  blocks.forEach((block, index) => {
+    if (block.kind === "thinking" || block.kind === "tool") {
+      workBlocks.push(block);
+      return;
+    }
+    flushWork();
+    content.push(
+      <AssistantBlock
+        key={`ordered-block:${index}`}
+        block={block}
+        mode={mode}
+        showCaret={showCaret && block === lastTextBlock}
+      />,
+    );
+  });
+  // Only the trailing trace can receive more adjacent tool calls. Earlier
+  // trace groups are final even while the broader assistant turn is active.
+  flushWork(turnActive);
+
+  return <>{content}</>;
+}
+
+export function ExecutionTrace({
   blocks,
   stepCount,
   mode,
   showCaret,
   lastTextBlock,
+  turnActive,
 }: {
   blocks: TranscriptBlock[];
   stepCount: number;
   mode: "streaming" | "static";
   showCaret: boolean;
   lastTextBlock?: Extract<TranscriptBlock, { kind: "text" }>;
+  turnActive: boolean;
 }) {
-  const [open, setOpen] = useState(true);
   const tools = blocks.filter(
     (block): block is Extract<TranscriptBlock, { kind: "tool" }> => block.kind === "tool",
   );
-  const running = tools.some(
-    (block) => block.tool.status === "running" || block.tool.status === "waiting",
+  const imageCount = tools.reduce(
+    (count, block) =>
+      count + (block.tool.resultBlocks?.filter((result) => result.kind === "image").length ?? 0),
+    0,
   );
+  const active = executionTraceIsActive(
+    tools.map((block) => block.tool),
+    turnActive,
+  );
+  const [open, setOpen] = useState(false);
   const failed = tools.filter((block) => block.tool.status === "error").length;
   const aborted = tools.filter((block) => block.tool.status === "aborted").length;
-  const traceLabel = running
-    ? `Running ${stepCount} ${stepCount === 1 ? "step" : "steps"}`
+  const traceLabel = active
+    ? `Running ${stepCount} ${stepCount === 1 ? "action" : "actions"}`
     : failed > 0
-      ? `Executed ${stepCount} steps · ${failed} failed`
+      ? `${stepCount} ${stepCount === 1 ? "action" : "actions"} completed, ${failed} failed`
       : aborted > 0
-        ? `Stopped after ${stepCount} ${stepCount === 1 ? "step" : "steps"}`
-        : `Executed ${stepCount} ${stepCount === 1 ? "step" : "steps"}`;
-  const TraceIcon = running ? LoaderCircle : Brain;
-
+        ? `Stopped after ${stepCount} ${stepCount === 1 ? "action" : "actions"}`
+        : `${stepCount} ${stepCount === 1 ? "action" : "actions"} completed`;
+  const traceLabelWithMedia = imageCount > 0 ? `${traceLabel} / ${imageCount} image${imageCount === 1 ? "" : "s"}` : traceLabel;
   return (
     <div className="execution-trace">
       <button
@@ -438,8 +557,8 @@ function ExecutionTrace({
         className="flex h-8 w-full items-center gap-2 rounded-md text-left text-xs font-medium text-foreground/80 transition-colors hover:text-foreground"
         aria-expanded={open}
       >
-        <TraceIcon size={14} className={`text-muted ${running ? "animate-spin" : ""}`} />
-        <span>{traceLabel}</span>
+        <ListTree size={14} className="shrink-0 text-muted" />
+        <span className="min-w-0 truncate" title={traceLabelWithMedia}>{traceLabelWithMedia}</span>
         <ChevronRight
           size={13}
           className={`ml-auto transition-transform ${open ? "rotate-90" : ""}`}
@@ -452,6 +571,7 @@ function ExecutionTrace({
               <ThinkingBlock
                 key={`activity:${block.kind}:${index}`}
                 content={block.text}
+                defaultOpen={active}
               />
             ) : block.kind === "text" ? (
               <div key={`activity:${block.kind}:${index}`} className="py-1 text-foreground/85">
@@ -500,15 +620,277 @@ function AssistantBlock({
       />
     );
   }
+  if (block.kind === "unknown") {
+    return <UnknownBlock block={block} />;
+  }
+  return <ToolTraceBlock tool={block.tool} />;
+}
+
+function ToolTraceBlock({ tool }: { tool: Extract<TranscriptBlock, { kind: "tool" }>["tool"] }) {
+  const orderedResults = tool.resultBlocks?.some((block) => block.kind !== "text")
+    ? tool.resultBlocks
+    : undefined;
   return (
-    <ToolView
-      name={block.tool.name}
-      args={block.tool.args}
-      result={block.tool.result}
-      details={block.tool.details}
-      status={block.tool.status}
-    />
+    <div className="min-w-0">
+      <ToolView
+        name={tool.name}
+        args={tool.args}
+        result={orderedResults ? undefined : tool.result}
+        resultContent={
+          orderedResults ? (
+            <div className="space-y-2">
+              {orderedResults.map((block, index) => (
+                <ContentBlockView key={`tool-result:${index}`} block={block} />
+              ))}
+            </div>
+          ) : undefined
+        }
+        details={tool.details}
+        status={tool.status}
+        startedAt={tool.startedAt}
+        endedAt={tool.endedAt}
+      />
+    </div>
   );
+}
+
+const TOOL_RESULT_TEXT_LIMIT = 100_000;
+
+function boundedToolResultText(text: string): string {
+  return text.length <= TOOL_RESULT_TEXT_LIMIT
+    ? text
+    : `${text.slice(0, TOOL_RESULT_TEXT_LIMIT)}\n... [tool data truncated]`;
+}
+
+function ContentBlockView({ block }: { block: TranscriptContentBlock }) {
+  if (block.kind === "text") {
+    return (
+      <LazyMarkdownMessage
+        content={boundedToolResultText(block.text)}
+        className="text-foreground/80"
+      />
+    );
+  }
+  if (block.kind === "thinking") {
+    return <ThinkingBlock content={boundedToolResultText(block.text)} />;
+  }
+  if (block.kind === "image") {
+    return (
+      <img
+        src={`data:${block.mimeType};base64,${block.data}`}
+        alt="tool result"
+        className="max-h-64 max-w-full rounded-md border border-border object-contain"
+      />
+    );
+  }
+  return <UnknownBlock block={block} />;
+}
+
+function UnknownBlock({ block }: { block: Extract<TranscriptContentBlock, { kind: "unknown" }> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="rounded-md border border-border/70 bg-surface-raised/60 text-xs"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-2.5 py-2 text-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <Braces size={13} />
+        <span>Unsupported content</span>
+        <span className="min-w-0 max-w-[55%] truncate font-mono text-[10px] text-muted/75" title={block.type}>
+          {block.type}
+        </span>
+      </summary>
+      {open && (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words border-t border-border px-2.5 py-2 font-mono text-[11px] leading-5 text-foreground/75">
+          {formatJson(block.value)}
+        </pre>
+      )}
+    </details>
+  );
+}
+
+function CustomMessageRow({ row }: { row: TranscriptRow }) {
+  const visibleBlocks = row.blocks.filter(
+    (block): block is Exclude<TranscriptBlock, { kind: "tool" }> => block.kind !== "tool",
+  );
+  return (
+    <div className="group/extension flex min-w-0 items-start gap-3">
+      <div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-md border border-accent/30 bg-accent/10 text-accent">
+        <Puzzle size={14} />
+      </div>
+      <div className="min-w-0 flex-1 border-l-2 border-accent/35 pl-3">
+        <div className="mb-1 flex min-h-6 items-center gap-2 text-[11px] text-muted">
+          <span className="font-medium text-accent">Extension message</span>
+          {row.customType && (
+            <span
+              className="min-w-0 max-w-[12rem] truncate rounded bg-surface-overlay px-1.5 py-0.5 font-mono text-[10px] text-muted"
+              title={row.customType}
+            >
+              {row.customType}
+            </span>
+          )}
+          <CopyMessageButton
+            text={row.copyText}
+            className="ml-auto opacity-0 group-hover/extension:opacity-100"
+          />
+        </div>
+        <div className="space-y-2">
+          {visibleBlocks.map((block, index) => (
+            <AssistantBlock key={`custom:${index}`} block={block} mode="static" showCaret={false} />
+          ))}
+        </div>
+        {row.details !== undefined && <JsonDetails label="Extension details" value={row.details} />}
+      </div>
+    </div>
+  );
+}
+
+function BashExecutionRow({ row }: { row: TranscriptRow }) {
+  const bash = row.bash;
+  if (!bash) return null;
+  const hasError = bash.cancelled || (bash.exitCode !== undefined && bash.exitCode !== 0);
+  const outputLines = bash.output ? bash.output.split("\n") : [];
+  const collapsible = outputLines.length > 5;
+  const output = bash.output ? (
+    <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-border px-3 py-2 font-mono text-[11px] leading-5 text-foreground/80">
+      {bash.output}
+      {bash.truncated ? "\n[output truncated]" : ""}
+    </pre>
+  ) : null;
+  return (
+    <div className="flex min-w-0 items-start gap-3">
+      <div className={`mt-1 flex size-7 shrink-0 items-center justify-center rounded-md border ${hasError ? "border-danger/30 bg-danger/10 text-danger" : "border-border bg-surface-raised text-muted"}`}>
+        <Terminal size={14} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-h-7 items-center gap-2 text-xs">
+          <span className="min-w-0 break-all font-mono text-foreground/90">$ {bash.command || "(empty command)"}</span>
+          <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px]">
+            {hasError ? <CircleAlert size={12} className="text-danger" /> : <CircleCheck size={12} className="text-success" />}
+            <span className={hasError ? "text-danger" : "text-muted"}>
+              {bash.cancelled ? "Cancelled" : bash.exitCode === undefined ? "Running" : `Exit ${bash.exitCode}`}
+            </span>
+          </span>
+        </div>
+        {output && (collapsible ? (
+          <details className="mt-1 rounded-md border border-border bg-surface-raised" open={hasError}>
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-1.5 text-[10px] text-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+              <ChevronRight size={12} />
+              <span>{outputLines.length} output lines</span>
+            </summary>
+            {output}
+          </details>
+        ) : (
+          <div className="mt-1 rounded-md border border-border bg-surface-raised">{output}</div>
+        ))}
+        {bash.fullOutputPath && (
+          <div className="mt-1 min-w-0 break-words text-[10px] text-muted">
+            Full output: <span className="font-mono break-all">{bash.fullOutputPath}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ row }: { row: TranscriptRow }) {
+  const summary = row.summary;
+  if (!summary) return null;
+  const isBranch = summary.kind === "branch";
+  return (
+    <details className="group/summary border-y border-border/70 py-2">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted hover:text-foreground [&::-webkit-details-marker]:hidden">
+        {isBranch ? <GitBranch size={14} /> : <FoldVertical size={14} />}
+        <span className="font-medium">{isBranch ? "Branch summary" : "Conversation compacted"}</span>
+        {summary.tokensBefore !== undefined && (
+          <span className="text-[10px]">{formatTokenCount(summary.tokensBefore)} tokens before</span>
+        )}
+        <ChevronRight size={13} className="ml-auto transition-transform group-open/summary:rotate-90" />
+      </summary>
+      <div className="mt-2 border-l border-border pl-4">
+        <LazyMarkdownMessage content={summary.text} className="text-muted" />
+        {summary.details !== undefined && <JsonDetails label="Summary details" value={summary.details} />}
+      </div>
+    </details>
+  );
+}
+
+function SessionEventRow({ row }: { row: TranscriptRow }) {
+  const event = row.event;
+  if (!event) return null;
+  const Icon = event.kind === "model" ? Bot : event.kind === "thinkingLevel" ? Brain : CircleAlert;
+  return (
+    <div>
+      <div className="flex items-center gap-3 py-1 text-[11px] text-muted">
+        <div className="h-px flex-1 bg-border/70" />
+        <span className="flex min-w-0 max-w-[80%] items-center gap-1.5 text-center">
+          <Icon size={13} />
+          <span className="min-w-0 break-words">{event.label}</span>
+        </span>
+        <div className="h-px flex-1 bg-border/70" />
+      </div>
+      {event.kind === "unknown" && (row.blocks.length > 0 || event.details !== undefined) && (
+        <div className="mx-auto mt-1 max-w-[90%] space-y-2">
+          {row.blocks.map((block, index) => (
+            <AssistantBlock key={`event:${index}`} block={block} mode="static" showCaret={false} />
+          ))}
+          {event.details !== undefined && <JsonDetails label="Raw message" value={event.details} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssistantOutcome({ outcome }: { outcome: NonNullable<TranscriptRow["outcome"]> }) {
+  const aborted = outcome.status === "aborted";
+  const message = outcome.errorMessage || (aborted ? "Operation aborted" : "The assistant could not complete this response.");
+  return (
+    <div className={`flex items-start gap-2 border-l-2 px-3 py-2 text-xs ${aborted ? "border-warning/60 bg-warning/8 text-warning" : "border-danger/70 bg-danger/8 text-danger"}`}>
+      {aborted ? <Ban size={14} className="mt-0.5 shrink-0" /> : <CircleAlert size={14} className="mt-0.5 shrink-0" />}
+      <div className="min-w-0">
+        <div className="font-medium">{aborted ? "Response stopped" : "Response failed"}</div>
+        <div className="mt-0.5 whitespace-pre-wrap break-words opacity-90">{message}</div>
+      </div>
+    </div>
+  );
+}
+
+function JsonDetails({ label, value }: { label: string; value: unknown }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="mt-2 text-[10px] text-muted"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-1 hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <Braces size={12} />
+        <span>{label}</span>
+      </summary>
+      {open && (
+        <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-overlay/50 px-2 py-1.5 font-mono text-[11px] leading-5 text-foreground/70">
+          {formatJson(value)}
+        </pre>
+      )}
+    </details>
+  );
+}
+
+function formatJson(value: unknown): string {
+  const limit = 100_000;
+  let formatted: string;
+  if (typeof value === "string") {
+    formatted = value;
+  } else {
+    try {
+      formatted = JSON.stringify(value, null, 2) ?? String(value);
+    } catch {
+      formatted = String(value);
+    }
+  }
+  if (formatted.length <= limit) return formatted;
+  return `${formatted.slice(0, limit)}\n... [details truncated]`;
 }
 
 function ThinkingBlock({
@@ -521,14 +903,21 @@ function ThinkingBlock({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+  const userToggled = useRef(false);
   const text = sanitizeAgentText(content);
+  useEffect(() => {
+    if (!userToggled.current) setOpen(defaultOpen);
+  }, [defaultOpen]);
   if (!text.trim()) return null;
 
   return (
     <div>
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          userToggled.current = true;
+          setOpen((current) => !current);
+        }}
         className="flex h-8 w-full items-center gap-2 rounded-md text-left text-xs text-muted transition-colors hover:text-foreground"
         aria-expanded={open}
       >

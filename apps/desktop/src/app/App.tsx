@@ -277,7 +277,7 @@ function handleHostEvent(
         event.sessionId === store.session?.sessionId &&
         event.sessionRevision === store.session?.revision
       ) {
-        store.setExtensionStatus(event.payload.text ?? "");
+        store.setExtensionStatus(event.payload.key, event.payload.text ?? "");
       }
       break;
     case "extensionUi.widgetChanged":
@@ -288,6 +288,7 @@ function handleHostEvent(
         store.setExtensionWidget({
           key: event.payload.key ?? "default",
           widget: event.payload.widget,
+          ...(event.payload.placement ? { placement: event.payload.placement } : {}),
           hostInstanceId: event.hostInstanceId,
           workspaceId: event.workspaceId,
           workspaceRevision: event.workspaceRevision,

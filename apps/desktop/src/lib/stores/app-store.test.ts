@@ -80,6 +80,7 @@ describe("app-store epoch wiring", () => {
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
+      extensionStatuses: {},
       extensionWidgets: {},
       packageProgress: null,
       packageRetry: null,
@@ -192,6 +193,7 @@ describe("app-store epoch wiring", () => {
     useAppStore.getState().setExtensionWidget({
       key: "summary",
       widget: { text: "ready" },
+      placement: "belowEditor",
       hostInstanceId: "h1",
       workspaceId: "w",
       workspaceRevision: 1,
@@ -199,9 +201,24 @@ describe("app-store epoch wiring", () => {
       sessionRevision: 1,
     });
     expect(useAppStore.getState().extensionWidgets.summary?.widget).toEqual({ text: "ready" });
+    expect(useAppStore.getState().extensionWidgets.summary?.placement).toBe("belowEditor");
 
     useAppStore.getState().applySessionSnapshot(session("s2"));
     expect(useAppStore.getState().extensionWidgets).toEqual({});
+  });
+
+  it("keeps extension statuses by key and clears them independently", () => {
+    useAppStore.getState().setExtensionStatus("planner", "Planning");
+    useAppStore.getState().setExtensionStatus("review", "Reviewing");
+    expect(useAppStore.getState().extensionStatuses).toEqual({
+      planner: "Planning",
+      review: "Reviewing",
+    });
+    expect(useAppStore.getState().extensionStatus).toBe("Reviewing");
+
+    useAppStore.getState().setExtensionStatus("review", "");
+    expect(useAppStore.getState().extensionStatuses).toEqual({ planner: "Planning" });
+    expect(useAppStore.getState().extensionStatus).toBe("Planning");
   });
 
   it("queues concurrent Extension UI requests with their response contexts", () => {

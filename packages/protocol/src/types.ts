@@ -229,6 +229,15 @@ export type SessionSnapshot = {
   pending: { steering: string[]; followUp: string[] };
   contextUsage?: SessionContextUsage;
   messages: SerializableAgentMessage[];
+  /**
+   * The compaction-aware entry path for the current session leaf.
+   *
+   * This is optional so clients can continue to consume snapshots produced by
+   * older hosts that only exposed the projected agent messages.
+   */
+  entries?: SerializableSessionEntry[];
+  /** The leaf represented by `entries`, when the host exposes the entry path. */
+  leafId?: string | null;
   tools: ToolSnapshot;
 };
 

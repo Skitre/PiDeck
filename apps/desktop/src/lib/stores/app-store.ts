@@ -86,6 +86,7 @@ function alignExtensionUiToSession(
 export type ExtensionWidgetState = {
   key: string;
   widget: JsonValue;
+  placement?: "aboveEditor" | "belowEditor";
   hostInstanceId: string;
   workspaceId: string | null;
   workspaceRevision: number;
@@ -137,6 +138,7 @@ export type AppState = EpochState & {
   extensionUiRequest: ExtensionUiRequestState | null;
   extensionUiQueue: ExtensionUiRequestState[];
   extensionStatus: string | null;
+  extensionStatuses: Record<string, string>;
   extensionWidgets: Record<string, ExtensionWidgetState>;
   extensionTerminal: ExtensionTerminalState | null;
   /** Right dock visibility. Auto-opens for extension panels; manual toggles persist. */
@@ -172,7 +174,7 @@ export type AppState = EpochState & {
   openExtensionTerminal: (t: ExtensionTerminalState) => void;
   closeExtensionTerminal: (requestId: string) => void;
   setDockOpen: (open: boolean) => void;
-  setExtensionStatus: (s: string | null) => void;
+  setExtensionStatus: (key: string | undefined, text: string | null) => void;
   setExtensionWidget: (widget: ExtensionWidgetState) => void;
   setPackageProgress: (progress: PackageProgressState | null) => void;
   setPackageRetry: (retry: PackageRetryState | null) => void;
@@ -228,6 +230,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   extensionUiRequest: null,
   extensionUiQueue: [],
   extensionStatus: null,
+  extensionStatuses: {},
   extensionWidgets: {},
   extensionTerminal: null,
   dockOpen: sidebarPref("pideck.dock.open"),
@@ -251,6 +254,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
+      extensionStatuses: {},
       extensionWidgets: {},
       ...resetExtensionTerminal(get()),
       packageProgress: null,
@@ -294,6 +298,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionUiRequest: null,
             extensionUiQueue: [],
             extensionStatus: null,
+            extensionStatuses: {},
             extensionWidgets: {},
             ...resetExtensionTerminal(get()),
             packageProgress: null,
@@ -312,6 +317,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
+      extensionStatuses: {},
       extensionWidgets: {},
       ...resetExtensionTerminal(get()),
       packageProgress: null,
@@ -363,6 +369,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(generationChanged
         ? {
             extensionStatus: null,
+            extensionStatuses: {},
             extensionWidgets: {},
             ...resetExtensionTerminal(current),
             packageProgress: null,
@@ -413,6 +420,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionUiRequest: null,
             extensionUiQueue: [],
             extensionStatus: null,
+            extensionStatuses: {},
             extensionWidgets: {},
             ...resetExtensionTerminal(previous),
             packageProgress: null,
@@ -513,7 +521,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Manual toggle takes over — the panel close no longer restores.
       dockRestoreOnPanelClose: null,
     }),
-  setExtensionStatus: (extensionStatus) => set({ extensionStatus }),
+  setExtensionStatus: (key, text) =>
+    set((state) => {
+      const statusKey = key || "default";
+      const extensionStatuses = { ...state.extensionStatuses };
+      if (text?.trim()) extensionStatuses[statusKey] = text;
+      else delete extensionStatuses[statusKey];
+      const values = Object.values(extensionStatuses);
+      return {
+        extensionStatuses,
+        extensionStatus: values.length > 0 ? values[values.length - 1] : null,
+      };
+    }),
   setExtensionWidget: (extensionWidget) =>
     set((state) => {
       const key = extensionWidget.key || "default";
@@ -617,6 +636,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
+      extensionStatuses: {},
       extensionWidgets: {},
       ...resetExtensionTerminal(current),
       packageProgress: null,
@@ -630,6 +650,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionStatus: null,
+      extensionStatuses: {},
       extensionWidgets: {},
       ...resetExtensionTerminal(get()),
       packageProgress: null,

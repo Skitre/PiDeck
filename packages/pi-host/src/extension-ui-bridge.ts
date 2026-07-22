@@ -350,10 +350,19 @@ export function createExtensionUiContext(
     setWorkingVisible: () => {},
     setWorkingIndicator: () => {},
     setHiddenThinkingLabel: () => {},
-    setWidget: (key, content, _options?) => {
+    setWidget: (key, content, options?) => {
       const sanitizedKey = stripAnsi(String(key));
+      const placement = options?.placement === "belowEditor" ? "belowEditor" : undefined;
       disposeWidgetFactory(sanitizedKey);
       if (typeof content === "function") {
+        // A same-key factory replaces the previous widget immediately. Clear
+        // the desktop snapshot before construction so a failed factory cannot
+        // leave stale content visible indefinitely.
+        opts.emit("extensionUi.widgetChanged", {
+          key: sanitizedKey,
+          widget: null,
+          ...(placement ? { placement } : {}),
+        });
         const widgetTui = new TUI(
           new VirtualTerminal({
             cols: WIDGET_SNAPSHOT_WIDTH,
@@ -392,6 +401,7 @@ export function createExtensionUiContext(
                   opts.emit("extensionUi.widgetChanged", {
                     key: sanitizedKey,
                     widget: sanitizedLines,
+                    ...(placement ? { placement } : {}),
                   });
                 }
                 lastRenderError = undefined;
@@ -399,6 +409,14 @@ export function createExtensionUiContext(
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 const sanitizedMessage = stripAnsi(message);
+                if (lastSnapshot !== undefined) {
+                  lastSnapshot = undefined;
+                  opts.emit("extensionUi.widgetChanged", {
+                    key: sanitizedKey,
+                    widget: null,
+                    ...(placement ? { placement } : {}),
+                  });
+                }
                 if (sanitizedMessage !== lastRenderError) {
                   lastRenderError = sanitizedMessage;
                   opts.emit("package.diagnostic", {
@@ -431,6 +449,7 @@ export function createExtensionUiContext(
       opts.emit("extensionUi.widgetChanged", {
         key: sanitizedKey,
         widget: content === undefined ? null : sanitize(content),
+        ...(placement ? { placement } : {}),
       });
     },
     setFooter: () => {},

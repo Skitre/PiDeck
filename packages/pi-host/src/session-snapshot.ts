@@ -2,6 +2,7 @@ import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-age
 import type {
   ModelSummary,
   SerializableAgentMessage,
+  SerializableSessionEntry,
   SerializableToolInfo,
   SessionSnapshot,
   ToolSnapshot,
@@ -68,6 +69,18 @@ export function buildSessionSnapshot(args: {
   const messages: SerializableAgentMessage[] = session.messages.map((m) =>
     toJsonValue(m) as SerializableAgentMessage,
   );
+  // Session messages can include an in-flight projection that is not persisted
+  // yet. Keep the persisted, compaction-aware path separately so the client can
+  // reconstruct extension and branch semantics without guessing from messages.
+  const canReadEntryPath =
+    typeof args.sessionManager.buildContextEntries === "function" &&
+    typeof args.sessionManager.getLeafId === "function";
+  const entries: SerializableSessionEntry[] | undefined = canReadEntryPath
+    ? args.sessionManager
+        .buildContextEntries()
+        .map((entry) => toJsonValue(entry) as SerializableSessionEntry)
+    : undefined;
+  const leafId = canReadEntryPath ? args.sessionManager.getLeafId() : undefined;
   const contextUsage = session.getContextUsage?.();
   const contextBreakdown = contextUsage
     ? buildContextUsageBreakdown({
@@ -109,6 +122,7 @@ export function buildSessionSnapshot(args: {
         }
       : {}),
     messages,
+    ...(entries !== undefined ? { entries, leafId: leafId ?? null } : {}),
     tools: buildToolSnapshot({
       session,
       workspaceId: args.workspaceId,

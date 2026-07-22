@@ -2,7 +2,14 @@
  * Apply Host agent.event payloads onto the local SessionSnapshot projection.
  * Pi remains the fact source — this only streams UI until the next full snapshot.
  */
-import type { SessionSnapshot, SerializableAgentMessage } from "@pideck/protocol";
+import type {
+  JsonValue,
+  SerializableSessionEntry,
+  SessionSnapshot,
+  SerializableAgentMessage,
+} from "@pideck/protocol";
+import { toJsonValue } from "@pideck/protocol";
+import { isAbortedToolResult } from "./tool-result-status";
 
 type ToolExecutionPart = {
   type: "toolCall";
@@ -12,6 +19,8 @@ type ToolExecutionPart = {
   status: "running" | "done" | "error" | "aborted";
   arguments?: string;
   result?: string;
+  resultBlocks?: JsonValue[];
+  details?: JsonValue;
   startedAt: number;
   endedAt?: number;
 };
@@ -71,6 +80,11 @@ export function applyAgentEvent(
 
   switch (type) {
     case "agent_start":
+      // A new run starts before its first message. Close any prior runtime tail
+      // so the previous assistant row cannot be mistaken for the new stream.
+      next.messages = settleOpenRuntime(next.messages, eventTime);
+      next = { ...next, isStreaming: true, isIdle: false };
+      break;
     case "turn_start":
       next = { ...next, isStreaming: true, isIdle: false };
       break;
@@ -137,14 +151,8 @@ export function applyAgentEvent(
       );
       const existing = findToolExecution(next.messages, toolCallId);
       const ended = type === "tool_execution_end";
-      const aborted =
-        ended &&
-        Boolean(
-          ev.result &&
-            typeof ev.result === "object" &&
-            "aborted" in ev.result &&
-            (ev.result as { aborted?: unknown }).aborted,
-        );
+      const resultValue = ev.result ?? ev.error;
+      const aborted = ended && isAbortedToolResult(resultValue, ev.isError === true);
       const status = ended
         ? aborted
           ? "aborted"
@@ -152,6 +160,19 @@ export function applyAgentEvent(
             ? "error"
             : "done"
         : "running";
+      const resultProjection = ended
+        ? projectToolResult(resultValue)
+        : ev.partialResult !== undefined
+          ? projectToolResult(ev.partialResult)
+          : existing
+            ? {
+                ...(existing.result !== undefined ? { result: existing.result } : {}),
+                ...(existing.resultBlocks !== undefined
+                  ? { resultBlocks: existing.resultBlocks }
+                  : {}),
+                ...(existing.details !== undefined ? { details: existing.details } : {}),
+              }
+            : {};
       const part: ToolExecutionPart = {
         type: "toolCall",
         id: toolCallId,
@@ -164,9 +185,7 @@ export function applyAgentEvent(
             existing?.arguments ??
             null,
         ),
-        result: toJsonish(
-          ended ? ev.result ?? ev.error ?? null : ev.partialResult ?? existing?.result ?? null,
-        ),
+        ...resultProjection,
         startedAt: existing?.startedAt ?? eventTime,
         ...(ended ? { endedAt: eventTime } : {}),
       };
@@ -189,6 +208,24 @@ export function applyAgentEvent(
       break;
     }
 
+    case "entry_appended": {
+      const entry = normalizeSessionEntry(ev.entry);
+      if (!entry || !next.entries) break;
+
+      // Snapshot entries are the active branch only. Accept a live append when
+      // it extends that branch; a branch jump is reconciled by the next full
+      // snapshot instead of manufacturing a path in the renderer.
+      const parentId = typeof entry.parentId === "string" ? entry.parentId : null;
+      if (parentId !== (next.leafId ?? null)) break;
+      if (next.entries.some((candidate) => candidate.id === entry.id)) break;
+      next = {
+        ...next,
+        entries: [...next.entries, entry],
+        leafId: entry.id,
+      };
+      break;
+    }
+
     case "compaction_start":
       next = { ...next, isCompacting: true, isIdle: false };
       break;
@@ -203,6 +240,11 @@ export function applyAgentEvent(
       break;
 
     case "agent_end":
+      // agent_end closes one core-agent run. Pi may still retry, compact, or
+      // process a continuation queued by an extension before agent_settled.
+      next = { ...next, isStreaming: true, isIdle: false };
+      break;
+
     case "agent_settled":
       next.messages = settleOpenRuntime(next.messages, eventTime);
       next = {
@@ -287,6 +329,13 @@ function normalizeMessage(
   };
 }
 
+function normalizeSessionEntry(value: unknown): SerializableSessionEntry | null {
+  if (!value || typeof value !== "object") return null;
+  const entry = value as Record<string, unknown>;
+  if (typeof entry.id !== "string" || typeof entry.type !== "string") return null;
+  return entry as SerializableSessionEntry;
+}
+
 function extractGenericDelta(ev: AgentEventEnvelope["event"]): string {
   if (typeof ev.delta === "string") return ev.delta;
   if (ev.delta && typeof ev.delta === "object" && "text" in (ev.delta as object)) {
@@ -299,6 +348,50 @@ function numericField(value: unknown, key: string): number | undefined {
   if (!value || typeof value !== "object") return undefined;
   const candidate = (value as Record<string, unknown>)[key];
   return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : undefined;
+}
+
+function projectToolResult(value: unknown): {
+  result?: string;
+  resultBlocks?: JsonValue[];
+  details?: JsonValue;
+} {
+  if (value === undefined || value === null) return {};
+  if (typeof value === "string") return value ? { result: value } : {};
+
+  let content: unknown[] | null = null;
+  if (Array.isArray(value)) {
+    content = value;
+  } else if (value && typeof value === "object") {
+    const candidate = (value as Record<string, unknown>).content;
+    if (Array.isArray(candidate)) content = candidate;
+  }
+  if (content) {
+    const blocks = content.filter(
+      (part): part is Record<string, unknown> =>
+        Boolean(part && typeof part === "object" && typeof (part as { type?: unknown }).type === "string"),
+    ).map((part) => toJsonValue(part));
+    const text = blocks
+      .map((part) =>
+        part && typeof part === "object" && !Array.isArray(part) && typeof part.text === "string"
+          ? part.text
+          : "",
+      )
+      .filter(Boolean)
+      .join("\n");
+    const record = value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+    return {
+      ...(text ? { result: text } : {}),
+      ...(blocks.length > 0 ? { resultBlocks: blocks } : {}),
+      ...(record?.details !== undefined && record.details !== null
+        ? { details: toJsonValue(record.details) }
+        : {}),
+    };
+  }
+
+  const serialized = toJsonish(value);
+  return serialized ? { result: serialized } : {};
 }
 
 function mergeContentTiming(

@@ -8,7 +8,7 @@ import {
   ShellToolCard,
 } from "./CodingToolCards";
 import { SearchToolCard, isWebSearchTool } from "./SearchToolCard";
-import { ToolCard, type ToolCardProps } from "./ToolCard";
+import { ToolCard, useToolDisclosure, type ToolCardProps } from "./ToolCard";
 
 export type ToolRendererDefinition = {
   id: string;
@@ -44,8 +44,17 @@ export function selectToolRenderer(props: ToolCardProps): ToolRendererDefinition
 }
 
 export function ToolView(props: ToolCardProps) {
+  const [expanded, setExpanded] = useToolDisclosure(props);
+  const rendererProps: ToolCardProps = {
+    ...props,
+    expanded,
+    onExpandedChange: setExpanded,
+  };
+  // Mixed provider blocks need one ordered result surface. Specialized cards
+  // consume flattened text, so use the generic card when rich blocks exist.
+  if (props.resultContent !== undefined) return <ToolCard {...rendererProps} />;
   const renderer = selectToolRenderer(props);
-  if (!renderer) return <ToolCard {...props} />;
+  if (!renderer) return <ToolCard {...rendererProps} />;
   const Renderer = renderer.Component;
-  return <Renderer {...props} />;
+  return <Renderer {...rendererProps} />;
 }

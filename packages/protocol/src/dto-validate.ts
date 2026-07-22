@@ -456,7 +456,7 @@ export function isSessionSnapshot(value: unknown): boolean {
         "messages",
         "tools",
       ],
-      ["sessionPath", "name", "model", "contextUsage"],
+      ["sessionPath", "name", "model", "contextUsage", "entries", "leafId"],
     )
   ) {
     return false;
@@ -490,6 +490,9 @@ export function isSessionSnapshot(value: unknown): boolean {
     isStringArray(pending.followUp) &&
     Array.isArray(value.messages) &&
     value.messages.every(isAgentMessage) &&
+    (value.entries === undefined ||
+      (Array.isArray(value.entries) && value.entries.every(isSessionEntry))) &&
+    (value.leafId === undefined || value.leafId === null || isString(value.leafId)) &&
     isToolSnapshot(tools) &&
     tools.sessionId === value.sessionId &&
     tools.sessionRevision === value.revision
@@ -1144,9 +1147,12 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
         : "invalid extensionUi.statusChanged payload";
     case "extensionUi.widgetChanged":
       return isPlainObject(payload) &&
-        hasExactKeys(payload, ["widget"], ["key"]) &&
+        hasExactKeys(payload, ["widget"], ["key", "placement"]) &&
         isOptionalString(payload.key) &&
-        isJsonValue(payload.widget)
+        isJsonValue(payload.widget) &&
+        (payload.placement === undefined ||
+          payload.placement === "aboveEditor" ||
+          payload.placement === "belowEditor")
         ? null
         : "invalid extensionUi.widgetChanged payload";
     case "extensionUi.notification":

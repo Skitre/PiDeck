@@ -444,7 +444,7 @@ describe("protocol coverage — events", () => {
       title: "t",
     },
     "extensionUi.statusChanged": { text: "working" },
-    "extensionUi.widgetChanged": { key: "k", widget: null },
+    "extensionUi.widgetChanged": { key: "k", widget: null, placement: "belowEditor" },
     "extensionUi.notification": { message: "hi", level: "info" },
     "extensionUi.customStarted": {
       requestId: EXTENSION_REQUEST_ID,
@@ -629,6 +629,34 @@ describe("context usage breakdown", () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it("accepts an optional compaction-aware session entry path", () => {
+    expect(
+      isSessionSnapshot({
+        ...snapshot,
+        entries: [
+          {
+            id: "entry-1",
+            type: "compaction",
+            parentId: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            summary: "Earlier context",
+            firstKeptEntryId: "entry-1",
+            tokensBefore: 12,
+          },
+        ],
+        leafId: "entry-1",
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    { entries: "not-an-array" },
+    { entries: [{ id: 1, type: "message" }] },
+    { leafId: 42 },
+  ])("rejects malformed session entry path %#", (extra) => {
+    expect(isSessionSnapshot({ ...snapshot, ...extra })).toBe(false);
   });
 });
 
