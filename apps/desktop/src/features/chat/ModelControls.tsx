@@ -13,6 +13,31 @@ import { formatTokenCount } from "../../lib/format-token-count";
 const MODEL_MENU_MIN_WIDTH = 120;
 const MODEL_MENU_MAX_WIDTH = 280;
 const MODEL_MENU_ROW_CONTROLS_WIDTH = 48;
+const MODEL_LIST_RETRY_DELAYS_MS = [80, 160, 240, 320] as const;
+
+type RetryableModelListResponse =
+  | { ok: true }
+  | { ok: false; error?: { retryable?: boolean } };
+
+export async function requestModelListWithRetry<T extends RetryableModelListResponse>(
+  request: () => Promise<T>,
+  wait: (delayMs: number) => Promise<unknown> = (delayMs) =>
+    new Promise((resolve) => setTimeout(resolve, delayMs)),
+  shouldContinue: () => boolean = () => true,
+): Promise<T | null> {
+  for (let attempt = 0; ; attempt += 1) {
+    if (!shouldContinue()) return null;
+    const response = await request();
+    if (
+      response.ok ||
+      response.error?.retryable !== true ||
+      attempt === MODEL_LIST_RETRY_DELAYS_MS.length
+    ) {
+      return response;
+    }
+    await wait(MODEL_LIST_RETRY_DELAYS_MS[attempt]!);
+  }
+}
 
 export function includeCurrentModel(
   models: ModelSummary[],
@@ -139,29 +164,43 @@ export function ModelControls() {
       setEnabledProviders(undefined);
       return;
     }
+    let cancelled = false;
     const request = ++listRequest.current;
     const expectedHostId = host.hostInstanceId;
     const expectedWorkspaceId = workspace.id;
     const expectedWorkspaceRevision = workspace.revision;
     const expectedSessionId = session.sessionId;
     const expectedSessionRevision = session.revision;
-    void (async () => {
-      const res = await hostClient.request(
-        "model.list",
-        activeSessionContext(host, workspace, session),
-        null,
-      );
+    const isCurrentRequest = () => {
       const current = useAppStore.getState();
-      if (
-        request !== listRequest.current ||
-        current.host?.hostInstanceId !== expectedHostId ||
-        current.workspace?.id !== expectedWorkspaceId ||
-        current.workspace?.revision !== expectedWorkspaceRevision ||
-        current.session?.sessionId !== expectedSessionId ||
-        current.session?.revision !== expectedSessionRevision
-      ) {
+      return (
+        !cancelled &&
+        request === listRequest.current &&
+        current.host?.hostInstanceId === expectedHostId &&
+        current.workspace?.id === expectedWorkspaceId &&
+        current.workspace?.revision === expectedWorkspaceRevision &&
+        current.session?.sessionId === expectedSessionId &&
+        current.session?.revision === expectedSessionRevision
+      );
+    };
+    void (async () => {
+      let res;
+      try {
+        res = await requestModelListWithRetry(
+          () =>
+            hostClient.request(
+              "model.list",
+              activeSessionContext(host, workspace, session),
+              null,
+            ),
+          undefined,
+          isCurrentRequest,
+        );
+      } catch {
         return;
       }
+      if (!res || !isCurrentRequest()) return;
+      const current = useAppStore.getState();
       if (res.ok) {
         setModels(res.result.models);
         setEnabledProviders(res.result.enabledProviders);
@@ -182,6 +221,9 @@ export function ModelControls() {
         }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     hostInstanceId,
     workspaceId,

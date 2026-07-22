@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ModelSummary } from "@pideck/protocol";
-import { includeCurrentModel, modelOptionLabel, thinkingLevelsForModel } from "./ModelControls";
+import {
+  includeCurrentModel,
+  modelOptionLabel,
+  requestModelListWithRetry,
+  thinkingLevelsForModel,
+} from "./ModelControls";
 
 const current: ModelSummary = {
   provider: "muapi",
@@ -47,5 +52,69 @@ describe("includeCurrentModel", () => {
 describe("modelOptionLabel", () => {
   it("prefixes the display name with the Provider ID", () => {
     expect(modelOptionLabel(current)).toBe("muapi/Grok 4.5");
+  });
+});
+
+describe("requestModelListWithRetry", () => {
+  it("retries transient failures until the model list succeeds", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false as const,
+        error: { code: "SERVICE_GRAPH_BUSY", retryable: true },
+      })
+      .mockResolvedValueOnce({
+        ok: false as const,
+        error: { code: "STALE_REVISION", retryable: true },
+      })
+      .mockResolvedValueOnce({ ok: true as const, result: { models: [current] } });
+    const wait = vi.fn(async () => {});
+
+    const result = await requestModelListWithRetry(request, wait);
+
+    expect(result).toEqual({ ok: true, result: { models: [current] } });
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(wait.mock.calls).toEqual([[80], [160]]);
+  });
+
+  it("does not retry a non-retryable failure", async () => {
+    const response = {
+      ok: false as const,
+      error: { code: "INTERNAL_ERROR", retryable: false },
+    };
+    const request = vi.fn(async () => response);
+    const wait = vi.fn(async () => {});
+
+    await expect(requestModelListWithRetry(request, wait)).resolves.toBe(response);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("stops after five retryable failures", async () => {
+    const response = {
+      ok: false as const,
+      error: { code: "SERVICE_GRAPH_BUSY", retryable: true },
+    };
+    const request = vi.fn(async () => response);
+    const wait = vi.fn(async () => {});
+
+    await expect(requestModelListWithRetry(request, wait)).resolves.toBe(response);
+    expect(request).toHaveBeenCalledTimes(5);
+    expect(wait.mock.calls).toEqual([[80], [160], [240], [320]]);
+  });
+
+  it("cancels retries when the request generation changes", async () => {
+    let active = true;
+    const request = vi.fn(async () => ({
+      ok: false as const,
+      error: { code: "SERVICE_GRAPH_BUSY", retryable: true },
+    }));
+    const wait = vi.fn(async () => {
+      active = false;
+    });
+
+    await expect(
+      requestModelListWithRetry(request, wait, () => active),
+    ).resolves.toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });
