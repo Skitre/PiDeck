@@ -6,7 +6,6 @@ import { fullRehydrate } from "../lib/bridge/rehydrate";
 import { Sidebar } from "../components/Sidebar";
 import { RightDock } from "../components/RightDock";
 import { WindowControls } from "../components/WindowControls";
-import { NotificationCenter } from "../components/NotificationCenter";
 import { ChatPage } from "../features/chat/ChatPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { ExtensionUiModal } from "../features/chat/ExtensionUiModal";
@@ -694,7 +693,6 @@ export function App() {
       <div className="absolute right-0 top-0 z-50">
         <WindowControls />
       </div>
-      <NotificationCenter />
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="flex min-w-0 flex-1 flex-col">

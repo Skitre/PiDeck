@@ -43,7 +43,7 @@ export function modelOptionLabel(model: ModelSummary): string {
   return `${model.provider}/${model.name || model.modelId}`;
 }
 
-function ContextUsageRing() {
+export function ContextUsageRing() {
   const contextUsage = useAppStore((s) => s.session?.contextUsage);
   const breakdown = contextUsage?.breakdown;
   const percent =
@@ -59,7 +59,7 @@ function ContextUsageRing() {
 
   return (
     <span
-      className="group/context relative flex size-7 shrink-0 items-center justify-center rounded-full"
+      className="group/context relative flex size-6 shrink-0 items-center justify-center rounded-full"
       style={{
         background: `conic-gradient(var(--color-accent) ${
           percent === null ? 0 : percent * 3.6
@@ -69,8 +69,8 @@ function ContextUsageRing() {
       role="img"
       tabIndex={0}
     >
-      <span className="absolute inset-[3px] rounded-full bg-surface-raised" />
-      <span className="relative text-[8px] tabular-nums text-muted">
+      <span className="absolute inset-[2px] rounded-full bg-surface-raised" />
+      <span className="relative text-[7px] tabular-nums text-muted">
         {roundedPercent === null ? "--" : `${roundedPercent}%`}
       </span>
       <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 hidden w-64 -translate-x-1/2 flex-col rounded-md border border-border bg-surface-raised p-3 text-left text-[11px] leading-4 text-foreground shadow-lg group-hover/context:flex group-focus/context:flex">
@@ -436,7 +436,6 @@ export function ModelControls() {
           </div>
         )}
       </div>
-      <ContextUsageRing />
     </div>
   );
 }

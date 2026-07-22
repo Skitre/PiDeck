@@ -18,6 +18,7 @@ import { SessionList } from "../features/sessions/SessionList";
 import { WorkspacePicker } from "../features/workspaces/WorkspacePicker";
 import { sidebarPref, setSidebarPref } from "../lib/sidebar-prefs";
 import { PiMark } from "./PiMark";
+import { NotificationCenter } from "./NotificationCenter";
 
 function NewSessionButton() {
   const host = useAppStore((s) => s.host);
@@ -149,6 +150,9 @@ export function SidebarLayout({
       <div className="flex h-16 shrink-0 items-center gap-3 px-4" data-tauri-drag-region>
         <PiMark className="size-8" />
         <span className="text-[15px] font-semibold">Pi Agent</span>
+        <div className="ml-auto">
+          <NotificationCenter />
+        </div>
       </div>
 
       <div className="px-2 pb-3">

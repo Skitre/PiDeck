@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { useState } from "react";
+import { PanelsTopLeft, X } from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 
 function renderWidget(widget: unknown): string {
@@ -13,65 +13,49 @@ function renderWidget(widget: unknown): string {
 
 /**
  * Extension widgets (ctx.ui.setWidget) — a floating drawer attached to the
- * composer card. The chevron tab sits on the card's bottom edge; opening it
- * never moves the input: the panel is an overlay anchored above the card
- * (same width), growing upward with an internal scroll cap. Dismiss via the
- * tab, an outside click, or Escape. Must render inside the composer's
- * `relative` anchor wrapper.
+ * composer card. Its toolbar trigger opens an overlay above the card (same
+ * width), growing upward with an internal scroll cap. It stays open while the
+ * user works and closes only from the toolbar trigger or its close button.
+ * Must render inside the composer's `relative` anchor wrapper.
  */
 export function ExtensionWidgets() {
   const widgets = useAppStore((state) => state.extensionWidgets);
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
   const entries = Object.values(widgets);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: PointerEvent) {
-      if (
-        rootRef.current &&
-        event.target instanceof Node &&
-        !rootRef.current.contains(event.target)
-      ) {
-        setOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
 
   if (entries.length === 0) return null;
 
   return (
-    <div ref={rootRef}>
-      <div className="flex justify-center">
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label="Toggle extension widgets"
-          title={`Extension widgets: ${entries.map((entry) => entry.key).join(", ")}`}
-          className="-mt-px flex h-4 w-10 items-center justify-center rounded-b-md border border-t-0 border-border bg-surface-raised text-muted hover:text-foreground"
-          onClick={() => setOpen((current) => !current)}
-        >
-          <ChevronDown
-            size={12}
-            className={`transition-transform ${open ? "rotate-180" : ""}`}
-          />
-        </button>
-      </div>
+    <div className="contents">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label="Toggle extension widgets"
+        title={`Extension widgets: ${entries.map((entry) => entry.key).join(", ")}`}
+        className={`flex size-7 items-center justify-center rounded-md transition-colors ${
+          open
+            ? "bg-accent/15 text-accent"
+            : "text-muted hover:bg-surface-overlay hover:text-foreground"
+        }`}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <PanelsTopLeft size={15} />
+      </button>
       {open && (
         <div className="absolute bottom-full left-0 right-0 z-30 mb-2 max-h-[65vh] overflow-auto rounded-lg border border-border bg-surface-raised px-4 py-2 shadow-xl">
+          <button
+            type="button"
+            aria-label="Close extension widgets"
+            title="Close extension widgets"
+            className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground"
+            onClick={() => setOpen(false)}
+          >
+            <X size={15} />
+          </button>
           {entries.map((entry) => (
             <section
               key={entry.key}
-              className="py-1"
+              className="py-1 pr-8"
               aria-label={`Extension widget ${entry.key}`}
             >
               <div className="mb-1 text-[10px] font-medium uppercase text-muted">

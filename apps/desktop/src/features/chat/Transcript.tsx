@@ -182,7 +182,6 @@ export function Transcript() {
         }}
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          {rows.length === 0 && <EmptyConversation />}
           {hidden > 0 && (
             <button
               type="button"
@@ -224,16 +223,6 @@ export function Transcript() {
           <ArrowDown size={15} />
         </button>
       )}
-    </div>
-  );
-}
-
-function EmptyConversation() {
-  return (
-    <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
-      <PiMark className="mb-3 size-9" />
-      <p className="text-sm font-medium">Start a conversation</p>
-      <p className="mt-1 text-xs text-muted">Pi is ready in this workspace.</p>
     </div>
   );
 }

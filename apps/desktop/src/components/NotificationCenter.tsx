@@ -44,7 +44,7 @@ export function NotificationPanel({
     <section
       role="dialog"
       aria-label="Notification center"
-      className="absolute right-3 top-11 z-[70] flex max-h-[min(32rem,calc(100vh-3.5rem))] w-[min(25rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-border bg-surface-raised shadow-xl"
+      className="fixed left-3 top-14 z-[70] flex max-h-[min(32rem,calc(100vh-4.25rem))] w-[min(25rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-border bg-surface-raised shadow-xl"
     >
       <header className="flex h-10 shrink-0 items-center border-b border-border px-3">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">Notifications</h2>
@@ -148,7 +148,7 @@ export function NotificationCenter() {
   ).length;
 
   return (
-    <div ref={rootRef} className="absolute inset-0 z-[60] pointer-events-none">
+    <div ref={rootRef} className="relative z-[60]">
       <button
         type="button"
         title="Notifications"
@@ -158,7 +158,7 @@ export function NotificationCenter() {
           setOpen((value) => !value);
           setToastId(null);
         }}
-        className={`pointer-events-auto absolute right-[140px] top-0 flex h-9 w-10 items-center justify-center text-muted hover:bg-surface-overlay hover:text-foreground ${
+        className={`relative flex size-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-overlay hover:text-foreground ${
           urgentCount > 0 ? "text-warning" : ""
         }`}
       >
@@ -171,7 +171,7 @@ export function NotificationCenter() {
       </button>
 
       {open && (
-        <div className="pointer-events-auto">
+        <div>
           <NotificationPanel
             notifications={notifications}
             onDismiss={dismissNotification}
@@ -188,7 +188,7 @@ export function NotificationCenter() {
             setOpen(true);
             setToastId(null);
           }}
-          className="pointer-events-auto absolute right-3 top-11 flex w-[min(25rem,calc(100vw-1.5rem))] items-start gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2.5 text-left shadow-xl"
+          className="fixed left-3 top-14 z-[70] flex w-[min(25rem,calc(100vw-1.5rem))] items-start gap-2 rounded-lg border border-border bg-surface-raised px-3 py-2.5 text-left shadow-xl"
         >
           {(() => {
             const style = levelStyle(toast.level);

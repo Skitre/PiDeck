@@ -2,6 +2,7 @@ import { useAppStore } from "../../lib/stores/app-store";
 import { Transcript } from "./Transcript";
 import { Composer } from "./Composer";
 import { ChatHeader } from "./ChatHeader";
+import { workspaceDisplayName } from "../workspaces/WorkspacePicker";
 
 export function ChatPage() {
   const workspace = useAppStore((s) => s.workspace);
@@ -15,6 +16,9 @@ export function ChatPage() {
   const resourceReloadBlocked = packages?.resourceReloadRequired === true;
   const reconcileBlocked = packages?.mutation?.reconcileRequired === true;
   const packageBlocked = resourceReloadBlocked || reconcileBlocked;
+  const isNewConversation = Boolean(
+    session && session.messages.length === 0 && session.isIdle,
+  );
 
   if (!workspace) {
     return (
@@ -53,10 +57,17 @@ export function ChatPage() {
         </div>
       )}
       {session ? (
-        <>
-          <Transcript />
-          <Composer disabled={authBlocked || packageBlocked} />
-        </>
+        isNewConversation ? (
+          <Composer
+            disabled={authBlocked || packageBlocked}
+            welcomeWorkspaceName={workspaceDisplayName(workspace.cwd)}
+          />
+        ) : (
+          <>
+            <Transcript />
+            <Composer disabled={authBlocked || packageBlocked} />
+          </>
+        )
       ) : (
         <div className="flex flex-1 items-center justify-center text-sm text-muted">
           Create or open a session from the sidebar.

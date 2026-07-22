@@ -78,6 +78,15 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
+.chat-composer-input:focus-visible {
+  outline: none;
+}
+
+.new-conversation-copy {
+  font-family: "SF Mono", "SFMono-Regular", "Cascadia Code", "Consolas", monospace;
+  letter-spacing: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

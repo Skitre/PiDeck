@@ -1,12 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, Plus, Send, Square, X } from "lucide-react";
+import {
+  Bug,
+  FileText,
+  FolderSearch,
+  PencilLine,
+  Plus,
+  Send,
+  Square,
+  TestTube,
+  X,
+} from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import type { SerializableImage } from "@pideck/protocol";
 import { buildAttachedFileBlock } from "./transcript-model";
-import { ModelControls } from "./ModelControls";
+import { ContextUsageRing, ModelControls } from "./ModelControls";
 import { QueuePanel } from "./QueuePanel";
 import { ExtensionWidgets } from "./ExtensionWidgets";
+import { PiMark } from "../../components/PiMark";
 import {
   activeSessionContext,
   captureRequestGeneration,
@@ -17,6 +28,29 @@ const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 4;
 const MAX_FILE_BYTES = 256 * 1024;
+
+const STARTER_PROMPTS = [
+  {
+    label: "Explore the codebase",
+    prompt: "Explore this codebase and explain its structure.",
+    icon: FolderSearch,
+  },
+  {
+    label: "Find an issue",
+    prompt: "Review this codebase and identify a meaningful issue to fix.",
+    icon: Bug,
+  },
+  {
+    label: "Run tests",
+    prompt: "Run the relevant test suite and investigate any failures.",
+    icon: TestTube,
+  },
+  {
+    label: "Make a change",
+    prompt: "Help me make a change to this project.",
+    icon: PencilLine,
+  },
+] as const;
 
 type PendingImage = SerializableImage & { id: string };
 type PendingFile = { id: string; name: string; size: number; text: string };
@@ -101,7 +135,13 @@ export function fileSortKey(
   return [rank, entry.path.split("/").length, entry.kind === "dir" ? 0 : 1];
 }
 
-export function Composer({ disabled }: { disabled?: boolean }) {
+export function Composer({
+  disabled,
+  welcomeWorkspaceName,
+}: {
+  disabled?: boolean;
+  welcomeWorkspaceName?: string;
+}) {
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
   const session = useAppStore((s) => s.session);
@@ -420,13 +460,38 @@ export function Composer({ disabled }: { disabled?: boolean }) {
   const canSend =
     !disabled && (Boolean(text.trim()) || images.length > 0 || files.length > 0);
 
+  function selectStarterPrompt(prompt: string) {
+    if (!session || disabled) return;
+    setSessionDraft(session.sessionId, prompt);
+    setCompletion(null);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(prompt.length, prompt.length);
+    });
+  }
+
   return (
-    <div className="shrink-0 px-5 pb-5 pt-2">
+    <div
+      className={
+        welcomeWorkspaceName
+          ? "flex min-h-0 flex-1 flex-col justify-center px-5 pb-14 pt-6"
+          : "shrink-0 px-5 pb-5 pt-2"
+      }
+    >
+      {welcomeWorkspaceName && (
+        <div className="new-conversation-copy mx-auto mb-6 flex max-w-3xl flex-col items-center text-center">
+          <PiMark className="mb-4 size-10" />
+          <h2 className="max-w-full truncate text-xl font-medium text-foreground">
+            Start in {welcomeWorkspaceName}
+          </h2>
+          <p className="mt-2 text-sm text-muted">What would you like to work on?</p>
+        </div>
+      )}
       <QueuePanel />
       {/* Anchor for the floating widget drawer — the input card never moves. */}
-      <div className="relative mx-auto max-w-3xl">
+      <div className="relative mx-auto w-full max-w-3xl">
         <div
-          className={`rounded-lg border bg-surface-raised p-2 shadow-sm transition-colors ${
+          className={`rounded-xl border bg-surface-raised p-2 shadow-sm transition-colors ${
             dragOver ? "border-accent" : "border-border"
           }`}
         onDragOver={(event) => {
@@ -526,7 +591,7 @@ export function Composer({ disabled }: { disabled?: boolean }) {
           )}
           <textarea
             ref={textareaRef}
-            className="min-h-[76px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted"
+            className="chat-composer-input min-h-[60px] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted"
             placeholder={disabled ? "Chat unavailable" : "Message Pi  ( / commands · @ files )"}
             value={text}
             disabled={disabled}
@@ -607,27 +672,30 @@ export function Composer({ disabled }: { disabled?: boolean }) {
           </button>
           <ModelControls />
           <div className="ml-auto flex items-center gap-1.5">
-            {busy && canSend && (
-              <button
-                type="button"
-                title="Queue message (Enter)"
-                aria-label="Queue message"
-                className="flex size-8 items-center justify-center rounded-md bg-foreground text-surface transition-colors hover:opacity-85"
-                onClick={() => void send()}
-              >
-                <Send size={15} />
-              </button>
-            )}
+            <ExtensionWidgets />
+            <ContextUsageRing />
             {busy ? (
-              <button
-                type="button"
-                title="Stop"
-                aria-label="Stop"
-                className="flex size-8 items-center justify-center rounded-md bg-danger/15 text-danger hover:bg-danger/20"
-                onClick={() => void abort()}
-              >
-                <Square size={14} fill="currentColor" />
-              </button>
+              canSend ? (
+                <button
+                  type="button"
+                  title="Queue message (Enter)"
+                  aria-label="Queue message"
+                  className="flex size-8 items-center justify-center rounded-md bg-foreground text-surface transition-colors hover:opacity-85"
+                  onClick={() => void send()}
+                >
+                  <Send size={15} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  title="Stop"
+                  aria-label="Stop"
+                  className="flex size-8 items-center justify-center rounded-md bg-danger/15 text-danger hover:bg-danger/20"
+                  onClick={() => void abort()}
+                >
+                  <Square size={14} fill="currentColor" />
+                </button>
+              )
             ) : (
               <button
                 type="button"
@@ -643,8 +711,28 @@ export function Composer({ disabled }: { disabled?: boolean }) {
           </div>
           </div>
         </div>
-        <ExtensionWidgets />
       </div>
+      {welcomeWorkspaceName && (
+        <div
+          className={`mx-auto mt-3 flex min-h-9 w-full max-w-3xl flex-wrap justify-center gap-1.5 ${
+            canSend ? "invisible pointer-events-none" : ""
+          }`}
+          aria-hidden={canSend || undefined}
+        >
+          {STARTER_PROMPTS.map(({ label, prompt, icon: Icon }) => (
+            <button
+              key={label}
+              type="button"
+              disabled={disabled}
+              className="flex h-8 items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => selectStarterPrompt(prompt)}
+            >
+              <Icon size={14} className="shrink-0" />
+              <span className="truncate">{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
