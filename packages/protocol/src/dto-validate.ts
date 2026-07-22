@@ -1155,6 +1155,16 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
           payload.placement === "belowEditor")
         ? null
         : "invalid extensionUi.widgetChanged payload";
+    case "extensionUi.widgetAttentionRequested":
+      return isPlainObject(payload) &&
+        hasExactKeys(payload, ["key", "runId", "invocation"]) &&
+        isString(payload.key) &&
+        payload.key.length > 0 &&
+        isUuid(payload.runId) &&
+        isString(payload.invocation) &&
+        payload.invocation.length > 0
+        ? null
+        : "invalid extensionUi.widgetAttentionRequested payload";
     case "extensionUi.notification":
       return isPlainObject(payload) &&
         hasExactKeys(payload, ["message", "level"]) &&

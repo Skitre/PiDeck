@@ -338,6 +338,11 @@ export type HostEventPayloadMap = {
     widget: JsonValue;
     placement?: "aboveEditor" | "belowEditor";
   };
+  "extensionUi.widgetAttentionRequested": {
+    key: string;
+    runId: string;
+    invocation: string;
+  };
   "extensionUi.notification": { message: string; level: string };
   "extensionUi.customStarted": {
     requestId: string;

@@ -95,6 +95,7 @@ describe("expectedIdentityForEvent", () => {
       "package.diagnostic",
       "extensionUi.statusChanged",
       "extensionUi.widgetChanged",
+      "extensionUi.widgetAttentionRequested",
       "extensionUi.notification",
     ] as const) {
       const incoming = event(name, {

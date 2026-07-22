@@ -82,6 +82,8 @@ describe("app-store epoch wiring", () => {
       extensionStatus: null,
       extensionStatuses: {},
       extensionWidgets: {},
+      extensionWidgetsOpen: false,
+      lastExtensionWidgetAttentionRunId: null,
       packageProgress: null,
       packageRetry: null,
       thinkingLevels: [],
@@ -202,9 +204,51 @@ describe("app-store epoch wiring", () => {
     });
     expect(useAppStore.getState().extensionWidgets.summary?.widget).toEqual({ text: "ready" });
     expect(useAppStore.getState().extensionWidgets.summary?.placement).toBe("belowEditor");
+    useAppStore.getState().requestExtensionWidgetAttention("run-before-switch", "summary");
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(true);
 
     useAppStore.getState().applySessionSnapshot(session("s2"));
     expect(useAppStore.getState().extensionWidgets).toEqual({});
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+    expect(useAppStore.getState().lastExtensionWidgetAttentionRunId).toBeNull();
+  });
+
+  it("opens once per widget attention run and closes on navigation or final clear", () => {
+    const widget = {
+      key: "brainstorm",
+      widget: ["active"],
+      hostInstanceId: "h1",
+      workspaceId: "w",
+      workspaceRevision: 1,
+      sessionId: "s1",
+      sessionRevision: 1,
+    };
+
+    useAppStore.getState().setExtensionWidget(widget);
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+
+    useAppStore.getState().requestExtensionWidgetAttention("run-1", "brainstorm");
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(true);
+
+    useAppStore.getState().setExtensionWidgetsOpen(false);
+    useAppStore.getState().requestExtensionWidgetAttention("run-1", "brainstorm");
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+
+    useAppStore.getState().requestExtensionWidgetAttention("run-2", "brainstorm");
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(true);
+
+    useAppStore.getState().setPage("settings");
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+    useAppStore.getState().requestExtensionWidgetAttention("run-3", "brainstorm");
+    useAppStore.getState().setPage("chat");
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+
+    useAppStore.getState().requestExtensionWidgetAttention("run-missing", "missing");
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+
+    useAppStore.getState().setExtensionWidgetsOpen(true);
+    useAppStore.getState().setExtensionWidget({ ...widget, widget: null });
+    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
   });
 
   it("keeps extension statuses by key and clears them independently", () => {

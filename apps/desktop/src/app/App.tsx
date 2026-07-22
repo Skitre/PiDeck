@@ -297,6 +297,14 @@ function handleHostEvent(
         });
       }
       break;
+    case "extensionUi.widgetAttentionRequested":
+      if (
+        event.sessionId === store.session?.sessionId &&
+        event.sessionRevision === store.session?.revision
+      ) {
+        store.requestExtensionWidgetAttention(event.payload.runId, event.payload.key);
+      }
+      break;
     case "extensionUi.notification":
       store.pushNotification(event.payload.message ?? "", event.payload.level ?? "info");
       break;

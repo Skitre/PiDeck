@@ -140,6 +140,8 @@ export type AppState = EpochState & {
   extensionStatus: string | null;
   extensionStatuses: Record<string, string>;
   extensionWidgets: Record<string, ExtensionWidgetState>;
+  extensionWidgetsOpen: boolean;
+  lastExtensionWidgetAttentionRunId: string | null;
   extensionTerminal: ExtensionTerminalState | null;
   /** Right dock visibility. Auto-opens for extension panels; manual toggles persist. */
   dockOpen: boolean;
@@ -176,6 +178,8 @@ export type AppState = EpochState & {
   setDockOpen: (open: boolean) => void;
   setExtensionStatus: (key: string | undefined, text: string | null) => void;
   setExtensionWidget: (widget: ExtensionWidgetState) => void;
+  setExtensionWidgetsOpen: (open: boolean) => void;
+  requestExtensionWidgetAttention: (runId: string, key: string) => void;
   setPackageProgress: (progress: PackageProgressState | null) => void;
   setPackageRetry: (retry: PackageRetryState | null) => void;
   setThinkingLevels: (levels: string[]) => void;
@@ -232,6 +236,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   extensionStatus: null,
   extensionStatuses: {},
   extensionWidgets: {},
+  extensionWidgetsOpen: false,
+  lastExtensionWidgetAttentionRunId: null,
   extensionTerminal: null,
   dockOpen: sidebarPref("pideck.dock.open"),
   dockRestoreOnPanelClose: null,
@@ -245,7 +251,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   hostFatal: null,
   connecting: true,
   rehydrating: false,
-  setPage: (page) => set({ page }),
+  setPage: (page) =>
+    set((state) => ({
+      page,
+      ...(page !== state.page ? { extensionWidgetsOpen: false } : {}),
+    })),
 
   beginHostEpoch: (host) => {
     const next = epochBeginHost(epochSlice(get()), host);
@@ -256,6 +266,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionStatus: null,
       extensionStatuses: {},
       extensionWidgets: {},
+      extensionWidgetsOpen: false,
+      lastExtensionWidgetAttentionRunId: null,
       ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,
@@ -300,6 +312,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionStatus: null,
             extensionStatuses: {},
             extensionWidgets: {},
+            extensionWidgetsOpen: false,
+            lastExtensionWidgetAttentionRunId: null,
             ...resetExtensionTerminal(get()),
             packageProgress: null,
             packageRetry: null,
@@ -319,6 +333,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionStatus: null,
       extensionStatuses: {},
       extensionWidgets: {},
+      extensionWidgetsOpen: false,
+      lastExtensionWidgetAttentionRunId: null,
       ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,
@@ -371,6 +387,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionStatus: null,
             extensionStatuses: {},
             extensionWidgets: {},
+            extensionWidgetsOpen: false,
+            lastExtensionWidgetAttentionRunId: null,
             ...resetExtensionTerminal(current),
             packageProgress: null,
             packageRetry: null,
@@ -422,6 +440,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionStatus: null,
             extensionStatuses: {},
             extensionWidgets: {},
+            extensionWidgetsOpen: false,
+            lastExtensionWidgetAttentionRunId: null,
             ...resetExtensionTerminal(previous),
             packageProgress: null,
             packageRetry: null,
@@ -539,13 +559,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (extensionWidget.widget === null) {
         const extensionWidgets = { ...state.extensionWidgets };
         delete extensionWidgets[key];
-        return { extensionWidgets };
+        return {
+          extensionWidgets,
+          ...(Object.keys(extensionWidgets).length === 0
+            ? { extensionWidgetsOpen: false }
+            : {}),
+        };
       }
       return {
         extensionWidgets: {
           ...state.extensionWidgets,
           [key]: { ...extensionWidget, key },
         },
+      };
+    }),
+  setExtensionWidgetsOpen: (extensionWidgetsOpen) => set({ extensionWidgetsOpen }),
+  requestExtensionWidgetAttention: (runId, key) =>
+    set((state) => {
+      if (state.lastExtensionWidgetAttentionRunId === runId) return {};
+      return {
+        lastExtensionWidgetAttentionRunId: runId,
+        ...(state.page === "chat" && state.extensionWidgets[key]
+          ? { extensionWidgetsOpen: true }
+          : {}),
       };
     }),
   setPackageProgress: (packageProgress) => set({ packageProgress }),
@@ -638,6 +674,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionStatus: null,
       extensionStatuses: {},
       extensionWidgets: {},
+      extensionWidgetsOpen: false,
+      lastExtensionWidgetAttentionRunId: null,
       ...resetExtensionTerminal(current),
       packageProgress: null,
       packageRetry: null,
@@ -652,6 +690,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionStatus: null,
       extensionStatuses: {},
       extensionWidgets: {},
+      extensionWidgetsOpen: false,
+      lastExtensionWidgetAttentionRunId: null,
       ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,

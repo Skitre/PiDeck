@@ -31,6 +31,11 @@ import type { MethodHandler as ServerMethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { VirtualTerminal } from "./virtual-terminal.js";
 import { logger } from "./logger.js";
+import {
+  claimExtensionCommandWidgetAttention,
+  getActiveExtensionCommandOrigin,
+  type ExtensionCommandOrigin,
+} from "./extension-command-context.js";
 
 type PendingUi = {
   requestId: string;
@@ -61,6 +66,7 @@ export type ExtensionUiBridgeOptions = {
   waitUntilActive?: () => Promise<void>;
   isDisposed?: () => boolean;
   registerCleanup?: (cleanup: () => void) => void;
+  getActiveCommandOrigin?: () => ExtensionCommandOrigin | undefined;
 };
 
 export type ExtensionUiBinding = {
@@ -235,6 +241,35 @@ export function createExtensionUiContext(
   const identityAt = () => opts.getIdentity();
   const desktopTheme = createDesktopStubTheme();
   const activeWidgetFactories = new Map<string, ActiveWidgetFactory>();
+  const publishedWidgetKeys = new Set<string>();
+
+  const publishWidget = (
+    key: string,
+    widget: unknown,
+    placement: "belowEditor" | undefined,
+  ) => {
+    if (widget === null || widget === undefined) publishedWidgetKeys.delete(key);
+    else publishedWidgetKeys.add(key);
+    opts.emit("extensionUi.widgetChanged", {
+      key,
+      widget,
+      ...(placement ? { placement } : {}),
+    });
+  };
+
+  const requestWidgetAttention = (
+    key: string,
+    origin: ExtensionCommandOrigin | undefined,
+  ) => {
+    if (!origin) return;
+    const invocation = stripAnsi(origin.invocation);
+    if (!key || !invocation || !claimExtensionCommandWidgetAttention(origin)) return;
+    opts.emit("extensionUi.widgetAttentionRequested", {
+      key,
+      runId: origin.runId,
+      invocation,
+    });
+  };
 
   const disposeWidgetFactory = (key: string) => {
     const active = activeWidgetFactories.get(key);
@@ -353,16 +388,12 @@ export function createExtensionUiContext(
     setWidget: (key, content, options?) => {
       const sanitizedKey = stripAnsi(String(key));
       const placement = options?.placement === "belowEditor" ? "belowEditor" : undefined;
+      const commandOrigin = opts.getActiveCommandOrigin?.();
+      let replacingPublishedWidget = publishedWidgetKeys.has(sanitizedKey);
       disposeWidgetFactory(sanitizedKey);
       if (typeof content === "function") {
-        // A same-key factory replaces the previous widget immediately. Clear
-        // the desktop snapshot before construction so a failed factory cannot
-        // leave stale content visible indefinitely.
-        opts.emit("extensionUi.widgetChanged", {
-          key: sanitizedKey,
-          widget: null,
-          ...(placement ? { placement } : {}),
-        });
+        // Keep the prior snapshot visible until the replacement publishes its
+        // first frame. A failed replacement clears it explicitly below.
         const widgetTui = new TUI(
           new VirtualTerminal({
             cols: WIDGET_SNAPSHOT_WIDTH,
@@ -373,6 +404,13 @@ export function createExtensionUiContext(
         let disposed = false;
         let lastSnapshot: string | undefined;
         let lastRenderError: string | undefined;
+        let initialRenderOrigin = commandOrigin;
+        let pendingRenderOrigin: ExtensionCommandOrigin | undefined;
+        const requestRender = widgetTui.requestRender.bind(widgetTui);
+        widgetTui.requestRender = (force = false) => {
+          pendingRenderOrigin = opts.getActiveCommandOrigin?.() ?? pendingRenderOrigin;
+          requestRender(force);
+        };
         const dispose = () => {
           if (disposed) return;
           disposed = true;
@@ -393,29 +431,30 @@ export function createExtensionUiContext(
             render: (width) => {
               if (disposed || !widgetComponent) return [];
               try {
+                const renderOrigin =
+                  opts.getActiveCommandOrigin?.() ??
+                  pendingRenderOrigin ??
+                  initialRenderOrigin;
                 const lines = widgetComponent.render(width);
                 const sanitizedLines = lines.map((line) => stripAnsi(line));
                 const snapshot = JSON.stringify(sanitizedLines);
                 if (snapshot !== lastSnapshot) {
                   lastSnapshot = snapshot;
-                  opts.emit("extensionUi.widgetChanged", {
-                    key: sanitizedKey,
-                    widget: sanitizedLines,
-                    ...(placement ? { placement } : {}),
-                  });
+                  publishWidget(sanitizedKey, sanitizedLines, placement);
+                  replacingPublishedWidget = false;
+                  requestWidgetAttention(sanitizedKey, renderOrigin);
                 }
+                pendingRenderOrigin = undefined;
+                initialRenderOrigin = undefined;
                 lastRenderError = undefined;
                 return lines;
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);
                 const sanitizedMessage = stripAnsi(message);
-                if (lastSnapshot !== undefined) {
+                if (lastSnapshot !== undefined || replacingPublishedWidget) {
                   lastSnapshot = undefined;
-                  opts.emit("extensionUi.widgetChanged", {
-                    key: sanitizedKey,
-                    widget: null,
-                    ...(placement ? { placement } : {}),
-                  });
+                  replacingPublishedWidget = false;
+                  publishWidget(sanitizedKey, null, placement);
                 }
                 if (sanitizedMessage !== lastRenderError) {
                   lastRenderError = sanitizedMessage;
@@ -438,6 +477,10 @@ export function createExtensionUiContext(
             activeWidgetFactories.delete(sanitizedKey);
           }
           dispose();
+          if (publishedWidgetKeys.has(sanitizedKey)) {
+            replacingPublishedWidget = false;
+            publishWidget(sanitizedKey, null, placement);
+          }
           const message = err instanceof Error ? err.message : String(err);
           opts.emit("package.diagnostic", {
             severity: "info",
@@ -446,11 +489,11 @@ export function createExtensionUiContext(
         }
         return;
       }
-      opts.emit("extensionUi.widgetChanged", {
-        key: sanitizedKey,
-        widget: content === undefined ? null : sanitize(content),
-        ...(placement ? { placement } : {}),
-      });
+      const widget = content === undefined ? null : sanitize(content);
+      publishWidget(sanitizedKey, widget, placement);
+      if (widget !== null && widget !== undefined) {
+        requestWidgetAttention(sanitizedKey, commandOrigin);
+      }
     },
     setFooter: () => {},
     setHeader: () => {},
@@ -696,6 +739,8 @@ export async function bindExtensionUi(
     waitUntilActive: () => activation,
     isDisposed: () => disposed,
     registerCleanup: (cleanup) => contextCleanups.add(cleanup),
+    getActiveCommandOrigin:
+      opts.getActiveCommandOrigin ?? (() => getActiveExtensionCommandOrigin(session)),
   });
   const ready = session
     .bindExtensions({

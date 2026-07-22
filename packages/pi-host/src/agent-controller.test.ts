@@ -5,6 +5,7 @@ import { createAgentHandlers, summarizeModel } from "./agent-controller.js";
 import { AgentOperationLock, TryMutex } from "./locks.js";
 import type { PiHostServer } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
+import { getActiveExtensionCommandOrigin } from "./extension-command-context.js";
 
 function model(overrides: Partial<Model<any>>): Model<any> {
   return {
@@ -75,6 +76,7 @@ function stableHandlerFixture(wait: Promise<void>) {
     },
   };
   const session = {
+    prompt: vi.fn(async () => wait),
     steer: vi.fn(async () => wait),
     followUp: vi.fn(async () => wait),
     abort: vi.fn(async () => wait),
@@ -97,6 +99,9 @@ function stableHandlerFixture(wait: Promise<void>) {
     getAllTools: () => [],
     getActiveToolNames: () => [],
     getAvailableThinkingLevels: () => ["off"],
+    extensionRunner: {
+      getCommand: () => undefined,
+    },
   } as unknown as AgentSession;
   const graph = {
     agentSession: session,
@@ -108,17 +113,29 @@ function stableHandlerFixture(wait: Promise<void>) {
   };
   const serviceGraphLock = new TryMutex();
   const sessionOperationLock = new AgentOperationLock();
+  let phase = "ready";
   const server = {
     identity,
     serviceGraphLock,
     emit: vi.fn(),
+    emitForIdentity: vi.fn(),
     getIdentity: () => identity.snapshot(),
+    setPhase: (next: string) => {
+      phase = next;
+    },
+    getPhase: () => phase,
   } as unknown as PiHostServer;
   const factory = {
     checkIdentity: () => null,
     getGraph: () => graph,
     getServer: () => server,
     getSessionOperationLock: () => sessionOperationLock,
+    hasBusySessions: () => false,
+    setSessionRunId: vi.fn(),
+    clearSessionRunId: vi.fn(),
+    setActiveSessionName: vi.fn(),
+    refineActiveSessionName: vi.fn(async () => {}),
+    currentRunId: null,
   } as unknown as WorkspaceGraphFactory;
   return { factory, graph, server, serviceGraphLock, sessionOperationLock, session };
 }
@@ -156,6 +173,57 @@ describe("session-bound agent handlers", () => {
     expect("error" in outcome).toBe(false);
     expect(outcome.identity).toEqual(fixture.server.getIdentity());
     expect(fixture.serviceGraphLock.isHeld()).toBe(false);
+  });
+});
+
+describe("agent.prompt extension command provenance", () => {
+  it("scopes the accepted run id and invocation to the registered command handler", async () => {
+    const gate = deferred();
+    const fixture = stableHandlerFixture(gate.promise);
+    const session = fixture.session as unknown as {
+      extensionRunner: { getCommand: (name: string) => unknown };
+      prompt: ReturnType<typeof vi.fn>;
+    };
+    session.extensionRunner = {
+      getCommand: (name) => (name === "brainstorm" ? { invocationName: name } : undefined),
+    };
+    let duringPrompt:
+      | { runId: string; invocation: string }
+      | undefined;
+    let afterAwait:
+      | { runId: string; invocation: string }
+      | undefined;
+    session.prompt = vi.fn(async () => {
+      const origin = getActiveExtensionCommandOrigin(fixture.session);
+      duringPrompt = origin
+        ? { runId: origin.runId, invocation: origin.invocation }
+        : undefined;
+      await gate.promise;
+      const resumed = getActiveExtensionCommandOrigin(fixture.session);
+      afterAwait = resumed
+        ? { runId: resumed.runId, invocation: resumed.invocation }
+        : undefined;
+    });
+
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+    const outcome = await handler({
+      id: "prompt-command",
+      context: {},
+      params: { text: "/brainstorm topic" },
+    } as never);
+
+    expect("result" in outcome).toBe(true);
+    if (!("result" in outcome)) return;
+    await vi.waitFor(() => expect(session.prompt).toHaveBeenCalledOnce());
+    expect(duringPrompt).toEqual({
+      runId: (outcome.result as { runId: string }).runId,
+      invocation: "brainstorm",
+    });
+    expect(getActiveExtensionCommandOrigin(fixture.session)).toBeUndefined();
+
+    gate.resolve();
+    await vi.waitFor(() => expect(fixture.sessionOperationLock.isHeld()).toBe(false));
+    expect(afterAwait).toEqual(duringPrompt);
   });
 });
 

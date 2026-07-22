@@ -14,6 +14,7 @@ import {
   parseHostRequest,
   validateMethodContext,
   validateRequestParams,
+  validateEventPayload,
   isHostEvent,
   isHostResponse,
 } from "./validate.js";
@@ -445,6 +446,11 @@ describe("protocol coverage — events", () => {
     },
     "extensionUi.statusChanged": { text: "working" },
     "extensionUi.widgetChanged": { key: "k", widget: null, placement: "belowEditor" },
+    "extensionUi.widgetAttentionRequested": {
+      key: "k",
+      runId: RUN_ID,
+      invocation: "brainstorm",
+    },
     "extensionUi.notification": { message: "hi", level: "info" },
     "extensionUi.customStarted": {
       requestId: EXTENSION_REQUEST_ID,
@@ -481,6 +487,17 @@ describe("protocol coverage — events", () => {
       ).toBe(false);
     });
   }
+
+  it.each([
+    { key: "", runId: RUN_ID, invocation: "brainstorm" },
+    { key: "brainstorm", runId: "not-a-run-id", invocation: "brainstorm" },
+    { key: "brainstorm", runId: RUN_ID, invocation: "" },
+    { key: "brainstorm", runId: RUN_ID, invocation: "brainstorm", extra: true },
+  ])("rejects malformed widget attention payload %#", (payload) => {
+    expect(validateEventPayload("extensionUi.widgetAttentionRequested", payload).ok).toBe(
+      false,
+    );
+  });
 
   it("session.runtimeChanged rejects unknown states and extra fields", () => {
     expect(

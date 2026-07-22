@@ -18,7 +18,7 @@ import { buildAttachedFileBlock } from "./transcript-model";
 import { ContextUsageRing, ModelControls } from "./ModelControls";
 import { QueuePanel } from "./QueuePanel";
 import {
-  ExtensionWidgetPanel,
+  ExtensionWidgetsPopover,
   ExtensionWidgetsButton,
 } from "./ExtensionWidgets";
 import { PiMark } from "../../components/PiMark";
@@ -171,6 +171,8 @@ export function Composer({
   const text = useAppStore((s) =>
     session ? (s.sessionDrafts[session.sessionId] ?? "") : "",
   );
+  const extensionWidgetsOpen = useAppStore((s) => s.extensionWidgetsOpen);
+  const setExtensionWidgetsOpen = useAppStore((s) => s.setExtensionWidgetsOpen);
   const setSession = useAppStore((s) => s.applySessionSnapshot);
   const setSessionDraft = useAppStore((s) => s.setSessionDraft);
   const pushNotification = useAppStore((s) => s.pushNotification);
@@ -178,9 +180,9 @@ export function Composer({
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [completion, setCompletion] = useState<CompletionState | null>(null);
-  const [extensionWidgetsOpen, setExtensionWidgetsOpen] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const extensionWidgetAnchorRef = useRef<HTMLDivElement>(null);
   const templatesRef = useRef<{ key: string; items: CompletionItem[] } | null>(null);
   const fileSnapshotRef = useRef<{
     query: string;
@@ -197,9 +199,16 @@ export function Composer({
     setFiles([]);
     setDragOver(false);
     setCompletion(null);
-    setExtensionWidgetsOpen(true);
     fileSnapshotRef.current = null;
   }, [sessionId]);
+
+  function closeExtensionWidgets() {
+    setExtensionWidgetsOpen(false);
+  }
+
+  function toggleExtensionWidgets() {
+    setExtensionWidgetsOpen(!extensionWidgetsOpen);
+  }
 
   async function loadCommandItems(): Promise<CompletionItem[]> {
     if (!host || !workspace || !session) return [];
@@ -513,13 +522,12 @@ export function Composer({
         </div>
       )}
       <QueuePanel />
-      <div className="mx-auto w-full max-w-3xl">
+      <div
+        ref={extensionWidgetAnchorRef}
+        className="relative mx-auto w-full max-w-3xl"
+        data-extension-widget-anchor
+      >
         <ExtensionStatusStrip />
-        <ExtensionWidgetPanel
-          placement="aboveEditor"
-          open={extensionWidgetsOpen}
-          onClose={() => setExtensionWidgetsOpen(false)}
-        />
         <div
           className={`rounded-xl border bg-surface-raised p-2 shadow-sm transition-colors ${
             dragOver ? "border-accent" : "border-border"
@@ -704,7 +712,7 @@ export function Composer({
           <div className="ml-auto flex items-center gap-1.5">
             <ExtensionWidgetsButton
               open={extensionWidgetsOpen}
-              onToggle={() => setExtensionWidgetsOpen((current) => !current)}
+              onToggle={toggleExtensionWidgets}
             />
             <ContextUsageRing />
             {busy ? (
@@ -744,10 +752,10 @@ export function Composer({
           </div>
           </div>
         </div>
-        <ExtensionWidgetPanel
-          placement="belowEditor"
+        <ExtensionWidgetsPopover
+          anchorRef={extensionWidgetAnchorRef}
           open={extensionWidgetsOpen}
-          onClose={() => setExtensionWidgetsOpen(false)}
+          onClose={closeExtensionWidgets}
         />
       </div>
       {welcomeWorkspaceName && (

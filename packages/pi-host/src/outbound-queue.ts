@@ -50,15 +50,31 @@ export const OUTBOUND_SOFT_WATERMARK_BYTES = 1024 * 1024;
 export const OUTBOUND_HARD_CAP_BYTES = 16 * 1024 * 1024;
 
 /** Latest-wins or mergeable event classes — safe to collapse under pressure. */
-function coalesceKeyFor(event: HostEventName, payload: unknown): string | null {
+function sessionScope(identity: HostIdentity): string {
+  return [
+    identity.hostInstanceId,
+    identity.workspaceId ?? "",
+    identity.workspaceRevision,
+    identity.sessionId ?? "",
+    identity.sessionRevision,
+  ].join(":");
+}
+
+function coalesceKeyFor(
+  identity: HostIdentity,
+  event: HostEventName,
+  payload: unknown,
+): string | null {
   const p = payload as Record<string, unknown> | null;
   switch (event) {
     case "extensionUi.customFrame":
       return `frame:${String(p?.requestId ?? "")}`;
     case "extensionUi.statusChanged":
-      return `status:${String(p?.key ?? "")}`;
+      return `status:${sessionScope(identity)}:${String(p?.key ?? "")}`;
     case "extensionUi.widgetChanged":
-      return `widget:${String(p?.key ?? "")}`;
+      return `widget:${sessionScope(identity)}:${String(p?.key ?? "")}`;
+    case "extensionUi.widgetAttentionRequested":
+      return `widget-attention:${sessionScope(identity)}:${String(p?.runId ?? "")}`;
     case "session.runtimeChanged":
       return `runtime:${String(p?.sessionId ?? "")}`;
     case "package.progress":
@@ -108,7 +124,21 @@ export class OutboundWriter {
 
   enqueueEvent(identity: HostIdentity, event: HostEventName, payload: unknown): void {
     const bytes = JSON.stringify(payload)?.length ?? 0;
-    const coalesceKey = coalesceKeyFor(event, payload);
+    const coalesceKey = coalesceKeyFor(identity, event, payload);
+
+    if (event === "extensionUi.widgetAttentionRequested") {
+      const widgetKey = `widget:${sessionScope(identity)}:${String(
+        (payload as { key?: unknown } | null)?.key ?? "",
+      )}`;
+      const widgetSnapshot = this.coalesceIndex.get(widgetKey);
+      // The Host emits attention immediately after the widget snapshot. If
+      // that snapshot breached the hard cap and was shed on arrival, opening
+      // the panel would reveal whatever stale widget content the client has.
+      if (widgetSnapshot?.dropped) return;
+      // Keep the causal pair ordered. Later same-key updates must be queued
+      // after attention instead of replacing its snapshot in place.
+      if (widgetSnapshot) this.coalesceIndex.delete(widgetKey);
+    }
 
     if (coalesceKey && this.pendingBytes > this.softWatermark) {
       const existing = this.coalesceIndex.get(coalesceKey);

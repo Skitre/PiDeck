@@ -22,6 +22,10 @@ import {
   recordQueuedImages,
   takeQueuedImages,
 } from "./queue-attachments.js";
+import {
+  resolveExtensionCommandInvocation,
+  withExtensionCommandOrigin,
+} from "./extension-command-context.js";
 import { logger } from "./logger.js";
 
 /** Protocol images ({mediaType,data}) → SDK ImageContent ({type,mimeType,data}). */
@@ -146,6 +150,10 @@ export function createAgentHandlers(
           : createProvisionalSessionTitle(params.text);
       const titleSession = g.agentSession;
       const titleSessionId = server.identity.sessionId;
+      const extensionCommandInvocation = resolveExtensionCommandInvocation(
+        titleSession,
+        params.text,
+      );
       if (provisionalTitle) {
         factory.setActiveSessionName(provisionalTitle);
       }
@@ -154,10 +162,21 @@ export function createAgentHandlers(
       void (async () => {
         let completed = false;
         try {
-          await g.agentSession!.prompt(params.text, {
-            streamingBehavior: params.streamingBehavior,
-            ...(promptImages ? { images: promptImages } : {}),
-          });
+          const runPrompt = () =>
+            titleSession.prompt(params.text, {
+              streamingBehavior: params.streamingBehavior,
+              ...(promptImages ? { images: promptImages } : {}),
+            });
+          if (extensionCommandInvocation) {
+            await withExtensionCommandOrigin(
+              titleSession,
+              runId,
+              extensionCommandInvocation,
+              runPrompt,
+            );
+          } else {
+            await runPrompt();
+          }
           completed = true;
         } catch (err) {
           server.emitForIdentity(runIdentity, "agent.event", {

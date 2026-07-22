@@ -42,6 +42,7 @@ export function expectedIdentityForEvent(
     case "package.diagnostic":
     case "extensionUi.statusChanged":
     case "extensionUi.widgetChanged":
+    case "extensionUi.widgetAttentionRequested":
     case "extensionUi.notification":
     case "package.progress":
     case "package.snapshot":

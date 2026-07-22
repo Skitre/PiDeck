@@ -139,6 +139,86 @@ describe("OutboundWriter", () => {
     expect(statuses).toEqual(["second", "kept"]);
   });
 
+  it("keeps widget attention between its snapshot and a later same-key update", async () => {
+    const fake = fakeStream({ stalled: true });
+    const { out } = writer(fake.stream, { softWatermark: 1 });
+
+    out.enqueueEvent(identity, "extensionUi.notification", { message: "hold", level: "info" });
+    await settle();
+    out.enqueueEvent(identity, "extensionUi.widgetChanged", {
+      key: "brainstorm",
+      widget: ["command content"],
+    });
+    out.enqueueEvent(identity, "extensionUi.widgetAttentionRequested", {
+      key: "brainstorm",
+      runId: "run-1",
+      invocation: "brainstorm",
+    });
+    out.enqueueEvent(identity, "extensionUi.widgetChanged", {
+      key: "brainstorm",
+      widget: null,
+    });
+
+    fake.unstall();
+    await out.drain();
+
+    const widgetEvents = fake
+      .parsed()
+      .filter((message) =>
+        ["extensionUi.widgetChanged", "extensionUi.widgetAttentionRequested"].includes(
+          String(message.event),
+        ),
+      )
+      .map((message) => ({ event: message.event, payload: message.payload }));
+    expect(widgetEvents).toEqual([
+      {
+        event: "extensionUi.widgetChanged",
+        payload: { key: "brainstorm", widget: ["command content"] },
+      },
+      {
+        event: "extensionUi.widgetAttentionRequested",
+        payload: { key: "brainstorm", runId: "run-1", invocation: "brainstorm" },
+      },
+      {
+        event: "extensionUi.widgetChanged",
+        payload: { key: "brainstorm", widget: null },
+      },
+    ]);
+  });
+
+  it("does not coalesce same-key widgets from different sessions", async () => {
+    const fake = fakeStream({ stalled: true });
+    const { out } = writer(fake.stream, { softWatermark: 1 });
+    const backgroundIdentity: HostIdentity = {
+      ...identity,
+      sessionId: "44444444-4444-4444-8444-444444444444",
+      sessionRevision: 2,
+    };
+
+    out.enqueueEvent(identity, "extensionUi.notification", { message: "hold", level: "info" });
+    await settle();
+    out.enqueueEvent(identity, "extensionUi.widgetChanged", {
+      key: "shared",
+      widget: ["active session"],
+    });
+    out.enqueueEvent(backgroundIdentity, "extensionUi.widgetChanged", {
+      key: "shared",
+      widget: ["background session"],
+    });
+
+    fake.unstall();
+    await out.drain();
+
+    const widgets = fake
+      .parsed()
+      .filter((message) => message.event === "extensionUi.widgetChanged");
+    expect(widgets).toHaveLength(2);
+    expect(widgets.map((message) => message.sessionId)).toEqual([
+      identity.sessionId,
+      backgroundIdentity.sessionId,
+    ]);
+  });
+
   it("never drops responses or agent events at the hard cap, and forces a sequence gap in catastrophe", async () => {
     const fake = fakeStream({ stalled: true });
     const { out, lastSequence } = writer(fake.stream, { softWatermark: 1, hardCap: 200 });
@@ -169,6 +249,64 @@ describe("OutboundWriter", () => {
     // A sequence number was burned to force client-side gap recovery.
     const written = parsed.filter((message) => typeof message.sequence === "number").length;
     expect(lastSequence()).toBeGreaterThan(written);
+  });
+
+  it("sheds widget attention with its widget snapshot at the hard cap", async () => {
+    const fake = fakeStream({ stalled: true });
+    const { out } = writer(fake.stream, { softWatermark: 1, hardCap: 300 });
+
+    out.enqueueEvent(identity, "extensionUi.notification", {
+      message: "hold",
+      level: "info",
+    });
+    await settle();
+    out.enqueueEvent(identity, "extensionUi.widgetChanged", {
+      key: "brainstorm",
+      widget: ["new content"],
+    });
+    out.enqueueEvent(identity, "extensionUi.widgetAttentionRequested", {
+      key: "brainstorm",
+      runId: "run-1",
+      invocation: "/brainstorm",
+    });
+    out.enqueueEvent(identity, "extensionUi.customFrame", {
+      requestId: "oversized",
+      data: "x".repeat(400),
+    });
+
+    fake.unstall();
+    await out.drain();
+
+    const events = fake.parsed().map((message) => message.event);
+    expect(events).not.toContain("extensionUi.widgetChanged");
+    expect(events).not.toContain("extensionUi.widgetAttentionRequested");
+  });
+
+  it("does not enqueue attention after its widget snapshot is shed on arrival", async () => {
+    const fake = fakeStream({ stalled: true });
+    const { out } = writer(fake.stream, { softWatermark: 1, hardCap: 200 });
+
+    out.enqueueEvent(identity, "extensionUi.notification", {
+      message: "hold",
+      level: "info",
+    });
+    await settle();
+    out.enqueueEvent(identity, "extensionUi.widgetChanged", {
+      key: "brainstorm",
+      widget: ["x".repeat(400)],
+    });
+    out.enqueueEvent(identity, "extensionUi.widgetAttentionRequested", {
+      key: "brainstorm",
+      runId: "run-1",
+      invocation: "/brainstorm",
+    });
+
+    fake.unstall();
+    await out.drain();
+
+    const events = fake.parsed().map((message) => message.event);
+    expect(events).not.toContain("extensionUi.widgetChanged");
+    expect(events).not.toContain("extensionUi.widgetAttentionRequested");
   });
 
   it("drain resolves immediately when idle", async () => {

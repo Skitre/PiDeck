@@ -8,6 +8,7 @@ import {
   injectExtensionCustomInput,
 } from "./extension-ui-bridge.js";
 import type { HostEventName, HostIdentity } from "@pideck/protocol";
+import { withExtensionCommandOrigin } from "./extension-command-context.js";
 
 const id: HostIdentity = {
   hostInstanceId: "h",
@@ -17,6 +18,9 @@ const id: HostIdentity = {
   sessionRevision: 1,
   packageRevision: 0,
 };
+
+const COMMAND_RUN_ID = "00000000-0000-4000-8000-000000000006";
+const NEXT_COMMAND_RUN_ID = "00000000-0000-4000-8000-000000000007";
 
 describe("extension-ui-bridge", () => {
   it("select uses positional title/options and returns option string", async () => {
@@ -115,6 +119,60 @@ describe("extension-ui-bridge", () => {
       e: "extensionUi.widgetChanged",
       p: { key: "progress", widget: ["working"], placement: "belowEditor" },
     });
+  });
+
+  it("requests attention once when an extension command writes a static widget", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    let ui: ReturnType<typeof createExtensionUiContext> | undefined;
+    const session = {
+      bindExtensions: async ({ uiContext }: { uiContext: typeof ui }) => {
+        ui = uiContext;
+      },
+    };
+    const binding = await bindExtensionUi(session as never, null, {
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    const publish = await binding.activate();
+    publish();
+
+    // A nano-context-style lifecycle refresh is not command-originated.
+    ui!.setWidget("nano-context", ["usage"]);
+    await withExtensionCommandOrigin(
+      session as never,
+      COMMAND_RUN_ID,
+      "brainstorm",
+      async () => {
+        ui!.setWidget("brainstorm", ["active"]);
+        ui!.setWidget("brainstorm-details", ["more"]);
+        ui!.setWidget("brainstorm", undefined);
+      },
+    );
+
+    const attention = events.filter(
+      (event) => event.e === "extensionUi.widgetAttentionRequested",
+    );
+    expect(attention).toEqual([
+      {
+        e: "extensionUi.widgetAttentionRequested",
+        p: {
+          key: "brainstorm",
+          runId: COMMAND_RUN_ID,
+          invocation: "brainstorm",
+        },
+      },
+    ]);
+    const brainstormWrite = events.findIndex(
+      (event) =>
+        event.e === "extensionUi.widgetChanged" &&
+        (event.p as { key?: string }).key === "brainstorm" &&
+        (event.p as { widget?: unknown }).widget !== null,
+    );
+    const attentionIndex = events.findIndex(
+      (event) => event.e === "extensionUi.widgetAttentionRequested",
+    );
+    expect(attentionIndex).toBeGreaterThan(brainstormWrite);
+    binding.cleanup();
   });
 
   it("clears a prior same-key widget when a replacement factory fails", () => {
@@ -462,8 +520,11 @@ describe("extension-ui-bridge", () => {
     requestRender?.();
     await new Promise((resolve) => setTimeout(resolve, 30));
     const updates = events.filter((x) => x.e === "extensionUi.widgetChanged");
-    expect(updates).toHaveLength(3);
-    expect(updates[0]?.p).toEqual({ key: "tasks", widget: null });
+    expect(updates).toHaveLength(2);
+    expect(updates[0]?.p).toEqual({
+      key: "tasks",
+      widget: ["line one", "line two"],
+    });
     widget = updates.at(-1)?.p as { key: string; widget: string[] };
     expect(widget.widget).toEqual(["updated", "line two"]);
 
@@ -476,14 +537,237 @@ describe("extension-ui-bridge", () => {
 
     requestRender?.();
     await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(4);
+    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(3);
 
     ui.setWidget("tasks", undefined);
     expect(events.at(-1)).toEqual({
       e: "extensionUi.widgetChanged",
       p: { key: "tasks", widget: null },
     });
-    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(5);
+    expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(4);
+  });
+
+  it("replaces a live widget factory without a transient clear", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    let disposed = false;
+
+    ui.setWidget("nano-context", () => ({
+      render: () => ["old context"],
+      invalidate: () => {},
+      dispose: () => {
+        disposed = true;
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    ui.setWidget("nano-context", () => ({
+      render: () => ["new context"],
+      invalidate: () => {},
+    }));
+    expect(disposed).toBe(true);
+    expect(events.filter((event) => event.e === "extensionUi.widgetChanged")).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(
+      events
+        .filter((event) => event.e === "extensionUi.widgetChanged")
+        .map((event) => event.p),
+    ).toEqual([
+      { key: "nano-context", widget: ["old context"] },
+      { key: "nano-context", widget: ["new context"] },
+    ]);
+  });
+
+  it("clears a prior widget when a replacement factory first render fails", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+
+    ui.setWidget("progress", ["old"]);
+    ui.setWidget("progress", () => ({
+      render: () => {
+        throw new Error("render failed");
+      },
+      invalidate: () => {},
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(
+      events
+        .filter((event) => event.e === "extensionUi.widgetChanged")
+        .map((event) => event.p),
+    ).toEqual([
+      { key: "progress", widget: ["old"] },
+      { key: "progress", widget: null },
+    ]);
+  });
+
+  it("captures command origin until a widget factory first renders successfully", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    let ui: ReturnType<typeof createExtensionUiContext> | undefined;
+    const session = {
+      bindExtensions: async ({ uiContext }: { uiContext: typeof ui }) => {
+        ui = uiContext;
+      },
+    };
+    const binding = await bindExtensionUi(session as never, null, {
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    const publish = await binding.activate();
+    publish();
+
+    let failRender = true;
+    let text = "ready";
+    let requestRender: (() => void) | undefined;
+    await withExtensionCommandOrigin(
+      session as never,
+      COMMAND_RUN_ID,
+      "brainstorm",
+      async () => {
+        ui!.setWidget("brainstorm-live", (tui) => {
+          requestRender = () => tui.requestRender();
+          return {
+            render: () => {
+              if (failRender) throw new Error("not ready");
+              return [text];
+            },
+            invalidate: () => {},
+          };
+        });
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+    );
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetAttentionRequested"),
+    ).toHaveLength(0);
+
+    failRender = false;
+    requestRender?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetAttentionRequested"),
+    ).toEqual([
+      {
+        e: "extensionUi.widgetAttentionRequested",
+        p: {
+          key: "brainstorm-live",
+          runId: COMMAND_RUN_ID,
+          invocation: "brainstorm",
+        },
+      },
+    ]);
+
+    text = "refreshed";
+    requestRender?.();
+    requestRender?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetAttentionRequested"),
+    ).toHaveLength(1);
+    binding.cleanup();
+  });
+
+  it("attributes an existing live widget redraw to the command that requested it", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    let ui: ReturnType<typeof createExtensionUiContext> | undefined;
+    const session = {
+      bindExtensions: async ({ uiContext }: { uiContext: typeof ui }) => {
+        ui = uiContext;
+      },
+    };
+    const binding = await bindExtensionUi(session as never, null, {
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    const publish = await binding.activate();
+    publish();
+
+    let text = "idle";
+    let requestRender: (() => void) | undefined;
+    ui!.setWidget("existing-live", (tui) => {
+      requestRender = () => tui.requestRender();
+      return {
+        render: () => [text],
+        invalidate: () => {},
+      };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetAttentionRequested"),
+    ).toHaveLength(0);
+
+    await withExtensionCommandOrigin(
+      session as never,
+      COMMAND_RUN_ID,
+      "brainstorm",
+      async () => {
+        text = "command update";
+        requestRender?.();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+
+        text = "same command update";
+        requestRender?.();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+    );
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetAttentionRequested"),
+    ).toEqual([
+      {
+        e: "extensionUi.widgetAttentionRequested",
+        p: {
+          key: "existing-live",
+          runId: COMMAND_RUN_ID,
+          invocation: "brainstorm",
+        },
+      },
+    ]);
+
+    await withExtensionCommandOrigin(
+      session as never,
+      NEXT_COMMAND_RUN_ID,
+      "brainstorm",
+      async () => {
+        text = "next command update";
+        requestRender?.();
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+    );
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetAttentionRequested"),
+    ).toEqual([
+      {
+        e: "extensionUi.widgetAttentionRequested",
+        p: {
+          key: "existing-live",
+          runId: COMMAND_RUN_ID,
+          invocation: "brainstorm",
+        },
+      },
+      {
+        e: "extensionUi.widgetAttentionRequested",
+        p: {
+          key: "existing-live",
+          runId: NEXT_COMMAND_RUN_ID,
+          invocation: "brainstorm",
+        },
+      },
+    ]);
+
+    text = "background refresh";
+    requestRender?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetAttentionRequested"),
+    ).toHaveLength(2);
+    binding.cleanup();
   });
 
   it("binding cleanup disposes live setWidget factories", async () => {
