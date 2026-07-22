@@ -20,7 +20,7 @@
     "prepare:runtime": "node scripts/prepare-release-runtime.mjs",
     "validate:resources": "node scripts/validate-resource-layout.mjs",
     "verify:docs": "node scripts/verify-doc-links.mjs",
-    "test:rust": "cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target-dir apps/desktop/src-tauri/target/verify-rust",
+    "test:rust": "node scripts/prepare-rust-test-resources.mjs && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target-dir apps/desktop/src-tauri/target/verify-rust",
     "package:release": "node scripts/package-release.mjs",
     "verify:quick": "pnpm verify:docs && pnpm typecheck && pnpm test",
     "verify:p0": "pnpm verify:quick && pnpm build && pnpm test:rust",
