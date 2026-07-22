@@ -187,7 +187,7 @@ export function WorkspacePicker() {
             return (
               <li
                 key={path.toLocaleLowerCase()}
-                className={`group flex h-9 items-center rounded-md text-sm ${
+                className={`group flex h-9 items-center rounded-md text-[13px] ${
                   active
                     ? "bg-surface-overlay font-medium"
                     : "hover:bg-surface-overlay/70"
