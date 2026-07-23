@@ -797,6 +797,9 @@ export function SessionList({
           const canArchive =
             !item.archived &&
             (item.runtimeState === "inactive" || item.runtimeState === "error");
+          const statusDot = item.archived
+            ? null
+            : sessionStatusDotClass(item.runtimeState);
           return (
             <li
               key={item.sessionId}
@@ -855,19 +858,6 @@ export function SessionList({
                     }
                   >
                     <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="flex size-1.5 shrink-0 items-center justify-center">
-                        {(() => {
-                          const dot = item.archived
-                            ? null
-                            : sessionStatusDotClass(item.runtimeState);
-                          return dot ? (
-                            <span
-                              aria-label={sessionRuntimeLabel(item.runtimeState)}
-                              className={`size-1.5 rounded-full ${dot}`}
-                            />
-                          ) : null;
-                        })()}
-                      </span>
                       <span className={`truncate ${active ? "font-medium" : ""}`}>
                         {sessionDisplayName(item)}
                       </span>
@@ -876,7 +866,22 @@ export function SessionList({
                       )}
                     </div>
                   </button>
-                  <div className="relative mr-1" data-session-menu>
+                  <div
+                    className="relative mr-1 flex size-[22px] shrink-0 items-center justify-center"
+                    data-session-menu
+                  >
+                    {statusDot && (
+                      <span
+                        aria-label={sessionRuntimeLabel(item.runtimeState)}
+                        className={`pointer-events-none absolute flex size-1.5 transition-opacity ${
+                          menuOpen
+                            ? "opacity-0"
+                            : "opacity-100 group-hover:opacity-0 group-focus-within:opacity-0"
+                        }`}
+                      >
+                        <span className={`size-1.5 rounded-full ${statusDot}`} />
+                      </span>
+                    )}
                     <button
                       type="button"
                       title="Session actions"
