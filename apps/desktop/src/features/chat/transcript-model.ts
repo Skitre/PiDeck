@@ -157,6 +157,34 @@ type RowSource = {
 
 type TranscriptSource = MessageSource | RowSource;
 
+function deferSettingEventsUntilUserMessage(sources: TranscriptSource[]): TranscriptSource[] {
+  const projected: TranscriptSource[] = [];
+  let modelEvent: RowSource | undefined;
+  let thinkingLevelEvent: RowSource | undefined;
+
+  for (const source of sources) {
+    if (source.kind === "row" && source.row.event?.kind === "model") {
+      modelEvent = source;
+      continue;
+    }
+    if (source.kind === "row" && source.row.event?.kind === "thinkingLevel") {
+      thinkingLevelEvent = source;
+      continue;
+    }
+
+    if (source.kind === "message" && source.message.role === "user") {
+      if (modelEvent) projected.push(modelEvent);
+      if (thinkingLevelEvent) projected.push(thinkingLevelEvent);
+      modelEvent = undefined;
+      thinkingLevelEvent = undefined;
+    }
+    projected.push(source);
+  }
+
+  // Unconsumed changes remain persisted and will appear once a user message follows.
+  return projected;
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
@@ -760,7 +788,10 @@ function sourceMessages(
       timestamp: timestampField(message),
     });
   }
-  return { sources, projectedMessageCount };
+  return {
+    sources: deferSettingEventsUntilUserMessage(sources),
+    projectedMessageCount,
+  };
 }
 
 function asAgentMessage(value: unknown): SerializableAgentMessage | null {

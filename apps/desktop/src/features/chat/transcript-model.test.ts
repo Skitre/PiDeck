@@ -573,7 +573,7 @@ describe("Pi extension and session entry messages", () => {
     if (unknown?.kind === "unknown") expect(unknown.type).toBe("artifact");
   });
 
-  it("renders bash, summaries, model changes, and thinking changes from entries", () => {
+  it("renders bash and summaries while deferring trailing setting changes", () => {
     const entries = [
       {
         id: "m1",
@@ -636,11 +636,155 @@ describe("Pi extension and session entry messages", () => {
       { role: "branchSummary", fromId: "old-leaf", summary: "Returned from branch", content: "" },
     ] as SerializableAgentMessage[];
     const rows = buildTranscriptRows(messages, { entries });
-    expect(rows.map((row) => row.role)).toEqual(["bash", "summary", "summary", "event", "event"]);
+    expect(rows.map((row) => row.role)).toEqual(["bash", "summary", "summary"]);
     expect(rows[1]?.summary).toMatchObject({ kind: "compaction", text: "Earlier context", tokensBefore: 12000 });
     expect(rows[2]?.summary).toMatchObject({ kind: "branch", fromId: "old-leaf" });
-    expect(rows[3]?.event?.kind).toBe("model");
-    expect(rows[4]?.event?.kind).toBe("thinkingLevel");
+  });
+
+  it("shows only the final model and thinking level before the next user message", () => {
+    const entries = [
+      {
+        id: "model-old",
+        type: "model_change",
+        parentId: null,
+        timestamp: "2026-07-22T00:00:00.000Z",
+        provider: "openai",
+        modelId: "gpt-old",
+      },
+      {
+        id: "thinking-old",
+        type: "thinking_level_change",
+        parentId: "model-old",
+        timestamp: "2026-07-22T00:00:01.000Z",
+        thinkingLevel: "low",
+      },
+      {
+        id: "thinking-final",
+        type: "thinking_level_change",
+        parentId: "thinking-old",
+        timestamp: "2026-07-22T00:00:02.000Z",
+        thinkingLevel: "high",
+      },
+      {
+        id: "model-final",
+        type: "model_change",
+        parentId: "thinking-final",
+        timestamp: "2026-07-22T00:00:03.000Z",
+        provider: "anthropic",
+        modelId: "claude-final",
+      },
+      {
+        id: "user-1",
+        type: "message",
+        parentId: "model-final",
+        timestamp: "2026-07-22T00:00:04.000Z",
+        message: { role: "user", content: "Use these settings" },
+      },
+    ];
+    const messages = [
+      { role: "user", content: "Use these settings" },
+    ] as SerializableAgentMessage[];
+
+    const rows = buildTranscriptRows(messages, { entries });
+
+    expect(rows.map((row) => row.role)).toEqual(["event", "event", "user"]);
+    expect(rows[0]?.sourceId).toBe("model-final");
+    expect(rows[0]?.event).toMatchObject({
+      kind: "model",
+      label: "Model: anthropic/claude-final",
+    });
+    expect(rows[1]?.sourceId).toBe("thinking-final");
+    expect(rows[1]?.event).toMatchObject({
+      kind: "thinkingLevel",
+      label: "Thinking level: high",
+    });
+    expect(rows[2]?.copyText).toBe("Use these settings");
+  });
+
+  it("keeps deferred setting events stable across the live-to-persisted handoff", () => {
+    const settingEntries = [
+      {
+        id: "model-1",
+        type: "model_change",
+        parentId: null,
+        timestamp: "2026-07-22T00:00:00.000Z",
+        provider: "openai",
+        modelId: "gpt-test",
+      },
+      {
+        id: "thinking-1",
+        type: "thinking_level_change",
+        parentId: "model-1",
+        timestamp: "2026-07-22T00:00:01.000Z",
+        thinkingLevel: "medium",
+      },
+    ];
+    const messages = [{ role: "user", content: "Streamed prompt" }] as SerializableAgentMessage[];
+    const liveRows = buildTranscriptRows(messages, { entries: settingEntries });
+    const persistedRows = buildTranscriptRows(messages, {
+      entries: [
+        ...settingEntries,
+        {
+          id: "user-1",
+          type: "message",
+          parentId: "thinking-1",
+          timestamp: "2026-07-22T00:00:02.000Z",
+          message: messages[0] as never,
+        },
+      ],
+    });
+
+    for (const rows of [liveRows, persistedRows]) {
+      expect(rows.map((row) => row.role)).toEqual(["event", "event", "user"]);
+      expect(rows.filter((row) => row.event?.kind === "model")).toHaveLength(1);
+      expect(rows.filter((row) => row.event?.kind === "thinkingLevel")).toHaveLength(1);
+    }
+    expect(persistedRows[0]?.sourceId).toBe(liveRows[0]?.sourceId);
+    expect(persistedRows[1]?.sourceId).toBe(liveRows[1]?.sourceId);
+  });
+
+  it("flushes single setting changes independently for each user message", () => {
+    const entries = [
+      {
+        id: "model-1",
+        type: "model_change",
+        parentId: null,
+        timestamp: "2026-07-22T00:00:00.000Z",
+        provider: "openai",
+        modelId: "gpt-test",
+      },
+      {
+        id: "user-1",
+        type: "message",
+        parentId: "model-1",
+        timestamp: "2026-07-22T00:00:01.000Z",
+        message: { role: "user", content: "First prompt" },
+      },
+      {
+        id: "thinking-1",
+        type: "thinking_level_change",
+        parentId: "user-1",
+        timestamp: "2026-07-22T00:00:02.000Z",
+        thinkingLevel: "high",
+      },
+      {
+        id: "user-2",
+        type: "message",
+        parentId: "thinking-1",
+        timestamp: "2026-07-22T00:00:03.000Z",
+        message: { role: "user", content: "Second prompt" },
+      },
+    ];
+    const messages = [
+      { role: "user", content: "First prompt" },
+      { role: "user", content: "Second prompt" },
+    ] as SerializableAgentMessage[];
+
+    const rows = buildTranscriptRows(messages, { entries });
+
+    expect(rows.map((row) => row.role)).toEqual(["event", "user", "event", "user"]);
+    expect(rows[0]?.event?.kind).toBe("model");
+    expect(rows[2]?.event?.kind).toBe("thinkingLevel");
   });
 
   it("preserves a tool result image and details when linked to a call", () => {
