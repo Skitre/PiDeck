@@ -5,7 +5,7 @@
   "identifier": "com.skitre.pideck",
   "build": {
     "beforeDevCommand": "pnpm --filter @pideck/desktop dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "pnpm --filter @pideck/desktop build",
     "frontendDist": "../dist"
   },

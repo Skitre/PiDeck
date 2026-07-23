@@ -78,6 +78,15 @@ export function applySessionSnapshot(
 ): EpochState {
   return {
     ...state,
+    // session.snapshot advances the active generation before any following
+    // session-scoped event (for example agent.toolsChanged) is validated.
+    host: state.host
+      ? {
+          ...state.host,
+          sessionId: session?.sessionId ?? null,
+          sessionRevision: session?.revision ?? 0,
+        }
+      : null,
     session,
     tools: session?.tools ?? null,
   };

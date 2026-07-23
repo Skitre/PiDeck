@@ -285,6 +285,135 @@ export class WorkspaceGraphFactory {
     return runtime;
   }
 
+  private static readonly MAX_RETAINED_SESSIONS = 3;
+
+  private retainedSessionRuntimes(
+    graph: WorkspaceGraph,
+  ): Map<string, BackgroundSessionRuntime> {
+    return graph.retainedSessions ?? (graph.retainedSessions = new Map());
+  }
+
+  /** Park an idle runtime after the replacement Session has activated. */
+  async retainIdleSession(
+    graph: WorkspaceGraph,
+    previous: {
+      sessionId: string | null;
+      sessionRevision: number;
+      sessionManager: SessionManager | null;
+      agentSession: AgentSession | null;
+      resourceLoader: DefaultResourceLoader | null;
+      extensionsResult: unknown;
+      toolRevision: number;
+      sessionSnapshot: SessionSnapshot | null;
+      unsubscribeAgent: (() => void) | null;
+      extensionUiActivate: (() => Promise<() => void>) | null;
+      extensionUiCleanup: (() => void) | null;
+      extensionUiUpdateIdentity: ((identity: HostIdentity) => void) | null;
+    },
+  ): Promise<BackgroundSessionRuntime | null> {
+    if (
+      !previous.sessionId ||
+      !previous.sessionManager ||
+      !previous.agentSession ||
+      !previous.resourceLoader ||
+      !previous.sessionSnapshot ||
+      !previous.sessionSnapshot.sessionPath ||
+      !previous.agentSession.isIdle
+    ) {
+      return null;
+    }
+
+    try {
+      previous.unsubscribeAgent?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      previous.extensionUiCleanup?.();
+    } catch {
+      /* ignore */
+    }
+
+    const runtime: BackgroundSessionRuntime = {
+      sessionId: previous.sessionId,
+      sessionRevision: previous.sessionRevision,
+      sessionManager: previous.sessionManager,
+      agentSession: previous.agentSession,
+      resourceLoader: previous.resourceLoader,
+      extensionsResult: previous.extensionsResult,
+      toolRevision: previous.toolRevision,
+      sessionSnapshot: previous.sessionSnapshot,
+      unsubscribeAgent: null,
+      extensionUiActivate: null,
+      extensionUiCleanup: null,
+      extensionUiUpdateIdentity: null,
+    };
+
+    const retainedSessions = this.retainedSessionRuntimes(graph);
+    const existing = retainedSessions.get(runtime.sessionId);
+    retainedSessions.delete(runtime.sessionId);
+    if (existing && existing !== runtime) {
+      await this.disposeRetainedSessionRuntime(graph, existing, false);
+    }
+    retainedSessions.set(runtime.sessionId, runtime);
+
+    while (retainedSessions.size > WorkspaceGraphFactory.MAX_RETAINED_SESSIONS) {
+      const oldestId = retainedSessions.keys().next().value;
+      if (oldestId === undefined) break;
+      const evicted = retainedSessions.get(oldestId);
+      retainedSessions.delete(oldestId);
+      if (evicted) await this.disposeRetainedSessionRuntime(graph, evicted, false);
+    }
+    return runtime;
+  }
+
+  private async disposeRetainedSessionRuntime(
+    graph: WorkspaceGraph,
+    runtime: BackgroundSessionRuntime,
+    remove = true,
+  ): Promise<void> {
+    const retainedSessions = this.retainedSessionRuntimes(graph);
+    if (remove) {
+      if (retainedSessions.get(runtime.sessionId) !== runtime) return;
+      retainedSessions.delete(runtime.sessionId);
+    }
+    try {
+      runtime.unsubscribeAgent?.();
+    } catch {
+      /* ignore */
+    }
+    try {
+      runtime.extensionUiCleanup?.();
+    } catch {
+      /* ignore */
+    }
+    await this.disposeAgentSessionOnly(runtime.agentSession);
+  }
+
+  async disposeRetainedSessionRuntimes(graph: WorkspaceGraph): Promise<void> {
+    const retainedSessions = this.retainedSessionRuntimes(graph);
+    const runtimes = [...retainedSessions.values()];
+    retainedSessions.clear();
+    for (const runtime of runtimes) {
+      await this.disposeRetainedSessionRuntime(graph, runtime, false);
+    }
+  }
+
+  async disposeRetainedSessionRuntimeIfPresent(
+    graph: WorkspaceGraph,
+    sessionId: string,
+    sessionPath: string,
+  ): Promise<boolean> {
+    const runtime = [...this.retainedSessionRuntimes(graph).values()].find(
+      (candidate) =>
+        candidate.sessionId === sessionId &&
+        this.sessionPathsEqual(candidate.sessionSnapshot.sessionPath, sessionPath),
+    );
+    if (!runtime) return false;
+    await this.disposeRetainedSessionRuntime(graph, runtime);
+    return true;
+  }
+
   private async disposeBackgroundRuntime(
     graph: WorkspaceGraph,
     runtime: BackgroundSessionRuntime,
@@ -408,18 +537,23 @@ export class WorkspaceGraphFactory {
     server.identity.sessionRevision = sessionRevision;
 
     if (!retainedPrevious) {
-      try {
-        previous.unsubscribeAgent?.();
-      } catch {
-        /* ignore */
-      }
-      try {
-        previous.extensionUiCleanup?.();
-      } catch {
-        /* ignore */
-      }
-      if (previous.agentSession) {
-        await this.disposeAgentSessionOnly(previous.agentSession);
+      const retainedIdle = previous.agentSession?.isIdle
+        ? await this.retainIdleSession(graph, previous)
+        : null;
+      if (!retainedIdle) {
+        try {
+          previous.unsubscribeAgent?.();
+        } catch {
+          /* ignore */
+        }
+        try {
+          previous.extensionUiCleanup?.();
+        } catch {
+          /* ignore */
+        }
+        if (previous.agentSession) {
+          await this.disposeAgentSessionOnly(previous.agentSession);
+        }
       }
     }
 
@@ -435,11 +569,166 @@ export class WorkspaceGraphFactory {
     return snapshot;
   }
 
+  /** Reactivate an idle runtime retained from an earlier Session visit. */
+  async promoteRetainedSessionRuntime(
+    graph: WorkspaceGraph,
+    runtime: BackgroundSessionRuntime,
+  ): Promise<SessionSnapshot | { error: HostError } | null> {
+    const server = this.server;
+    const retainedSessions = this.retainedSessionRuntimes(graph);
+    if (!server || retainedSessions.get(runtime.sessionId) !== runtime) return null;
+
+    const previous = {
+      sessionManager: graph.sessionManager,
+      agentSession: graph.agentSession,
+      extensionsResult: graph.extensionsResult,
+      resourceLoader: graph.resourceLoader,
+      toolRevision: graph.toolRevision,
+      sessionSnapshot: graph.sessionSnapshot,
+      extensionUiActivate: graph.extensionUiActivate,
+      extensionUiCleanup: graph.extensionUiCleanup,
+      extensionUiUpdateIdentity: graph.extensionUiUpdateIdentity,
+      unsubscribeAgent: graph.unsubscribeAgent,
+      sessionId: server.identity.sessionId,
+      sessionRevision: server.identity.sessionRevision,
+    };
+    const sessionRevision = server.identity.sessionRevision + 1;
+    const candidateIdentity: HostIdentity = {
+      ...server.getIdentity(),
+      sessionId: runtime.sessionId,
+      sessionRevision,
+    };
+
+    let binding: Awaited<ReturnType<typeof bindExtensionUi>>;
+    try {
+      binding = await bindExtensionUi(runtime.agentSession, runtime.extensionsResult, {
+        emit: (event, payload) => server.emitForIdentity(candidateIdentity, event, payload),
+        emitForIdentity: (identity, event, payload) =>
+          server.emitForIdentity(identity, event, payload),
+        getIdentity: () => candidateIdentity,
+      });
+    } catch (err) {
+      logger.warn("retained Session Extension rebind failed; reopening from disk", {
+        sessionId: runtime.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.disposeRetainedSessionRuntime(graph, runtime);
+      return null;
+    }
+
+    const unsubscribe = runtime.agentSession.subscribe((event) => {
+      this.handleAgentEvent(graph, runtime.agentSession, event);
+    });
+    const retainedPrevious = this.retainBusySession(graph, previous);
+    retainedSessions.delete(runtime.sessionId);
+
+    runtime.sessionRevision = sessionRevision;
+    runtime.unsubscribeAgent = unsubscribe;
+    runtime.extensionUiActivate = binding.activate;
+    runtime.extensionUiCleanup = binding.cleanup;
+    runtime.extensionUiUpdateIdentity = binding.updateIdentity;
+    binding.updateIdentity(candidateIdentity);
+    const snapshot = buildSessionSnapshot({
+      session: runtime.agentSession,
+      sessionManager: runtime.sessionManager,
+      cwd: graph.canonicalCwd,
+      sessionId: runtime.sessionId,
+      revision: sessionRevision,
+      workspaceId: graph.workspaceId,
+      toolRevision: runtime.toolRevision,
+    });
+    runtime.sessionSnapshot = snapshot;
+
+    graph.sessionManager = runtime.sessionManager;
+    graph.agentSession = runtime.agentSession;
+    graph.extensionsResult = runtime.extensionsResult;
+    graph.resourceLoader = runtime.resourceLoader;
+    graph.toolRevision = runtime.toolRevision;
+    graph.sessionSnapshot = snapshot;
+    graph.extensionUiActivate = runtime.extensionUiActivate;
+    graph.extensionUiCleanup = runtime.extensionUiCleanup;
+    graph.extensionUiUpdateIdentity = runtime.extensionUiUpdateIdentity;
+    graph.unsubscribeAgent = runtime.unsubscribeAgent;
+    server.identity.sessionId = runtime.sessionId;
+    server.identity.sessionRevision = sessionRevision;
+
+    let publishExtensionUi = () => {};
+    try {
+      publishExtensionUi = await this.activateExtensionUi(graph);
+    } catch (err) {
+      if (retainedPrevious) graph.backgroundSessions.delete(retainedPrevious.sessionId);
+      try {
+        unsubscribe();
+      } catch {
+        /* ignore */
+      }
+      try {
+        binding.cleanup();
+      } catch {
+        /* ignore */
+      }
+      runtime.unsubscribeAgent = null;
+      runtime.extensionUiActivate = null;
+      runtime.extensionUiCleanup = null;
+      runtime.extensionUiUpdateIdentity = null;
+      retainedSessions.set(runtime.sessionId, runtime);
+      graph.sessionManager = previous.sessionManager;
+      graph.agentSession = previous.agentSession;
+      graph.extensionsResult = previous.extensionsResult;
+      graph.resourceLoader = previous.resourceLoader;
+      graph.toolRevision = previous.toolRevision;
+      graph.sessionSnapshot = previous.sessionSnapshot;
+      graph.extensionUiActivate = previous.extensionUiActivate;
+      graph.extensionUiCleanup = previous.extensionUiCleanup;
+      graph.extensionUiUpdateIdentity = previous.extensionUiUpdateIdentity;
+      graph.unsubscribeAgent = previous.unsubscribeAgent;
+      server.identity.sessionId = previous.sessionId;
+      server.identity.sessionRevision = previous.sessionRevision;
+      return {
+        error: createHostError(
+          "SESSION_SWITCH_FAILED",
+          err instanceof Error ? err.message : "Extension bind failed",
+        ),
+      };
+    }
+
+    if (!retainedPrevious) {
+      const retainedIdle = await this.retainIdleSession(graph, previous);
+      if (!retainedIdle) {
+        try {
+          previous.unsubscribeAgent?.();
+        } catch {
+          /* ignore */
+        }
+        try {
+          previous.extensionUiCleanup?.();
+        } catch {
+          /* ignore */
+        }
+        if (previous.agentSession) {
+          await this.disposeAgentSessionOnly(previous.agentSession);
+        }
+      }
+    }
+    server.emit("session.snapshot", snapshot);
+    server.emit("agent.toolsChanged", snapshot.tools);
+    if (retainedPrevious) this.announceRetainedRuntime(retainedPrevious);
+    server.emit("session.runtimeChanged", {
+      sessionId: runtime.sessionId,
+      sessionRevision,
+      state: "idle",
+      updatedAt: Date.now(),
+    });
+    publishExtensionUi();
+    return snapshot;
+  }
+
   async disposeGraph(g: WorkspaceGraph): Promise<void> {
     await this.disposeAgentSession(g);
     for (const runtime of [...g.backgroundSessions.values()]) {
       await this.disposeBackgroundRuntime(g, runtime);
     }
+    await this.disposeRetainedSessionRuntimes(g);
     g.settingsManager = null;
     g.packageManager = null;
     g.resourceLoader = null;
@@ -479,6 +768,7 @@ export class WorkspaceGraphFactory {
       await this.disposeGraph(g);
       return;
     }
+    await this.disposeRetainedSessionRuntimes(g);
     g.unsubscribeAgent?.();
     g.unsubscribeAgent = null;
     g.extensionUiActivate = null;
@@ -713,6 +1003,7 @@ export class WorkspaceGraphFactory {
       extensionUiUpdateIdentity: null,
       resourceReloadRequired: false,
       backgroundSessions: new Map(),
+      retainedSessions: new Map(),
     };
     this.graph = failedGraph;
     server.identity.workspaceId = args.workspaceId;
@@ -956,6 +1247,7 @@ export class WorkspaceGraphFactory {
         extensionUiUpdateIdentity: null,
         resourceReloadRequired: false,
         backgroundSessions: new Map(),
+        retainedSessions: new Map(),
       };
 
       // Bind against the candidate generation, but defer session_start UI until commit.

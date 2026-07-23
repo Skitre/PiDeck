@@ -188,6 +188,8 @@ export function SessionList({
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(() =>
     readPinnedSessionIds(useAppStore.getState().workspace?.id),
   );
+  const sessionMutationBlocked =
+    sessionMutationPending || connecting || rehydrating || desynchronized;
   const refreshRequest = useRef(0);
   const mutationRequest = useRef(0);
   const itemsWorkspaceId = useRef<string | null>(null);
@@ -292,7 +294,7 @@ export function SessionList({
   }, [menuSessionId]);
 
   async function createSession() {
-    if (!host || !workspace || sessionMutationPending) return;
+    if (!host || !workspace || sessionMutationBlocked) return;
     const request = ++mutationRequest.current;
     const generation = captureRequestGeneration(host);
     setSessionMutationPending(true);
@@ -326,19 +328,23 @@ export function SessionList({
   }
 
   async function openSession(path: string) {
-    if (!host || !workspace || sessionMutationPending) return;
+    if (!host || !workspace || sessionMutationBlocked) return;
     if (session?.sessionPath === path) return;
     const request = ++mutationRequest.current;
     const generation = captureRequestGeneration(host);
     const target = sessionCatalogItems(sessionCatalog).find(
       (item) => item.sessionPath === path,
     );
+    const startedAt = performance.now();
     setSessionMutationPending(true);
     try {
       const res = await hostClient.request(
         "session.open",
         nullableSessionContext(host, workspace),
         { sessionPath: path },
+      );
+      console.info(
+        `[session] open took ${Math.round(performance.now() - startedAt)}ms ok=${res.ok}`,
       );
       if (
         request !== mutationRequest.current ||
@@ -375,7 +381,7 @@ export function SessionList({
   }
 
   function beginRename(item: SessionCatalogEntry) {
-    if (!canRenameSession(item, session) || sessionMutationPending) return;
+    if (!canRenameSession(item, session) || sessionMutationBlocked) return;
     setMenuSessionId(null);
     setEditingSessionId(item.sessionId);
     setNameDraft(sessionDisplayName(item));
@@ -387,7 +393,7 @@ export function SessionList({
   }
 
   async function renameSession() {
-    if (!host || !workspace || !editingSessionId || sessionMutationPending) return;
+    if (!host || !workspace || !editingSessionId || sessionMutationBlocked) return;
     const item = sessionCatalogItems(sessionCatalog).find(
       (entry) => entry.sessionId === editingSessionId,
     );
@@ -457,7 +463,7 @@ export function SessionList({
     method: "session.archive" | "session.restore",
     item: SessionCatalogEntry,
   ) {
-    if (!host || !workspace || sessionMutationPending) return;
+    if (!host || !workspace || sessionMutationBlocked) return;
     const request = ++mutationRequest.current;
     const generation = captureRequestGeneration(host);
     setSessionMutationPending(true);
@@ -506,7 +512,7 @@ export function SessionList({
   }
 
   async function deleteSessionPermanently(item: SessionCatalogEntry) {
-    if (!host || !workspace || sessionMutationPending) return;
+    if (!host || !workspace || sessionMutationBlocked) return;
     const currentSession = useAppStore.getState().session;
     if (!canDeleteSession(item, currentSession)) {
       pushNotification(
@@ -571,7 +577,7 @@ export function SessionList({
   }
 
   async function cleanupArchivedSessions() {
-    if (!host || !workspace || sessionMutationPending) return;
+    if (!host || !workspace || sessionMutationBlocked) return;
     const request = ++mutationRequest.current;
     const generation = captureRequestGeneration(host);
     setSessionMutationPending(true);
@@ -622,7 +628,7 @@ export function SessionList({
   }
 
   async function reloadSessionFromDisk() {
-    if (!host || !workspace || !session || sessionMutationPending || !session.isIdle) {
+    if (!host || !workspace || !session || sessionMutationBlocked || !session.isIdle) {
       return;
     }
     const request = ++mutationRequest.current;
@@ -701,7 +707,7 @@ export function SessionList({
               aria-label="Clear archived sessions"
               className="rounded p-1 text-muted hover:bg-surface-overlay hover:text-danger"
               onClick={() => setConfirmAction({ kind: "cleanup", count: archivedCount })}
-              disabled={sessionMutationPending}
+              disabled={sessionMutationBlocked}
             >
               <Trash2 size={13} />
             </button>
@@ -720,7 +726,7 @@ export function SessionList({
             title="New session"
             className="rounded p-1 text-muted hover:bg-surface-overlay hover:text-foreground"
             onClick={() => void createSession()}
-            disabled={!workspace?.servicesReady || sessionMutationPending}
+            disabled={!workspace?.servicesReady || sessionMutationBlocked}
           >
             <Plus size={14} />
           </button>}
@@ -820,7 +826,7 @@ export function SessionList({
                   <button
                     type="submit"
                     title="Save name"
-                    disabled={sessionMutationPending || !nameDraft.trim()}
+                    disabled={sessionMutationBlocked || !nameDraft.trim()}
                     className="rounded p-1 text-accent hover:bg-surface-overlay disabled:opacity-40"
                   >
                     <Check size={14} />
@@ -829,7 +835,7 @@ export function SessionList({
                     type="button"
                     title="Cancel rename"
                     onClick={cancelRename}
-                    disabled={sessionMutationPending}
+                    disabled={sessionMutationBlocked}
                     className="rounded p-1 text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
                   >
                     <X size={14} />
@@ -840,7 +846,7 @@ export function SessionList({
                   <button
                     type="button"
                     onClick={() => void openSession(item.sessionPath)}
-                    disabled={sessionMutationPending || !item.sessionPath || item.archived}
+                    disabled={sessionMutationBlocked || !item.sessionPath || item.archived}
                     className="min-w-0 flex-1 px-2.5 py-2 text-left"
                     title={
                       item.runtimeState === "error" && item.lastError
@@ -902,7 +908,7 @@ export function SessionList({
                         });
                         setMenuSessionId(item.sessionId);
                       }}
-                      disabled={sessionMutationPending}
+                      disabled={sessionMutationBlocked}
                       className={`rounded p-1 text-muted transition-opacity hover:bg-surface hover:text-foreground disabled:opacity-30 ${
                         menuOpen
                           ? "opacity-100"
@@ -1038,7 +1044,7 @@ export function SessionList({
                 type="button"
                 className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-overlay"
                 onClick={() => setConfirmAction(null)}
-                disabled={sessionMutationPending}
+                disabled={sessionMutationBlocked}
               >
                 Cancel
               </button>
@@ -1052,7 +1058,7 @@ export function SessionList({
                     void cleanupArchivedSessions();
                   }
                 }}
-                disabled={sessionMutationPending}
+                disabled={sessionMutationBlocked}
               >
                 Delete permanently
               </button>

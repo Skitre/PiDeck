@@ -5,6 +5,7 @@ import { createMermaidPlugin } from "@streamdown/mermaid";
 import {
   type ComponentProps,
   cloneElement,
+  Component,
   isValidElement,
   memo,
   type ReactElement,
@@ -59,6 +60,36 @@ type CodeChildProps = {
 type MarkdownPreProps = ComponentProps<"pre"> & ExtraProps;
 type MarkdownImageProps = ComponentProps<"img"> & ExtraProps;
 type MarkdownLinkProps = ComponentProps<"a"> & ExtraProps;
+
+type MarkdownRenderBoundaryProps = {
+  children: ReactNode;
+  fallback: ReactNode;
+};
+
+type MarkdownRenderBoundaryState = {
+  failed: boolean;
+};
+
+class MarkdownRenderBoundary extends Component<
+  MarkdownRenderBoundaryProps,
+  MarkdownRenderBoundaryState
+> {
+  state: MarkdownRenderBoundaryState = { failed: false };
+
+  static getDerivedStateFromError(): MarkdownRenderBoundaryState {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error): void {
+    // Syntax highlighting is optional; keep the transcript usable when its
+    // lazy chunk is stale or unavailable during a Vite update.
+    console.warn("PiDeck Markdown enhancement failed; using plain text", error);
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 const CODE_COLLAPSE_THRESHOLD = 16;
 const mathPluginBase = createMathPlugin({
@@ -373,43 +404,51 @@ export const MarkdownMessage = memo(function MarkdownMessage({
         event.stopPropagation();
       }}
     >
-      <Streamdown
+      <MarkdownRenderBoundary
         key={mermaidKey}
-        className={`chat-markdown ${showCaret ? "chat-markdown-caret" : ""} ${className}`}
-        plugins={markdownPlugins}
-        remarkPlugins={remarkPlugins}
-        remarkRehypeOptions={remarkRehypeOptions}
-        rehypePlugins={messageRehypePlugins}
-        components={components}
-        mode={mode}
-        dir="auto"
-        parseIncompleteMarkdown
-        normalizeHtmlIndentation
-        skipHtml
-        animated={
-          mode === "streaming"
-            ? { animation: "fadeIn", duration: 110, easing: "ease-out", sep: "word", stagger: 3 }
-            : false
+        fallback={
+          <div className={`chat-markdown whitespace-pre-wrap break-words ${className}`}>
+            {normalized}
+          </div>
         }
-        isAnimating={showCaret}
-        caret={mode === "streaming" ? "block" : undefined}
-        shikiTheme={["github-light", "github-dark"]}
-        mermaid={{ config: mermaidConfig, errorComponent: MermaidError }}
-        controls={{
-          code: false,
-          table: false,
-          mermaid: {
-            copy: true,
-            download: false,
-            fullscreen: true,
-            panZoom: true,
-          },
-        }}
-        lineNumbers={false}
-        urlTransform={urlTransform}
       >
-        {normalized}
-      </Streamdown>
+        <Streamdown
+          className={`chat-markdown ${showCaret ? "chat-markdown-caret" : ""} ${className}`}
+          plugins={markdownPlugins}
+          remarkPlugins={remarkPlugins}
+          remarkRehypeOptions={remarkRehypeOptions}
+          rehypePlugins={messageRehypePlugins}
+          components={components}
+          mode={mode}
+          dir="auto"
+          parseIncompleteMarkdown
+          normalizeHtmlIndentation
+          skipHtml
+          animated={
+            mode === "streaming"
+              ? { animation: "fadeIn", duration: 110, easing: "ease-out", sep: "word", stagger: 3 }
+              : false
+          }
+          isAnimating={showCaret}
+          caret={mode === "streaming" ? "block" : undefined}
+          shikiTheme={["github-light", "github-dark"]}
+          mermaid={{ config: mermaidConfig, errorComponent: MermaidError }}
+          controls={{
+            code: false,
+            table: false,
+            mermaid: {
+              copy: true,
+              download: false,
+              fullscreen: true,
+              panZoom: true,
+            },
+          }}
+          lineNumbers={false}
+          urlTransform={urlTransform}
+        >
+          {normalized}
+        </Streamdown>
+      </MarkdownRenderBoundary>
     </div>
   );
 });

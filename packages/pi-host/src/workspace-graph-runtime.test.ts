@@ -35,6 +35,8 @@ function fakeSession(isIdle: boolean, sessionId = "session"): AgentSession {
     getAllTools: () => [],
     getActiveToolNames: () => [],
     getAvailableThinkingLevels: () => ["off"],
+    subscribe: vi.fn(() => vi.fn()),
+    bindExtensions: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
     dispose: vi.fn(),
   } as unknown as AgentSession;
@@ -335,9 +337,9 @@ describe("WorkspaceGraphFactory multi-Session routing", () => {
       workspaceId: WORKSPACE_ID,
       canonicalCwd: "C:/workspace",
       agentSession: foreground,
-      sessionManager: null,
-      sessionSnapshot: null,
-      resourceLoader: null,
+      sessionManager: {},
+      sessionSnapshot: fakeSessionSnapshot(ACTIVE_SESSION_ID, 5, true),
+      resourceLoader: {},
       extensionsResult: null,
       toolRevision: 1,
       extensionUiActivate: null,
@@ -366,12 +368,119 @@ describe("WorkspaceGraphFactory multi-Session routing", () => {
     expect(updateIdentity).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: BACKGROUND_SESSION_ID, sessionRevision: 6 }),
     );
-    expect(foreground.dispose).toHaveBeenCalled();
+    expect(foreground.dispose).not.toHaveBeenCalled();
+    expect(graph.retainedSessions?.has(ACTIVE_SESSION_ID)).toBe(true);
     expect(emitted).toEqual([
       "session.snapshot",
       "agent.toolsChanged",
       "session.runtimeChanged",
     ]);
+  });
+
+  it("reactivates a retained idle Session and parks the previous one", async () => {
+    const identity: HostIdentity = {
+      hostInstanceId: HOST_ID,
+      workspaceId: WORKSPACE_ID,
+      workspaceRevision: 1,
+      sessionId: ACTIVE_SESSION_ID,
+      sessionRevision: 5,
+      packageRevision: 1,
+    };
+    const emitted: HostEventName[] = [];
+    const server = {
+      identity,
+      getIdentity: () => ({ ...identity }),
+      emit: vi.fn((event: HostEventName) => emitted.push(event)),
+      emitForIdentity: vi.fn(),
+    } as unknown as PiHostServer;
+    const factory = new WorkspaceGraphFactory({} as GraphFactoryDeps);
+    factory.bindServer(server);
+
+    const active = fakeSession(true, ACTIVE_SESSION_ID);
+    const retained = fakeSession(true, BACKGROUND_SESSION_ID);
+    const activeCleanup = vi.fn();
+    const activeUnsubscribe = vi.fn();
+    const graph = {
+      workspaceId: WORKSPACE_ID,
+      canonicalCwd: "C:/workspace",
+      agentSession: active,
+      sessionManager: {},
+      sessionSnapshot: fakeSessionSnapshot(ACTIVE_SESSION_ID, 5, true),
+      resourceLoader: {},
+      extensionsResult: null,
+      toolRevision: 1,
+      extensionUiActivate: null,
+      extensionUiCleanup: activeCleanup,
+      extensionUiUpdateIdentity: null,
+      unsubscribeAgent: activeUnsubscribe,
+      backgroundSessions: new Map(),
+      retainedSessions: new Map(),
+    } as unknown as WorkspaceGraph;
+    Reflect.set(factory, "graph", graph);
+
+    const runtime = await factory.retainIdleSession(graph, {
+      sessionId: BACKGROUND_SESSION_ID,
+      sessionRevision: 3,
+      sessionManager: {} as never,
+      agentSession: retained,
+      resourceLoader: {} as never,
+      extensionsResult: null,
+      toolRevision: 2,
+      sessionSnapshot: fakeSessionSnapshot(BACKGROUND_SESSION_ID, 3, true),
+      unsubscribeAgent: vi.fn(),
+      extensionUiActivate: null,
+      extensionUiCleanup: vi.fn(),
+      extensionUiUpdateIdentity: null,
+    });
+    expect(runtime).not.toBeNull();
+
+    const result = await factory.promoteRetainedSessionRuntime(graph, runtime!);
+
+    expect(result).toMatchObject({ sessionId: BACKGROUND_SESSION_ID, revision: 6 });
+    expect(graph.agentSession).toBe(retained);
+    expect(graph.retainedSessions.has(BACKGROUND_SESSION_ID)).toBe(false);
+    expect(graph.retainedSessions.has(ACTIVE_SESSION_ID)).toBe(true);
+    expect(active.dispose).not.toHaveBeenCalled();
+    expect(activeCleanup).toHaveBeenCalledTimes(1);
+    expect(activeUnsubscribe).toHaveBeenCalledTimes(1);
+    expect(retained.bindExtensions).toHaveBeenCalledTimes(1);
+    expect(emitted).toEqual([
+      "session.snapshot",
+      "agent.toolsChanged",
+      "session.runtimeChanged",
+    ]);
+  });
+
+  it("bounds retained idle Sessions and disposes the oldest runtime", async () => {
+    const factory = new WorkspaceGraphFactory({} as GraphFactoryDeps);
+    const graph = { retainedSessions: new Map() } as unknown as WorkspaceGraph;
+    const sessions = Array.from({ length: 4 }, (_, index) =>
+      fakeSession(true, `retained-${index}`),
+    );
+
+    for (const [index, session] of sessions.entries()) {
+      await factory.retainIdleSession(graph, {
+        sessionId: session.sessionId,
+        sessionRevision: index + 1,
+        sessionManager: {} as never,
+        agentSession: session,
+        resourceLoader: {} as never,
+        extensionsResult: null,
+        toolRevision: 1,
+        sessionSnapshot: fakeSessionSnapshot(session.sessionId, index + 1, true),
+        unsubscribeAgent: vi.fn(),
+        extensionUiActivate: null,
+        extensionUiCleanup: vi.fn(),
+        extensionUiUpdateIdentity: null,
+      });
+    }
+
+    expect(graph.retainedSessions.size).toBe(3);
+    expect(graph.retainedSessions.has("retained-0")).toBe(false);
+    expect(sessions[0]!.dispose).toHaveBeenCalledTimes(1);
+    expect(sessions.slice(1).every((session) => graph.retainedSessions.has(session.sessionId))).toBe(
+      true,
+    );
   });
 
   it("rejects disk reload while the active Session is running", async () => {

@@ -111,6 +111,7 @@ export async function archiveSession(
         ),
       };
     }
+    await factory.disposeRetainedSessionRuntimeIfPresent(g, session.id, session.path);
     const { archiveDir } = sessionStorageDirs(factory, g);
     await mkdir(archiveDir, { recursive: true });
     const archivedPath = join(archiveDir, basename(session.path));
@@ -149,6 +150,7 @@ export async function restoreSession(
         ),
       };
     }
+    await factory.disposeRetainedSessionRuntimeIfPresent(g, session.id, session.path);
     await rename(session.path, restoredPath);
     return { sessionId, sessionPath: restoredPath, archived: false as const };
   });
@@ -195,6 +197,7 @@ export async function deleteSession(
         }),
       };
     }
+    await factory.disposeRetainedSessionRuntimeIfPresent(g, sessionId, sessionPath);
     await unlink(session.path);
     return { sessionId, deleted: true as const };
   });
@@ -280,6 +283,7 @@ export async function renameSession(
         }),
       };
     }
+    await factory.disposeRetainedSessionRuntimeIfPresent(g, target.id, target.path);
     const sessionManager = SessionManager.open(target.path, undefined, g.canonicalCwd);
     sessionManager.appendSessionInfo(name);
     return { sessionId, name: sessionManager.getSessionName() ?? name };
@@ -559,25 +563,28 @@ export async function createSession(
       };
     }
 
-    if (!retainedPrevious && prev.extensionUiCleanup) {
-      try {
-        prev.extensionUiCleanup();
-      } catch {
-        /* ignore */
-      }
-    }
-    if (!retainedPrevious && prev.unsubscribeAgent) {
-      try {
-        prev.unsubscribeAgent();
-      } catch {
-        /* ignore */
-      }
-    }
-    if (!retainedPrevious && prev.agentSession) {
-      try {
-        await factory.disposeAgentSessionOnly(prev.agentSession);
-      } catch {
-        /* ignore */
+    if (!retainedPrevious) {
+      const retainedIdle = prev.agentSession?.isIdle
+        ? await factory.retainIdleSession(g, prev)
+        : null;
+      if (!retainedIdle) {
+        try {
+          prev.extensionUiCleanup?.();
+        } catch {
+          /* ignore */
+        }
+        try {
+          prev.unsubscribeAgent?.();
+        } catch {
+          /* ignore */
+        }
+        if (prev.agentSession) {
+          try {
+            await factory.disposeAgentSessionOnly(prev.agentSession);
+          } catch {
+            /* ignore */
+          }
+        }
       }
     }
 
@@ -685,6 +692,13 @@ export async function openSession(
     );
     if (retained) {
       return await factory.promoteBackgroundRuntime(g, retained);
+    }
+    const retainedIdle = [...(g.retainedSessions?.values() ?? [])].find((runtime) =>
+      factory.sessionPathsEqual(runtime.sessionSnapshot.sessionPath, sessionPath),
+    );
+    if (retainedIdle) {
+      const promoted = await factory.promoteRetainedSessionRuntime(g, retainedIdle);
+      if (promoted !== null) return promoted;
     }
 
     const sessionManager = SessionManager.open(sessionPath, undefined, g.canonicalCwd);
@@ -808,18 +822,23 @@ export async function openSession(
       }
 
       if (!retainedPrevious) {
-        try {
-          prev.unsubscribeAgent?.();
-        } catch {
-          /* ignore */
-        }
-        try {
-          prev.extensionUiCleanup?.();
-        } catch {
-          /* ignore */
-        }
-        if (prev.agentSession) {
-          await factory.disposeAgentSessionOnly(prev.agentSession);
+        const retainedIdle = prev.agentSession?.isIdle
+          ? await factory.retainIdleSession(g, prev)
+          : null;
+        if (!retainedIdle) {
+          try {
+            prev.unsubscribeAgent?.();
+          } catch {
+            /* ignore */
+          }
+          try {
+            prev.extensionUiCleanup?.();
+          } catch {
+            /* ignore */
+          }
+          if (prev.agentSession) {
+            await factory.disposeAgentSessionOnly(prev.agentSession);
+          }
         }
       }
 

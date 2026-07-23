@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { HostEventEnvelope } from "@pideck/protocol";
+import type {
+  HostEventEnvelope,
+  HostStatusSnapshot,
+  SessionSnapshot,
+} from "@pideck/protocol";
 import { HostClient } from "../lib/bridge/host-client";
+import { applySessionSnapshot, emptyEpoch } from "../lib/stores/epoch-store";
 import { expectedIdentityForEvent, isBackgroundExtensionUiRequest } from "./event-identity";
 
 const state = {
@@ -69,6 +74,56 @@ describe("expectedIdentityForEvent", () => {
     });
 
     expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(false);
+  });
+
+  it("accepts tools immediately after an authoritative Session transition", () => {
+    const nextSession: SessionSnapshot = {
+      sessionId: "55555555-5555-4555-8555-555555555555",
+      cwd: "/workspace",
+      revision: state.sessionRevision + 1,
+      isStreaming: false,
+      isIdle: true,
+      isCompacting: false,
+      isRetrying: false,
+      thinkingLevel: "off",
+      autoCompactionEnabled: true,
+      autoRetryEnabled: true,
+      steeringMode: "all",
+      followUpMode: "all",
+      pending: { steering: [], followUp: [] },
+      messages: [],
+      tools: {
+        revision: 1,
+        workspaceId: state.workspaceId,
+        sessionId: "55555555-5555-4555-8555-555555555555",
+        sessionRevision: state.sessionRevision + 1,
+        tools: [],
+        active: [],
+      },
+    };
+    const epoch = applySessionSnapshot(
+      { ...emptyEpoch(), host: state as HostStatusSnapshot },
+      nextSession,
+    );
+    const incoming = event("agent.toolsChanged", {
+      sessionId: nextSession.sessionId,
+      sessionRevision: nextSession.revision,
+      payload: nextSession.tools,
+    });
+    const currentIdentity = {
+      hostInstanceId: epoch.host?.hostInstanceId ?? null,
+      workspaceId: epoch.host?.workspaceId ?? null,
+      workspaceRevision: epoch.host?.workspaceRevision,
+      sessionId: epoch.host?.sessionId ?? null,
+      sessionRevision: epoch.host?.sessionRevision,
+    };
+
+    expect(
+      client.shouldAcceptEvent(
+        incoming,
+        expectedIdentityForEvent(incoming, currentIdentity),
+      ),
+    ).toBe(true);
   });
 
   it("accepts a runtime update from a background Session in the current Workspace", () => {

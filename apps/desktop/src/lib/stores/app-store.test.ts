@@ -42,11 +42,11 @@ function workspace(id: string, rev: number): WorkspaceSnapshot {
   };
 }
 
-function session(id: string): SessionSnapshot {
+function session(id: string, revision = 1): SessionSnapshot {
   return {
     sessionId: id,
     cwd: "/p",
-    revision: 1,
+    revision,
     isStreaming: false,
     isIdle: true,
     isCompacting: false,
@@ -62,7 +62,7 @@ function session(id: string): SessionSnapshot {
       revision: 1,
       workspaceId: "w",
       sessionId: id,
-      sessionRevision: 1,
+      sessionRevision: revision,
       tools: [],
       active: [],
     },
@@ -119,6 +119,29 @@ describe("app-store epoch wiring", () => {
     expect(s.session).toBeNull();
     expect(s.packages).toBeNull();
     expect(s.tools).toBeNull();
+  });
+
+  it("advances Host session identity with authoritative session snapshots", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w", 1));
+
+    useAppStore.getState().applySessionSnapshot(session("s1", 1));
+    expect(useAppStore.getState().host).toMatchObject({
+      sessionId: "s1",
+      sessionRevision: 1,
+    });
+
+    useAppStore.getState().applySessionSnapshot(session("s2", 2));
+    expect(useAppStore.getState().host).toMatchObject({
+      sessionId: "s2",
+      sessionRevision: 2,
+    });
+
+    useAppStore.getState().applySessionSnapshot(null);
+    expect(useAppStore.getState().host).toMatchObject({
+      sessionId: null,
+      sessionRevision: 0,
+    });
   });
 
   it("setHost with new hostInstanceId begins epoch", () => {

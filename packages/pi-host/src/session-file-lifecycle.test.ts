@@ -112,6 +112,37 @@ describe("Session file lifecycle", () => {
     });
   });
 
+  it("invalidates a retained idle Runtime before mutating its Session file", async () => {
+    const fixture = createFixture();
+    const sessionPath = writeSession(fixture.activeDir, SESSION_ID, fixture.cwd);
+    const dispose = vi.fn();
+    fixture.graph.retainedSessions = new Map([
+      [
+        SESSION_ID,
+        {
+          sessionId: SESSION_ID,
+          agentSession: {
+            isIdle: true,
+            abort: vi.fn(),
+            dispose,
+          },
+          sessionSnapshot: { sessionPath },
+        } as never,
+      ],
+    ]);
+
+    const renamed = await fixture.factory.renameSession(
+      "rename-retained",
+      SESSION_ID,
+      sessionPath,
+      "Updated on disk",
+    );
+
+    expect(renamed).toEqual({ sessionId: SESSION_ID, name: "Updated on disk" });
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(fixture.graph.retainedSessions.has(SESSION_ID)).toBe(false);
+  });
+
   it("archives, lists, restores, and permanently deletes a Session", async () => {
     const fixture = createFixture();
     const originalPath = writeSession(fixture.activeDir, SESSION_ID, fixture.cwd);

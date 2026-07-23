@@ -40,6 +40,8 @@ export type WorkspaceGraph = {
   /** After package mutation reload failure — block prompts until reload succeeds */
   resourceReloadRequired: boolean;
   backgroundSessions: Map<string, BackgroundSessionRuntime>;
+  /** Idle runtimes parked for fast switching within this workspace. */
+  retainedSessions: Map<string, BackgroundSessionRuntime>;
 };
 
 export type BackgroundSessionRuntime = {
