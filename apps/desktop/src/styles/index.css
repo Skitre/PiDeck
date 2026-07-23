@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
+@source "../../node_modules/@streamdown/cjk/dist/*.js";
+@source "../../node_modules/@streamdown/math/dist/*.js";
+@source "../../node_modules/@streamdown/mermaid/dist/*.js";
+
 @theme {
   --color-surface: #111312;
   --color-surface-raised: #181a19;
@@ -13,6 +21,8 @@
   --color-success: #22c55e;
   --color-warning: #f59e0b;
   --color-danger: #ef4444;
+  --color-background: var(--color-surface);
+  --color-muted-foreground: var(--color-muted);
   --font-sans: "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
 }
@@ -284,6 +294,132 @@ textarea:focus-visible {
   display: block;
   min-width: 100%;
   width: max-content;
+}
+
+.chat-markdown .katex {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-size: 1em;
+  vertical-align: middle;
+}
+
+.chat-markdown .katex-display {
+  max-width: 100%;
+  margin: 0.75rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+
+.chat-markdown .katex-display > .katex {
+  display: block;
+  min-width: max-content;
+  overflow: visible;
+  padding-inline: 0.25rem;
+}
+
+.chat-markdown [data-streamdown="mermaid-block"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  border-color: var(--color-border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-surface-overlay) 42%, transparent);
+}
+
+.chat-markdown [data-streamdown="mermaid"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+}
+
+[data-streamdown="mermaid"] [aria-label="Mermaid chart"] {
+  width: 100%;
+  min-width: 0;
+}
+
+[data-streamdown="mermaid"] svg {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+}
+
+svg[data-pideck-mermaid-theme="neutral"] {
+  background: #ffffff;
+  color-scheme: light;
+}
+
+.chat-markdown [data-streamdown="mermaid-block-actions"] button,
+.chat-markdown [data-streamdown="mermaid"] button {
+  color: var(--color-muted);
+}
+
+.chat-markdown [data-streamdown="mermaid-block-actions"] button:hover,
+.chat-markdown [data-streamdown="mermaid"] button:hover {
+  color: var(--color-foreground);
+}
+
+.markdown-mermaid-error {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  margin: 1rem 0;
+  border: 1px solid color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--color-danger) 9%, var(--color-surface));
+  padding: 0.75rem 3rem 0.75rem 0.875rem;
+  color: var(--color-foreground);
+}
+
+.markdown-mermaid-error-retry {
+  position: absolute;
+  top: 0.625rem;
+  right: 0.625rem;
+  display: flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-surface-raised);
+  color: var(--color-muted);
+}
+
+.markdown-mermaid-error-retry:hover {
+  color: var(--color-foreground);
+}
+
+.chat-markdown [data-footnotes] {
+  margin-top: 1.25rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.5rem;
+  color: var(--color-muted);
+  font-size: 0.875em;
+}
+
+.chat-markdown [data-footnote-ref],
+.chat-markdown [data-footnote-backref] {
+  scroll-margin-block: 1rem;
+}
+
+.chat-markdown .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  border-width: 0;
+  padding: 0;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
 }
 
 .chat-markdown [data-streamdown="table-wrapper"] {
