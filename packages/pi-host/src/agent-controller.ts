@@ -79,7 +79,7 @@ export function createAgentHandlers(
 
       if (server.serviceGraphLock.isHeld()) {
         const kind = server.serviceGraphLock.getOwner()?.operationKind;
-        if (kind?.startsWith("package") || kind === "resource.setTopLevelEnabled") {
+        if (kind?.startsWith("package") || kind?.startsWith("resource.setPreference")) {
           return {
             error: createHostError("PACKAGE_MUTATION_BUSY", "Package mutation in progress", {
               retryable: true,
@@ -107,10 +107,10 @@ export function createAgentHandlers(
         operationLock.release(ctx.id);
         return {
           error: createHostError(
-            kind?.startsWith("package") || kind === "resource.setTopLevelEnabled"
+            kind?.startsWith("package") || kind?.startsWith("resource.setPreference")
               ? "PACKAGE_MUTATION_BUSY"
               : "SERVICE_GRAPH_BUSY",
-            kind?.startsWith("package") || kind === "resource.setTopLevelEnabled"
+            kind?.startsWith("package") || kind?.startsWith("resource.setPreference")
               ? "Package mutation in progress"
               : "Service graph is busy",
             { retryable: true },

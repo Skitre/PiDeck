@@ -24,7 +24,7 @@ Implemented in `packages/protocol` + handlers in `packages/pi-host`:
 - `session.*` (list, create, open, snapshot, name, entries, tree, stats)
 - `agent.*` (prompt, steer, followUp, abort, queue, compact, tools, …)
 - `model.list` / `setCurrent` / `setThinkingLevel`
-- `package.*` / `resource.setTopLevelEnabled`
+- `package.*` / `resource.setPreference` / `resource.setPreferences`
 - `piSettings.get` / `patch`
 - `extensionUi.respond` / `customInput` / `customResize`
 

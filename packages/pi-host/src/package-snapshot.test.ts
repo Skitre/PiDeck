@@ -61,11 +61,13 @@ describe("Package snapshot projections", () => {
     const user = await build("user");
     expect(user.configured).toHaveLength(1);
     expect(user.configured[0]!.scope).toBe("user");
-    expect(user.packageResources).toHaveLength(1);
-    expect(user.packageResources[0]!.scope).toBe("user");
-    expect(user.packageResources[0]!.packageId).toBe(user.configured[0]!.id);
-    expect(user.topLevelResources).toHaveLength(1);
-    expect(user.topLevelResources[0]!.scope).toBe("user");
+    const packageResources = user.resources.filter((resource) => resource.origin === "package");
+    const topLevelResources = user.resources.filter((resource) => resource.origin === "top-level");
+    expect(packageResources).toHaveLength(1);
+    expect(packageResources[0]!.scope).toBe("user");
+    expect(packageResources[0]!.packageId).toBe(user.configured[0]!.id);
+    expect(topLevelResources).toHaveLength(1);
+    expect(topLevelResources[0]!.scope).toBe("user");
   });
 
   it("package.list leaves the canonical all-scope snapshot and resource map unchanged", async () => {
@@ -77,7 +79,9 @@ describe("Package snapshot projections", () => {
           type: "extension",
           scope: "user",
           path: "C:/canonical.ts",
+          relativePath: "canonical.ts",
           origin: "top-level",
+          configurableScopes: ["user"],
         },
       ],
     ]);

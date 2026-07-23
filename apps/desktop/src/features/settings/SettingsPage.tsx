@@ -244,7 +244,7 @@ export function SettingsPage({
             </button>
           ))}
         </nav>
-        <div className="flex min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1">
           {section === "general" ? (
             <GeneralSettings />
           ) : section === "providers" ? (

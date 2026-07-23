@@ -19,7 +19,8 @@ export type GraphOperationKind =
   | "provider.mutation"
   | "package.mutation"
   | "package.reload"
-  | "resource.setTopLevelEnabled"
+  | "resource.setPreference"
+  | "resource.setPreferences"
   | "piSettings.patch"
   | "sdk.read";
 

@@ -28,7 +28,8 @@ import type {
   PackageMutationResult,
   PackageUpdateSummary,
   PackageRecord,
-  PackageResource,
+  ResourcePreferenceUpdate,
+  ResourceRecord,
   PiSettingsSnapshot,
   PiSettingsPatch,
   ExtensionUiRequest,
@@ -95,10 +96,9 @@ export type HostContextMap = {
   "package.update": SessionPackageContext;
   "package.updateAll": SessionPackageContext;
   "package.getResources": WorkspacePackageContext;
-  "package.setResourceEnabled": SessionPackageContext;
-  "package.setResourceTypeEnabled": SessionPackageContext;
   "package.reloadResources": SessionPackageContext;
-  "resource.setTopLevelEnabled": SessionPackageContext;
+  "resource.setPreference": SessionPackageContext;
+  "resource.setPreferences": SessionPackageContext;
   "piSettings.get": WorkspaceContext;
   "piSettings.patch": NullableSessionContext;
   "extensionUi.respond": ActiveSessionContext;
@@ -167,20 +167,11 @@ export type HostRequestParams = {
   "package.remove": { packageId: string };
   "package.checkUpdates": { packageId?: string } | null;
   "package.update": { packageId: string };
-  "package.updateAll": { scope: "user" | "project" | "all" };
+  "package.updateAll": null;
   "package.getResources": { packageId: string };
-  "package.setResourceEnabled": {
-    packageId: string;
-    resourceId: string;
-    enabled: boolean;
-  };
-  "package.setResourceTypeEnabled": {
-    packageId: string;
-    type: "extension" | "skill" | "prompt" | "theme";
-    enabled: boolean;
-  };
   "package.reloadResources": null;
-  "resource.setTopLevelEnabled": { resourceId: string; enabled: boolean };
+  "resource.setPreference": ResourcePreferenceUpdate;
+  "resource.setPreferences": { updates: ResourcePreferenceUpdate[] };
   "piSettings.get": null;
   "piSettings.patch": { patch: PiSettingsPatch };
   "extensionUi.respond": {
@@ -267,11 +258,10 @@ export type HostResultMap = {
   "package.checkUpdates": { supported: boolean; updates: PackageUpdateSummary[] };
   "package.update": PackageMutationResult;
   "package.updateAll": PackageMutationResult;
-  "package.getResources": { package: PackageRecord; resources: PackageResource[] };
-  "package.setResourceEnabled": PackageMutationResult;
-  "package.setResourceTypeEnabled": PackageMutationResult;
+  "package.getResources": { package: PackageRecord; resources: ResourceRecord[] };
   "package.reloadResources": PackageMutationResult;
-  "resource.setTopLevelEnabled": PackageMutationResult;
+  "resource.setPreference": PackageMutationResult;
+  "resource.setPreferences": PackageMutationResult;
   "piSettings.get": PiSettingsSnapshot;
   "piSettings.patch": PiSettingsSnapshot;
   "extensionUi.respond": { accepted: true };

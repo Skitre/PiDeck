@@ -243,6 +243,7 @@ export type SessionSnapshot = {
 
 export type PackageRecord = {
   id: string;
+  identity: string;
   source: string;
   kind: "npm" | "git" | "local";
   scope: "user" | "project";
@@ -250,11 +251,16 @@ export type PackageRecord = {
   installed: boolean;
   installedPath?: string;
   displayName: string;
+  description?: string;
   versionOrRef?: string;
   updateAvailable?: boolean;
   effective: boolean;
   shadowedByPackageId?: string;
   overridesPackageId?: string;
+  projectOverride?: {
+    source: string;
+    overrideCount: number;
+  };
   resourceCounts: {
     extensions: number;
     skills: number;
@@ -266,50 +272,60 @@ export type PackageRecord = {
   resourceCountsState: "resolvedEffective" | "unknownShadowed";
 };
 
-export type PackageResource = {
-  id: string;
-  packageId: string;
-  type: "extension" | "skill" | "prompt" | "theme";
-  name: string;
-  path: string;
-  relativePath?: string;
-  enabled: boolean;
-  scope: "user" | "project" | "temporary";
-  origin: "package";
-  diagnostic?: {
-    severity: "info" | "warning" | "error";
-    message: string;
-  };
-};
-
-export type TopLevelResource = {
-  id: string;
-  type: "extension" | "skill" | "prompt" | "theme";
-  name: string;
-  path: string;
-  enabled: boolean;
-  scope: "user" | "project";
-  source: "auto" | "local";
-  origin: "top-level";
-  diagnostic?: {
-    severity: "info" | "warning" | "error";
-    message: string;
-  };
-};
-
 export type PackageDiagnostic = {
   severity: "info" | "warning" | "error";
   source?: string;
   message: string;
 };
 
+export type UserResourcePreference = "enabled" | "disabled";
+
+export type ProjectResourcePreference = "inherit" | "enabled" | "disabled";
+
+export type ResourceControl =
+  | { kind: "preference"; scopes: Array<"user" | "project"> }
+  | { kind: "owner-extension"; ownerResourceId: string }
+  | { kind: "read-only"; reason: string };
+
+export type ResourceRecord = {
+  id: string;
+  type: "extension" | "skill" | "prompt" | "theme";
+  name: string;
+  description?: string;
+  path: string;
+  relativePath?: string;
+  scope: "user" | "project" | "temporary";
+  origin: "package" | "top-level" | "extension";
+  source: string;
+  packageId?: string;
+  enabled: boolean;
+  preferences: {
+    user?: UserResourcePreference;
+    project?: ProjectResourcePreference;
+  };
+  control: ResourceControl;
+  manualOnly?: boolean;
+  diagnostics: PackageDiagnostic[];
+};
+
+export type ResourcePreferenceUpdate =
+  | {
+      resourceId: string;
+      targetScope: "user";
+      preference: UserResourcePreference;
+    }
+  | {
+      resourceId: string;
+      targetScope: "project";
+      preference: ProjectResourcePreference;
+    };
+
 export type PackageSnapshot = {
   revision: number;
   workspaceId: string;
   scope: "user" | "project" | "all";
   configured: PackageRecord[];
-  packageResources: PackageResource[];
-  topLevelResources: TopLevelResource[];
+  resources: ResourceRecord[];
   updateCheck: {
     supported: boolean;
     checkedAt?: number;
@@ -340,7 +356,11 @@ export type PackageUpdateSummary = {
   available?: string;
 };
 
-export type ResourceType = "extension" | "skill" | "prompt" | "theme";
+/** Resource kinds exposed by package and top-level resource listings. */
+export type PackageResourceType = ResourceRecord["type"];
+
+/** @deprecated Prefer PackageResourceType for package/resource APIs. */
+export type ResourceType = PackageResourceType;
 
 export type PiSettingsSnapshot = {
   defaultModel?: ModelSummary;

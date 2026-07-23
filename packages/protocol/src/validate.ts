@@ -84,6 +84,22 @@ function validateImages(value: unknown): boolean {
   );
 }
 
+function isResourcePreferenceUpdate(value: unknown): boolean {
+  if (
+    !exactObject(value, ["resourceId", "targetScope", "preference"]) ||
+    !isNonEmptyString(value.resourceId)
+  ) {
+    return false;
+  }
+  if (value.targetScope === "user") {
+    return value.preference === "enabled" || value.preference === "disabled";
+  }
+  return (
+    value.targetScope === "project" &&
+    ["inherit", "enabled", "disabled"].includes(String(value.preference))
+  );
+}
+
 export function validateMethodContext<M extends HostMethod>(
   method: M,
   context: unknown,
@@ -195,6 +211,7 @@ export function validateRequestParams<M extends HostMethod>(
     case "agent.getTools":
     case "provider.list":
     case "model.list":
+    case "package.updateAll":
     case "package.reloadResources":
     case "piSettings.get":
       return params === null ? ok(null) : fail("params must be null", { method });
@@ -341,31 +358,16 @@ export function validateRequestParams<M extends HostMethod>(
           (params.packageId === undefined || isNonEmptyString(params.packageId)))
         ? ok(params)
         : fail("invalid package.checkUpdates params", { method });
-    case "package.updateAll":
-      return exactObject(params, ["scope"]) &&
-        ["user", "project", "all"].includes(String(params.scope))
+    case "resource.setPreference":
+      return isResourcePreferenceUpdate(params)
         ? ok(params)
-        : fail("invalid package.updateAll params", { method });
-    case "package.setResourceEnabled":
-      return exactObject(params, ["packageId", "resourceId", "enabled"]) &&
-        isNonEmptyString(params.packageId) &&
-        isNonEmptyString(params.resourceId) &&
-        isBoolean(params.enabled)
+        : fail("invalid resource.setPreference params", { method });
+    case "resource.setPreferences":
+      return exactObject(params, ["updates"]) &&
+        Array.isArray(params.updates) &&
+        params.updates.every(isResourcePreferenceUpdate)
         ? ok(params)
-        : fail("invalid package.setResourceEnabled params", { method });
-    case "package.setResourceTypeEnabled":
-      return exactObject(params, ["packageId", "type", "enabled"]) &&
-        isNonEmptyString(params.packageId) &&
-        ["extension", "skill", "prompt", "theme"].includes(String(params.type)) &&
-        isBoolean(params.enabled)
-        ? ok(params)
-        : fail("invalid package.setResourceTypeEnabled params", { method });
-    case "resource.setTopLevelEnabled":
-      return exactObject(params, ["resourceId", "enabled"]) &&
-        isNonEmptyString(params.resourceId) &&
-        isBoolean(params.enabled)
-        ? ok(params)
-        : fail("invalid resource.setTopLevelEnabled params", { method });
+        : fail("invalid resource.setPreferences params", { method });
     case "piSettings.patch": {
       if (!exactObject(params, ["patch"]) || !isPlainObject(params.patch)) {
         return fail("invalid piSettings.patch params", { method });

@@ -50,10 +50,9 @@ export const HOST_METHODS = [
   "package.update",
   "package.updateAll",
   "package.getResources",
-  "package.setResourceEnabled",
-  "package.setResourceTypeEnabled",
   "package.reloadResources",
-  "resource.setTopLevelEnabled",
+  "resource.setPreference",
+  "resource.setPreferences",
   "piSettings.get",
   "piSettings.patch",
   "extensionUi.respond",
@@ -155,10 +154,9 @@ export type SessionPackageMethod =
   | "package.remove"
   | "package.update"
   | "package.updateAll"
-  | "package.setResourceEnabled"
-  | "package.setResourceTypeEnabled"
   | "package.reloadResources"
-  | "resource.setTopLevelEnabled";
+  | "resource.setPreference"
+  | "resource.setPreferences";
 
 export type HostRequestContext<M extends HostMethod> = M extends "system.hello"
   ? EmptyContext
@@ -240,10 +238,9 @@ export const METHOD_CONTEXT_SCOPE: Record<HostMethod, MethodContextScope> = {
   "package.update": "sessionPackage",
   "package.updateAll": "sessionPackage",
   "package.getResources": "workspacePackage",
-  "package.setResourceEnabled": "sessionPackage",
-  "package.setResourceTypeEnabled": "sessionPackage",
   "package.reloadResources": "sessionPackage",
-  "resource.setTopLevelEnabled": "sessionPackage",
+  "resource.setPreference": "sessionPackage",
+  "resource.setPreferences": "sessionPackage",
   "piSettings.get": "workspace",
   "piSettings.patch": "nullableSession",
   "extensionUi.respond": "activeSession",

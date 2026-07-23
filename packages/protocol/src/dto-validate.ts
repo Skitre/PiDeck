@@ -584,6 +584,7 @@ function isPackageRecord(value: unknown): boolean {
       value,
       [
         "id",
+        "identity",
         "source",
         "kind",
         "scope",
@@ -594,9 +595,18 @@ function isPackageRecord(value: unknown): boolean {
         "resourceCounts",
         "resourceCountsState",
       ],
-      ["installedPath", "versionOrRef", "updateAvailable", "shadowedByPackageId", "overridesPackageId"],
+      [
+        "installedPath",
+        "description",
+        "versionOrRef",
+        "updateAvailable",
+        "shadowedByPackageId",
+        "overridesPackageId",
+        "projectOverride",
+      ],
     ) &&
     isString(value.id) &&
+    isString(value.identity) &&
     isString(value.source) &&
     ["npm", "git", "local"].includes(String(value.kind)) &&
     ["user", "project"].includes(String(value.scope)) &&
@@ -604,51 +614,86 @@ function isPackageRecord(value: unknown): boolean {
     isBoolean(value.installed) &&
     isOptionalString(value.installedPath) &&
     isString(value.displayName) &&
+    isOptionalString(value.description) &&
     isOptionalString(value.versionOrRef) &&
     (value.updateAvailable === undefined || isBoolean(value.updateAvailable)) &&
     isBoolean(value.effective) &&
     isOptionalString(value.shadowedByPackageId) &&
     isOptionalString(value.overridesPackageId) &&
+    (value.projectOverride === undefined ||
+      (isPlainObject(value.projectOverride) &&
+        hasExactKeys(value.projectOverride, ["source", "overrideCount"]) &&
+        isString(value.projectOverride.source) &&
+        isSafeRevision(value.projectOverride.overrideCount))) &&
     (value.resourceCounts === null || isResourceCounts(value.resourceCounts)) &&
     ["resolvedEffective", "unknownShadowed"].includes(String(value.resourceCountsState))
   );
 }
 
-function isPackageResource(value: unknown): boolean {
-  return (
-    isPlainObject(value) &&
-    hasExactKeys(
-      value,
-      ["id", "packageId", "type", "name", "path", "enabled", "scope", "origin"],
-      ["relativePath", "diagnostic"],
-    ) &&
-    isString(value.id) &&
-    isString(value.packageId) &&
-    ["extension", "skill", "prompt", "theme"].includes(String(value.type)) &&
-    isString(value.name) &&
-    isString(value.path) &&
-    isOptionalString(value.relativePath) &&
-    isBoolean(value.enabled) &&
-    ["user", "project", "temporary"].includes(String(value.scope)) &&
-    value.origin === "package" &&
-    (value.diagnostic === undefined || isDiagnostic(value.diagnostic))
-  );
+function isResourceControl(value: unknown): boolean {
+  if (!isPlainObject(value) || !isString(value.kind)) return false;
+  switch (value.kind) {
+    case "preference":
+      return (
+        hasExactKeys(value, ["kind", "scopes"]) &&
+        Array.isArray(value.scopes) &&
+        value.scopes.every((scope) => scope === "user" || scope === "project")
+      );
+    case "owner-extension":
+      return hasExactKeys(value, ["kind", "ownerResourceId"]) && isString(value.ownerResourceId);
+    case "read-only":
+      return hasExactKeys(value, ["kind", "reason"]) && isString(value.reason);
+    default:
+      return false;
+  }
 }
 
-function isTopLevelResource(value: unknown): boolean {
-  return (
-    isPlainObject(value) &&
-    hasExactKeys(value, ["id", "type", "name", "path", "enabled", "scope", "source", "origin"], ["diagnostic"]) &&
-    isString(value.id) &&
-    ["extension", "skill", "prompt", "theme"].includes(String(value.type)) &&
-    isString(value.name) &&
-    isString(value.path) &&
-    isBoolean(value.enabled) &&
-    ["user", "project"].includes(String(value.scope)) &&
-    ["auto", "local"].includes(String(value.source)) &&
-    value.origin === "top-level" &&
-    (value.diagnostic === undefined || isDiagnostic(value.diagnostic))
-  );
+function isResourceRecord(value: unknown): boolean {
+  if (
+    !isPlainObject(value) ||
+    !hasExactKeys(
+      value,
+      [
+        "id",
+        "type",
+        "name",
+        "path",
+        "scope",
+        "origin",
+        "source",
+        "enabled",
+        "preferences",
+        "control",
+        "diagnostics",
+      ],
+      ["description", "relativePath", "packageId", "manualOnly"],
+    ) ||
+    !isString(value.id) ||
+    !["extension", "skill", "prompt", "theme"].includes(String(value.type)) ||
+    !isString(value.name) ||
+    !isOptionalString(value.description) ||
+    !isString(value.path) ||
+    !isOptionalString(value.relativePath) ||
+    !["user", "project", "temporary"].includes(String(value.scope)) ||
+    !["package", "top-level", "extension"].includes(String(value.origin)) ||
+    !isString(value.source) ||
+    !isOptionalString(value.packageId) ||
+    !isBoolean(value.enabled) ||
+    !isPlainObject(value.preferences) ||
+    !hasExactKeys(value.preferences, [], ["user", "project"]) ||
+    (value.preferences.user !== undefined &&
+      value.preferences.user !== "enabled" &&
+      value.preferences.user !== "disabled") ||
+    (value.preferences.project !== undefined &&
+      !["inherit", "enabled", "disabled"].includes(String(value.preferences.project))) ||
+    !isResourceControl(value.control) ||
+    (value.manualOnly !== undefined && !isBoolean(value.manualOnly)) ||
+    !Array.isArray(value.diagnostics) ||
+    !value.diagnostics.every(isDiagnostic)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export function isPackageSnapshot(value: unknown): boolean {
@@ -656,7 +701,7 @@ export function isPackageSnapshot(value: unknown): boolean {
     !isPlainObject(value) ||
     !hasExactKeys(
       value,
-      ["revision", "workspaceId", "scope", "configured", "packageResources", "topLevelResources", "updateCheck", "diagnostics"],
+      ["revision", "workspaceId", "scope", "configured", "resources", "updateCheck", "diagnostics"],
       ["resourceReloadRequired", "mutation"],
     )
   ) {
@@ -670,10 +715,8 @@ export function isPackageSnapshot(value: unknown): boolean {
     ["user", "project", "all"].includes(String(value.scope)) &&
     Array.isArray(value.configured) &&
     value.configured.every(isPackageRecord) &&
-    Array.isArray(value.packageResources) &&
-    value.packageResources.every(isPackageResource) &&
-    Array.isArray(value.topLevelResources) &&
-    value.topLevelResources.every(isTopLevelResource) &&
+    Array.isArray(value.resources) &&
+    value.resources.every(isResourceRecord) &&
     isPlainObject(updateCheck) &&
     hasExactKeys(updateCheck, ["supported"], ["checkedAt"]) &&
     isBoolean(updateCheck.supported) &&
@@ -992,10 +1035,9 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
     case "package.remove":
     case "package.update":
     case "package.updateAll":
-    case "package.setResourceEnabled":
-    case "package.setResourceTypeEnabled":
     case "package.reloadResources":
-    case "resource.setTopLevelEnabled":
+    case "resource.setPreference":
+    case "resource.setPreferences":
       return isPackageMutationResult(result) ? null : "invalid PackageMutationResult";
     case "package.checkUpdates":
       return isPlainObject(result) &&
@@ -1018,7 +1060,7 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         hasExactKeys(result, ["package", "resources"]) &&
         isPackageRecord(result.package) &&
         Array.isArray(result.resources) &&
-        result.resources.every(isPackageResource)
+        result.resources.every(isResourceRecord)
         ? null
         : "invalid package.getResources result";
     case "piSettings.get":

@@ -6,18 +6,23 @@ import {
   type PackageMutationResult,
   type PackageSnapshot,
   type PackageUpdateSummary,
+  type ResourcePreferenceUpdate,
 } from "@pideck/protocol";
 import type { MethodHandler } from "./server.js";
 import type { WorkspaceGraph, WorkspaceGraphFactory } from "./workspace-graph-factory.js";
-import { buildPackageSnapshot, type ResourceIdMap } from "./package-snapshot.js";
+import {
+  buildPackageSnapshot,
+  normalizePackageIdentity,
+  type ResourceIdMap,
+} from "./package-snapshot.js";
 import { buildSessionSnapshot } from "./session-snapshot.js";
 import {
+  matchesResourcePattern,
   setPackageResourceFilter,
-  setPackageResourceTypeFilter,
   setTopLevelPathEnabled,
   resourceTypeToSettingsKey,
-  toPosixPath,
   type PackageSource,
+  type PackageSourceObject,
 } from "./package-filters.js";
 import { logger } from "./logger.js";
 
@@ -137,13 +142,14 @@ export function mapPackageUpdates(
   updates: Array<{ source: string; scope: string }>,
   requestedPackageId?: string,
 ): PackageUpdateSummary[] {
-  const configuredBySourceScope = new Map(
-    configured.map((pkg) => [`${pkg.scope}::${pkg.source}`, pkg] as const),
+  const configuredByIdentityScope = new Map(
+    configured.map((pkg) => [`${pkg.scope}::${pkg.identity}`, pkg] as const),
   );
   const summaries: PackageUpdateSummary[] = [];
   for (const update of updates) {
     const scope = update.scope === "project" ? "project" : "user";
-    const pkg = configuredBySourceScope.get(`${scope}::${update.source}`);
+    const identity = normalizePackageIdentity(update.source).identity;
+    const pkg = configuredByIdentityScope.get(`${scope}::${identity}`);
     if (!pkg || (requestedPackageId && pkg.id !== requestedPackageId)) continue;
     summaries.push({
       packageId: pkg.id,
@@ -188,6 +194,9 @@ export function createPackageHandlers(
             scope: params.scope,
             packageManager: g.packageManager,
             settingsManager: g.settingsManager,
+            resourceLoader: g.resourceLoader,
+            cwd: g.canonicalCwd,
+            agentDir: factory.deps.agentDir,
             packageUpdateCheck: factory.deps.packageUpdateCheck,
             resourceIdMap: projectionResourceIds,
             resourceReloadRequired: g.resourceReloadRequired,
@@ -242,12 +251,9 @@ export function createPackageHandlers(
     "package.remove": async (ctx) => mutatePackage(factory, ctx, "remove"),
     "package.update": async (ctx) => mutatePackage(factory, ctx, "update"),
     "package.updateAll": async (ctx) => mutatePackage(factory, ctx, "updateAll"),
-    "package.setResourceEnabled": async (ctx) => mutatePackage(factory, ctx, "setResourceEnabled"),
-    "package.setResourceTypeEnabled": async (ctx) =>
-      mutatePackage(factory, ctx, "setResourceTypeEnabled"),
     "package.reloadResources": async (ctx) => mutatePackage(factory, ctx, "reload"),
-    "resource.setTopLevelEnabled": async (ctx) =>
-      mutatePackage(factory, ctx, "setTopLevelEnabled"),
+    "resource.setPreference": async (ctx) => mutatePackage(factory, ctx, "setPreferences"),
+    "resource.setPreferences": async (ctx) => mutatePackage(factory, ctx, "setPreferences"),
 
     "package.getResources": async (ctx) => {
       const stale = factory.checkIdentity(ctx.context, {
@@ -264,7 +270,7 @@ export function createPackageHandlers(
       if (!pkg) {
         return { error: createHostError("PACKAGE_NOT_FOUND", "Package not found") };
       }
-      const resources = g.packageSnapshot.packageResources.filter(
+      const resources = g.packageSnapshot.resources.filter(
         (r) => r.packageId === params.packageId,
       );
       return { result: { package: pkg, resources } };
@@ -272,15 +278,17 @@ export function createPackageHandlers(
   };
 }
 
-type MutateKind =
+export type MutateKind =
   | "install"
   | "remove"
   | "update"
   | "updateAll"
-  | "setResourceEnabled"
-  | "setResourceTypeEnabled"
-  | "reload"
-  | "setTopLevelEnabled";
+  | "setPreferences"
+  | "reload";
+
+export function packageMutationMayChangeDisk(kind: MutateKind): boolean {
+  return kind === "install" || kind === "remove" || kind === "update" || kind === "updateAll";
+}
 
 async function mutatePackage(
   factory: WorkspaceGraphFactory,
@@ -353,7 +361,12 @@ async function mutatePackageUnderLock(
   const operationId = randomUUID();
   if (
     !server.serviceGraphLock.tryAcquire({
-      operationKind: kind === "reload" ? "package.reload" : "package.mutation",
+      operationKind:
+        kind === "reload"
+          ? "package.reload"
+          : kind === "setPreferences"
+            ? "resource.setPreferences"
+            : "package.mutation",
       requestId: ctx.id,
       operationId,
     })
@@ -371,6 +384,7 @@ async function mutatePackageUnderLock(
   server.setPhase("packageBusy");
 
   // Capture before snapshot for disk-aware reconcile (B-PKG-DISK-01)
+  const trackPackageDisk = packageMutationMayChangeDisk(kind);
   let beforeConfigured: string | undefined;
   let beforeDiskFingerprint: string | undefined;
   try {
@@ -378,10 +392,12 @@ async function mutatePackageUnderLock(
   } catch {
     beforeConfigured = undefined;
   }
-  try {
-    beforeDiskFingerprint = await capturePackageDiskFingerprint(g, factory.deps.agentDir);
-  } catch {
-    beforeDiskFingerprint = undefined;
+  if (trackPackageDisk) {
+    try {
+      beforeDiskFingerprint = await capturePackageDiskFingerprint(g, factory.deps.agentDir);
+    } catch {
+      beforeDiskFingerprint = undefined;
+    }
   }
 
   let mutationError: Error | null = null;
@@ -434,10 +450,12 @@ async function mutatePackageUnderLock(
     } catch (err) {
       reconcileError = err instanceof Error ? err : new Error(String(err));
     }
-    try {
-      afterDiskFingerprint = await capturePackageDiskFingerprint(g, factory.deps.agentDir);
-    } catch (err) {
-      reconcileError = err instanceof Error ? err : new Error(String(err));
+    if (trackPackageDisk) {
+      try {
+        afterDiskFingerprint = await capturePackageDiskFingerprint(g, factory.deps.agentDir);
+      } catch (err) {
+        reconcileError = err instanceof Error ? err : new Error(String(err));
+      }
     }
 
     if (beforeConfigured !== afterConfigured) {
@@ -459,6 +477,11 @@ async function mutatePackageUnderLock(
           error: createHostError("RESOURCE_NOT_FOUND", mutationError.message),
         };
       }
+      if (coded.code === "RESOURCE_NOT_CONFIGURABLE") {
+        return {
+          error: createHostError("RESOURCE_NOT_CONFIGURABLE", mutationError.message),
+        };
+      }
       return {
         error: createHostError(
           kind === "install"
@@ -474,42 +497,6 @@ async function mutatePackageUnderLock(
     }
 
     const rev = server.identity.bumpPackageRevision();
-    let packageSnapshot;
-    try {
-      packageSnapshot = await buildPackageSnapshot({
-        revision: rev,
-        workspaceId: g.workspaceId,
-        scope: "all",
-        packageManager: g.packageManager,
-        settingsManager: g.settingsManager,
-        packageUpdateCheck: factory.deps.packageUpdateCheck,
-        resourceIdMap: g.resourceIdMap,
-        resourceReloadRequired: g.resourceReloadRequired,
-      });
-      g.packageSnapshot = packageSnapshot;
-    } catch (err) {
-      reconcileError = err instanceof Error ? err : new Error(String(err));
-      g.resourceReloadRequired = true;
-      packageSnapshot = g.packageSnapshot
-        ? {
-            ...g.packageSnapshot,
-            revision: rev,
-            workspaceId: g.workspaceId,
-            resourceReloadRequired: true,
-          }
-        : {
-            revision: rev,
-            workspaceId: g.workspaceId,
-            scope: "all" as const,
-            configured: [],
-            packageResources: [],
-            topLevelResources: [],
-            updateCheck: { supported: factory.deps.packageUpdateCheck },
-            diagnostics: [],
-            resourceReloadRequired: true,
-          };
-    }
-
     let status: PackageMutationResult["status"] = "committed";
     const warnings: PackageMutationResult["warnings"] = [];
     let reconcileRequired = false;
@@ -523,59 +510,33 @@ async function mutatePackageUnderLock(
       g.resourceReloadRequired = true;
     }
 
-    if (mutationError || flushError || reconcileError) {
+    if (mutationError || flushError) {
       status = "partialFailure";
       reconcileRequired = true;
       g.resourceReloadRequired = true;
       warnings.push(
         createHostError(
           "PACKAGE_PARTIAL_FAILURE",
-          mutationError?.message ?? flushError?.message ?? reconcileError?.message ?? "Partial failure",
+          mutationError?.message ?? flushError?.message ?? "Partial failure",
           {
             details: {
               mutationError: mutationError?.message ?? null,
               flushError: flushError?.message ?? null,
-              reconcileError: reconcileError?.message ?? null,
+              reconcileError: null,
             },
           },
         ),
       );
     }
 
-    // Reload session only on clean commit
-    if (status === "committed" && g.agentSession && kind !== "reload") {
-      try {
-        await g.agentSession.reload();
-        const sessionRevision = server.identity.bumpSessionRevision();
-        g.toolRevision = 1;
-        sessionSnap = buildSessionSnapshot({
-          session: g.agentSession,
-          sessionManager: g.sessionManager!,
-          cwd: g.canonicalCwd,
-          sessionId: server.identity.sessionId ?? "",
-          revision: sessionRevision,
-          workspaceId: g.workspaceId,
-          toolRevision: 1,
-        });
-        g.sessionSnapshot = sessionSnap;
-        sessionChanged = true;
-      } catch (err) {
-        status = "partialFailure";
-        reconcileRequired = true;
-        g.resourceReloadRequired = true;
-        warnings.push(
-          createHostError(
-            "RESOURCE_RELOAD_FAILED",
-            err instanceof Error ? err.message : "Session reload failed",
-          ),
-        );
-      }
-    } else if (kind === "reload") {
-      // AgentSession owns the shared resource loader while a session exists.
-      // Without a session, reload the workspace loader directly exactly once.
+    // ResourceLoader is the authoritative metadata source. Reload it before
+    // constructing the final package snapshot for every clean mutation.
+    if (status === "committed") {
       try {
         if (g.agentSession) {
-          await g.agentSession.reload();
+          await g.agentSession.reload(
+            kind === "setPreferences" ? { preserveExtensionCache: true } : undefined,
+          );
           const sessionRevision = server.identity.bumpSessionRevision();
           g.toolRevision = 1;
           sessionSnap = buildSessionSnapshot({
@@ -595,8 +556,6 @@ async function mutatePackageUnderLock(
           throw new Error("Resource loader unavailable");
         }
         g.resourceReloadRequired = false;
-        status = "committed";
-        reconcileRequired = false;
       } catch (err) {
         status = "partialFailure";
         reconcileRequired = true;
@@ -608,6 +567,41 @@ async function mutatePackageUnderLock(
           ),
         );
       }
+    }
+
+    let packageSnapshot: PackageSnapshot;
+    try {
+      packageSnapshot = await buildPackageSnapshot({
+        revision: rev,
+        workspaceId: g.workspaceId,
+        scope: "all",
+        packageManager: g.packageManager,
+        settingsManager: g.settingsManager,
+        resourceLoader: g.resourceLoader,
+        cwd: g.canonicalCwd,
+        agentDir: factory.deps.agentDir,
+        packageUpdateCheck: factory.deps.packageUpdateCheck,
+        resourceIdMap: g.resourceIdMap,
+        resourceReloadRequired: g.resourceReloadRequired,
+      });
+    } catch (err) {
+      reconcileError = err instanceof Error ? err : new Error(String(err));
+      status = "partialFailure";
+      reconcileRequired = true;
+      g.resourceReloadRequired = true;
+      warnings.push(createHostError("PACKAGE_RESOLVE_FAILED", reconcileError.message));
+      packageSnapshot = g.packageSnapshot
+        ? { ...g.packageSnapshot, revision: rev, resourceReloadRequired: true }
+        : {
+            revision: rev,
+            workspaceId: g.workspaceId,
+            scope: "all",
+            configured: [],
+            resources: [],
+            updateCheck: { supported: factory.deps.packageUpdateCheck },
+            diagnostics: [],
+            resourceReloadRequired: true,
+          };
     }
 
     // Sync graph.resourceReloadRequired (and mutation meta) into snapshot
@@ -644,6 +638,231 @@ async function mutatePackageUnderLock(
     if (server.getPhase() === "packageBusy") {
       server.setPhase("ready");
     }
+  }
+}
+
+function clonePackageSources(sources: PackageSource[]): PackageSource[] {
+  return sources.map((source) => {
+    if (typeof source === "string") return source;
+    return Object.fromEntries(
+      Object.entries(source).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]),
+    ) as PackageSourceObject;
+  });
+}
+
+function packageSourceIdentity(source: PackageSource): string {
+  return normalizePackageIdentity(typeof source === "string" ? source : source.source).identity;
+}
+
+function stripExactPreference(patterns: string[], relativePath: string): string[] {
+  const rel = relativePath.replace(/\\/g, "/");
+  return patterns.filter((pattern) => {
+    if (!/^[!+-]/.test(pattern)) return true;
+    return !matchesResourcePattern(rel, pattern.slice(1), true);
+  });
+}
+
+function updatePackagePreference(
+  sources: PackageSource[],
+  identity: string,
+  fallbackSource: string,
+  type: "extension" | "skill" | "prompt" | "theme",
+  relativePath: string,
+  preference: "inherit" | "enabled" | "disabled",
+  createProjectDelta: boolean,
+): PackageSource[] {
+  let index = sources.findIndex((source) => {
+    const value = typeof source === "string" ? source : source.source;
+    return value === fallbackSource || packageSourceIdentity(source) === identity;
+  });
+  if (index < 0) {
+    if (!createProjectDelta || preference === "inherit") return sources;
+    sources = [...sources, { source: fallbackSource, autoload: false }];
+    index = sources.length - 1;
+  }
+  const current = sources[index]!;
+  if (preference === "inherit" && typeof current === "string") return sources;
+  if (preference === "enabled" && typeof current === "string") return sources;
+  let object: PackageSourceObject =
+    typeof current === "string" ? { source: current } : { ...current };
+  const key = resourceTypeToSettingsKey(type);
+
+  if (preference === "inherit") {
+    const existing = object[key];
+    if (!existing) return sources;
+    if (existing) {
+      const next = stripExactPreference(existing, relativePath);
+      if (next.length > 0) object[key] = next;
+      else delete object[key];
+    }
+  } else if (object.autoload === false) {
+    const rel = relativePath.replace(/\\/g, "/");
+    const existing = stripExactPreference(object[key] ?? [], rel);
+    object[key] = [...existing, `${preference === "enabled" ? "+" : "-"}${rel}`];
+  } else {
+    const one = [object] as PackageSource[];
+    const updated = setPackageResourceFilter(
+      one,
+      object.source,
+      type,
+      relativePath,
+      preference === "enabled",
+    )[0]!;
+    if (typeof updated === "string") {
+      sources[index] = updated;
+      return sources;
+    }
+    object = updated;
+  }
+
+  const hasResourceFields = ["extensions", "skills", "prompts", "themes"].some(
+    (field) => object[field] !== undefined,
+  );
+  if (!hasResourceFields) {
+    if (object.autoload === false) {
+      return [...sources.slice(0, index), ...sources.slice(index + 1)];
+    }
+    sources[index] = object.source;
+    return sources;
+  }
+  sources[index] = object;
+  return sources;
+}
+
+function setSettingsPaths(
+  sm: NonNullable<WorkspaceGraph["settingsManager"]>,
+  scope: "user" | "project",
+  key: "extensions" | "skills" | "prompts" | "themes",
+  paths: string[],
+): void {
+  if (scope === "project") {
+    const setter =
+      key === "extensions"
+        ? sm.setProjectExtensionPaths.bind(sm)
+        : key === "skills"
+          ? sm.setProjectSkillPaths.bind(sm)
+          : key === "prompts"
+            ? sm.setProjectPromptTemplatePaths.bind(sm)
+            : sm.setProjectThemePaths.bind(sm);
+    setter(paths);
+    return;
+  }
+  const setter =
+    key === "extensions"
+      ? sm.setExtensionPaths.bind(sm)
+      : key === "skills"
+        ? sm.setSkillPaths.bind(sm)
+        : key === "prompts"
+          ? sm.setPromptTemplatePaths.bind(sm)
+          : sm.setThemePaths.bind(sm);
+  setter(paths);
+}
+
+export function applyResourcePreferences(
+  g: WorkspaceGraph,
+  updates: ResourcePreferenceUpdate[],
+): void {
+  const sm = g.settingsManager!;
+  const resolved = updates.map((update) => {
+    const metadata = g.resourceIdMap.get(update.resourceId);
+    if (!metadata) {
+      throw Object.assign(new Error(`Resource not found: ${update.resourceId}`), {
+        code: "RESOURCE_NOT_FOUND",
+      });
+    }
+    if (!metadata.configurableScopes.includes(update.targetScope)) {
+      throw Object.assign(
+        new Error(`Resource ${update.resourceId} cannot be configured at ${update.targetScope} scope`),
+        { code: "RESOURCE_NOT_CONFIGURABLE" },
+      );
+    }
+    return { update, metadata };
+  });
+
+  let userPackages = clonePackageSources(
+    ((sm.getGlobalSettings().packages ?? []) as PackageSource[]),
+  );
+  let projectPackages = clonePackageSources(
+    ((sm.getProjectSettings().packages ?? []) as PackageSource[]),
+  );
+  let userPackagesChanged = false;
+  let projectPackagesChanged = false;
+  const pathChanges = new Map<
+    string,
+    { scope: "user" | "project"; key: "extensions" | "skills" | "prompts" | "themes"; paths: string[] }
+  >();
+
+  for (const { update, metadata } of resolved) {
+    if (metadata.origin === "package") {
+      if (!metadata.packageIdentity || !metadata.packageSource || !metadata.packageScope) {
+        throw Object.assign(new Error("Package resource metadata is incomplete"), {
+          code: "RESOURCE_NOT_CONFIGURABLE",
+        });
+      }
+      if (update.targetScope === "user") {
+        userPackages = updatePackagePreference(
+          userPackages,
+          metadata.packageIdentity,
+          metadata.packageSource,
+          metadata.type,
+          metadata.relativePath,
+          update.preference,
+          false,
+        );
+        userPackagesChanged = true;
+      } else {
+        projectPackages = updatePackagePreference(
+          projectPackages,
+          metadata.packageIdentity,
+          metadata.projectOverrideSource ?? metadata.packageSource,
+          metadata.type,
+          metadata.relativePath,
+          update.preference,
+          metadata.packageScope === "user",
+        );
+        projectPackagesChanged = true;
+      }
+      continue;
+    }
+    if (metadata.origin !== "top-level") {
+      throw Object.assign(new Error("Extension-owned resources are read-only"), {
+        code: "RESOURCE_NOT_CONFIGURABLE",
+      });
+    }
+    const key = resourceTypeToSettingsKey(metadata.type);
+    const changeKey = `${update.targetScope}:${key}`;
+    const existing = pathChanges.get(changeKey);
+    const settings = update.targetScope === "project" ? sm.getProjectSettings() : sm.getGlobalSettings();
+    let paths = existing?.paths ?? ([...(settings[key] ?? [])] as string[]);
+    if (update.targetScope === "project" && metadata.scope === "user") {
+      const pattern = metadata.path.replace(/\\/g, "/");
+      const candidates = new Set([
+        pattern,
+        metadata.relativePath.replace(/\\/g, "/"),
+        relative(join(g.canonicalCwd, ".pi"), metadata.path).replace(/\\/g, "/"),
+      ]);
+      paths = paths.filter((entry) => {
+        const target = /^[!+-]/.test(entry) ? entry.slice(1) : entry;
+        return !candidates.has(target);
+      });
+      if (update.preference !== "inherit") {
+        if (!paths.includes(pattern)) paths.push(pattern);
+        paths.push(`${update.preference === "enabled" ? "+" : "-"}${pattern}`);
+      }
+    } else {
+      paths = update.preference === "inherit"
+        ? stripExactPreference(paths, metadata.relativePath)
+        : setTopLevelPathEnabled(paths, metadata.relativePath, update.preference === "enabled");
+    }
+    pathChanges.set(changeKey, { scope: update.targetScope, key, paths });
+  }
+
+  // Validation and transformation happen above. Each affected settings field is
+  // replaced once, avoiding observable partially-applied batches in memory.
+  if (userPackagesChanged) sm.setPackages(userPackages as never);
+  if (projectPackagesChanged) sm.setProjectPackages(projectPackages as never);
+  for (const change of pathChanges.values()) {
+    setSettingsPaths(sm, change.scope, change.key, change.paths);
   }
 }
 
@@ -717,90 +936,11 @@ async function runMutation(
         emitProgress("complete", "update", "*");
         break;
       }
-      case "setResourceEnabled": {
-        const p = params as { packageId: string; resourceId: string; enabled: boolean };
-        const meta = g.resourceIdMap.get(p.resourceId);
-        const rec = g.packageSnapshot?.configured.find((c) => c.id === p.packageId);
-        const res = g.packageSnapshot?.packageResources.find((r) => r.id === p.resourceId);
-        if (!meta || !rec || !res || meta.origin !== "package") {
-          throw Object.assign(new Error("Resource not found"), { code: "RESOURCE_NOT_FOUND" });
-        }
-        const rel =
-          res.relativePath ??
-          (meta.baseDir ? toPosixPath(meta.path.replace(meta.baseDir, "").replace(/^[/\\]/, "")) : res.name);
-        if (rec.scope === "project") {
-          const sources = (sm.getProjectSettings().packages ?? []) as PackageSource[];
-          const next = setPackageResourceFilter(
-            sources,
-            rec.source,
-            res.type,
-            rel,
-            p.enabled,
-          );
-          sm.setProjectPackages(next as never);
-        } else {
-          const sources = sm.getPackages() as PackageSource[];
-          const next = setPackageResourceFilter(sources, rec.source, res.type, rel, p.enabled);
-          sm.setPackages(next as never);
-        }
-        break;
-      }
-      case "setResourceTypeEnabled": {
-        const p = params as {
-          packageId: string;
-          type: "extension" | "skill" | "prompt" | "theme";
-          enabled: boolean;
-        };
-        const rec = g.packageSnapshot?.configured.find((c) => c.id === p.packageId);
-        if (!rec) throw new Error("Package not found");
-        if (rec.scope === "project") {
-          const sources = (sm.getProjectSettings().packages ?? []) as PackageSource[];
-          const next = setPackageResourceTypeFilter(sources, rec.source, p.type, p.enabled);
-          sm.setProjectPackages(next as never);
-        } else {
-          const sources = sm.getPackages() as PackageSource[];
-          const next = setPackageResourceTypeFilter(sources, rec.source, p.type, p.enabled);
-          sm.setPackages(next as never);
-        }
-        break;
-      }
-      case "setTopLevelEnabled": {
-        const p = params as { resourceId: string; enabled: boolean };
-        const meta = g.resourceIdMap.get(p.resourceId);
-        if (!meta || meta.origin !== "top-level") {
-          throw Object.assign(new Error("Resource not found"), { code: "RESOURCE_NOT_FOUND" });
-        }
-        const rel = meta.baseDir
-          ? toPosixPath(meta.path.replace(meta.baseDir, "").replace(/^[/\\]/, ""))
-          : toPosixPath(meta.path);
-        const key = resourceTypeToSettingsKey(meta.type);
-        if (meta.scope === "project") {
-          const projectSettings = sm.getProjectSettings() as Record<string, unknown>;
-          const current = (projectSettings[key] as string[] | undefined) ?? [];
-          const next = setTopLevelPathEnabled(current, rel, p.enabled);
-          const setter =
-            key === "extensions"
-              ? sm.setProjectExtensionPaths?.bind(sm)
-              : key === "skills"
-                ? sm.setProjectSkillPaths?.bind(sm)
-                : key === "prompts"
-                  ? sm.setProjectPromptTemplatePaths?.bind(sm)
-                  : sm.setProjectThemePaths?.bind(sm);
-          setter?.(next);
-        } else {
-          const globalSettings = sm.getGlobalSettings() as Record<string, unknown>;
-          const current = (globalSettings[key] as string[] | undefined) ?? [];
-          const next = setTopLevelPathEnabled(current, rel, p.enabled);
-          const setter =
-            key === "extensions"
-              ? sm.setExtensionPaths.bind(sm)
-              : key === "skills"
-                ? sm.setSkillPaths.bind(sm)
-                : key === "prompts"
-                  ? sm.setPromptTemplatePaths.bind(sm)
-                  : sm.setThemePaths.bind(sm);
-          setter(next);
-        }
+      case "setPreferences": {
+        const updates = Array.isArray(params)
+          ? params as ResourcePreferenceUpdate[]
+          : (params as { updates?: ResourcePreferenceUpdate[] }).updates ?? [params as ResourcePreferenceUpdate];
+        applyResourcePreferences(g, updates);
         break;
       }
       case "reload": {

@@ -15,12 +15,13 @@ import {
   validateMethodContext,
   validateRequestParams,
   validateEventPayload,
+  validateSuccessResult,
   isHostEvent,
   isHostResponse,
 } from "./validate.js";
 import { createEvent, createSuccessResponse, createFailureResponse } from "./envelopes.js";
-import { createHostError } from "./errors.js";
-import { isSessionSnapshot } from "./dto-validate.js";
+import { createHostError, HOST_ERROR_CODES } from "./errors.js";
+import { isPackageSnapshot, isSessionSnapshot } from "./dto-validate.js";
 
 const REQUEST_ID = "00000000-0000-4000-8000-000000000001";
 const RESPONSE_ID = "00000000-0000-4000-8000-000000000002";
@@ -143,20 +144,23 @@ const VALID_PARAMS: Record<HostMethod, unknown> = {
   "package.remove": { packageId: "p1" },
   "package.checkUpdates": null,
   "package.update": { packageId: "p1" },
-  "package.updateAll": { scope: "all" },
+  "package.updateAll": null,
   "package.getResources": { packageId: "p1" },
-  "package.setResourceEnabled": {
-    packageId: "p1",
-    resourceId: "r1",
-    enabled: true,
-  },
-  "package.setResourceTypeEnabled": {
-    packageId: "p1",
-    type: "extension",
-    enabled: false,
-  },
   "package.reloadResources": null,
-  "resource.setTopLevelEnabled": { resourceId: "r1", enabled: true },
+  "resource.setPreference": {
+    resourceId: "r1",
+    targetScope: "user",
+    preference: "enabled",
+  },
+  "resource.setPreferences": {
+    updates: [
+      {
+        resourceId: "r1",
+        targetScope: "project",
+        preference: "inherit",
+      },
+    ],
+  },
   "piSettings.get": null,
   "piSettings.patch": { patch: {} },
   "extensionUi.respond": { requestId: EXTENSION_REQUEST_ID, status: "resolved", value: true },
@@ -265,15 +269,13 @@ function invalidParams(method: HostMethod): unknown {
     case "package.checkUpdates":
       return "x";
     case "package.updateAll":
-      return { scope: "none" };
+      return { scope: "all" };
     case "package.getResources":
       return {};
-    case "package.setResourceEnabled":
-      return { packageId: "p" };
-    case "package.setResourceTypeEnabled":
-      return { packageId: "p", type: "widget", enabled: true };
-    case "resource.setTopLevelEnabled":
-      return { resourceId: "r" };
+    case "resource.setPreference":
+      return { resourceId: "r", targetScope: "user", preference: "inherit" };
+    case "resource.setPreferences":
+      return { updates: [{ resourceId: "r", targetScope: "workspace", preference: "enabled" }] };
     case "piSettings.patch":
       return {};
     case "extensionUi.respond":
@@ -342,6 +344,188 @@ describe("protocol coverage — methods", () => {
       expectedPackageRevision: 1,
     });
     expect(r.ok).toBe(false);
+  });
+
+  it("uses preference methods instead of the legacy boolean resource methods", () => {
+    expect(HOST_METHODS).toContain("resource.setPreference");
+    expect(HOST_METHODS).toContain("resource.setPreferences");
+    expect(HOST_METHODS).not.toContain("package.setResourceEnabled" as HostMethod);
+    expect(HOST_METHODS).not.toContain("package.setResourceTypeEnabled" as HostMethod);
+    expect(HOST_METHODS).not.toContain("resource.setTopLevelEnabled" as HostMethod);
+  });
+
+  it("enforces scope-specific resource preferences", () => {
+    expect(
+      validateRequestParams("resource.setPreference", {
+        resourceId: "r1",
+        targetScope: "project",
+        preference: "inherit",
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateRequestParams("resource.setPreference", {
+        resourceId: "r1",
+        targetScope: "user",
+        preference: "inherit",
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateRequestParams("resource.setPreferences", {
+        updates: [
+          { resourceId: "r1", targetScope: "user", preference: "enabled" },
+          { resourceId: "r2", targetScope: "project", preference: "disabled" },
+        ],
+      }).ok,
+    ).toBe(true);
+    expect(validateRequestParams("resource.setPreferences", { updates: [] }).ok).toBe(true);
+  });
+
+  it("requires null package.updateAll params", () => {
+    expect(validateRequestParams("package.updateAll", null).ok).toBe(true);
+    expect(validateRequestParams("package.updateAll", { scope: "all" }).ok).toBe(false);
+  });
+});
+
+describe("unified package resources", () => {
+  const packageRecord = {
+    id: "package:user:tools",
+    identity: "npm:tools",
+    source: "npm:tools",
+    kind: "npm",
+    scope: "user",
+    filtered: false,
+    installed: true,
+    installedPath: "C:/agent/packages/tools",
+    displayName: "Tools",
+    description: "Shared tools",
+    versionOrRef: "1.2.3",
+    effective: true,
+    projectOverride: { source: "./project-tools", overrideCount: 2 },
+    resourceCounts: {
+      extensions: 1,
+      skills: 1,
+      prompts: 1,
+      themes: 0,
+      enabled: 2,
+      disabled: 1,
+    },
+    resourceCountsState: "resolvedEffective",
+  };
+
+  const extensionResource = {
+    id: "resource:extension:tools",
+    type: "extension",
+    name: "Tools extension",
+    description: "Registers shared tools",
+    path: "C:/agent/extensions/tools.ts",
+    relativePath: "extensions/tools.ts",
+    scope: "user",
+    origin: "package",
+    source: "npm:tools",
+    packageId: packageRecord.id,
+    enabled: true,
+    preferences: { user: "enabled", project: "inherit" },
+    control: { kind: "preference", scopes: ["user", "project"] },
+    diagnostics: [],
+  };
+
+  const snapshot = {
+    revision: 2,
+    workspaceId: WORKSPACE_ID,
+    scope: "all",
+    configured: [packageRecord],
+    resources: [
+      extensionResource,
+      {
+        id: "resource:skill:review",
+        type: "skill",
+        name: "Review",
+        path: "runtime://tools/review/SKILL.md",
+        scope: "temporary",
+        origin: "extension",
+        source: "runtime:tools",
+        enabled: true,
+        preferences: {},
+        control: {
+          kind: "owner-extension",
+          ownerResourceId: extensionResource.id,
+        },
+        manualOnly: true,
+        diagnostics: [],
+      },
+      {
+        id: "resource:prompt:built-in",
+        type: "prompt",
+        name: "Built-in prompt",
+        path: "C:/agent/prompts/built-in.md",
+        scope: "user",
+        origin: "top-level",
+        source: "local",
+        enabled: false,
+        preferences: { user: "disabled" },
+        control: { kind: "read-only", reason: "Managed by the host" },
+        diagnostics: [{ severity: "warning", source: "loader", message: "Disabled" }],
+      },
+    ],
+    updateCheck: { supported: true, checkedAt: 1 },
+    diagnostics: [],
+  };
+
+  it("validates package metadata and every resource control variant", () => {
+    expect(isPackageSnapshot(snapshot)).toBe(true);
+    expect(
+      validateSuccessResult("package.getResources", {
+        package: packageRecord,
+        resources: snapshot.resources,
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("rejects retired arrays and malformed preferences", () => {
+    const { resources: _resources, ...withoutResources } = snapshot;
+    const { identity: _identity, ...legacyPackageRecord } = packageRecord;
+    expect(
+      isPackageSnapshot({
+        ...withoutResources,
+        packageResources: [],
+        topLevelResources: [],
+      }),
+    ).toBe(false);
+    expect(
+      isPackageSnapshot({
+        ...snapshot,
+        resources: [
+          {
+            ...extensionResource,
+            preferences: { user: "inherit", project: "inherit" },
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      isPackageSnapshot({ ...snapshot, configured: [legacyPackageRecord] }),
+    ).toBe(false);
+    expect(
+      validateSuccessResult("package.getResources", {
+        package: packageRecord,
+        resources: [
+          {
+            id: extensionResource.id,
+            packageId: packageRecord.id,
+            type: extensionResource.type,
+            name: extensionResource.name,
+            path: extensionResource.path,
+            enabled: true,
+            scope: "user",
+            origin: "package",
+          },
+        ],
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("exposes the non-configurable resource error", () => {
+    expect(HOST_ERROR_CODES).toContain("RESOURCE_NOT_CONFIGURABLE");
   });
 });
 
@@ -421,8 +605,7 @@ describe("protocol coverage — events", () => {
       workspaceId: WORKSPACE_ID,
       scope: "all",
       configured: [],
-      packageResources: [],
-      topLevelResources: [],
+      resources: [],
       updateCheck: { supported: false },
       diagnostics: [],
     },
@@ -432,8 +615,7 @@ describe("protocol coverage — events", () => {
         workspaceId: WORKSPACE_ID,
         scope: "all",
         configured: [],
-        packageResources: [],
-        topLevelResources: [],
+        resources: [],
         updateCheck: { supported: false },
         diagnostics: [],
       },
@@ -681,12 +863,32 @@ describe("compile-time maps completeness", () => {
   it("type maps assignable", () => {
     type Ctx = HostContextMap["system.getStatus"];
     type Params = HostRequestParams["package.list"];
+    type PreferenceParams = HostRequestParams["resource.setPreference"];
     type Result = HostResultMap["system.hello"];
     type Payload = HostEventPayloadMap["host.ready"];
     const _c: Ctx = { expectedHostInstanceId: "h" };
     const _p: Params = { scope: "all" };
+    const _userPreference: PreferenceParams = {
+      resourceId: "r1",
+      targetScope: "user",
+      preference: "disabled",
+    };
+    const _projectPreference: PreferenceParams = {
+      resourceId: "r1",
+      targetScope: "project",
+      preference: "inherit",
+    };
+    // @ts-expect-error User preferences cannot inherit from another scope.
+    const _invalidUserPreference: PreferenceParams = {
+      resourceId: "r1",
+      targetScope: "user",
+      preference: "inherit",
+    };
     void _c;
     void _p;
+    void _userPreference;
+    void _projectPreference;
+    void _invalidUserPreference;
     void (null as unknown as Result);
     void (null as unknown as Payload);
   });

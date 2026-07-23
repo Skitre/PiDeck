@@ -305,13 +305,13 @@ describe("package + workspace integration", () => {
     expect(list.packageRevision).toBe(install.packageRevision);
     const snap = list.result as {
       configured: Array<{ id: string; source: string; scope: string }>;
-      packageResources: unknown[];
+      resources: unknown[];
     };
     const installed = snap.configured.find(
       (c) => c.scope === "user" && (c.source === fixturePkg || c.source.includes("full-package")),
     );
     expect(installed).toBeTruthy();
-    expect(Array.isArray(snap.packageResources)).toBe(true);
+    expect(Array.isArray(snap.resources)).toBe(true);
 
     const remove = await host.request(
       "package.remove",
@@ -336,6 +336,119 @@ describe("package + workspace integration", () => {
       false,
     );
   }, 300_000);
+
+  it("enables the last filtered prompt in a mixed package", async () => {
+    expect(existsSync(fixturePkg)).toBe(true);
+    const proj = emptyProject(root, "pkg-resource-preference");
+    const st = await host.request("system.getStatus", { expectedHostInstanceId: hostId }, null);
+    const status = st.result as {
+      workspaceId: string | null;
+      workspaceRevision: number;
+    };
+    const set = await host.request(
+      "workspace.setCurrent",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: status.workspaceId,
+        expectedWorkspaceRevision: status.workspaceRevision,
+      },
+      { cwd: proj },
+      60_000,
+    );
+    expect(set.ok).toBe(true);
+    const ws = (set.result as { workspace: { id: string; revision: number } }).workspace;
+
+    const install = await host.request(
+      "package.install",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: ws.id,
+        expectedWorkspaceRevision: ws.revision,
+        expectedSessionId: set.sessionId,
+        expectedSessionRevision: set.sessionRevision,
+        expectedPackageRevision: set.packageRevision,
+      },
+      { source: fixturePkg, scope: "user" },
+      180_000,
+    );
+    expect(install.ok, JSON.stringify(install.error)).toBe(true);
+    const installedSnapshot = (install.result as {
+      packageSnapshot: {
+        configured: Array<{ id: string; source: string }>;
+        resources: Array<{ id: string; type: string; relativePath?: string }>;
+      };
+    }).packageSnapshot;
+    const packageRecord = installedSnapshot.configured.find((item) => item.source.includes("full-package"));
+    const prompt = installedSnapshot.resources.find(
+      (item) => item.type === "prompt" && item.relativePath === "prompts/test-prompt.md",
+    );
+    expect(packageRecord).toBeTruthy();
+    expect(prompt).toBeTruthy();
+
+    const disabled = await host.request(
+      "resource.setPreferences",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: ws.id,
+        expectedWorkspaceRevision: ws.revision,
+        expectedSessionId: install.sessionId,
+        expectedSessionRevision: install.sessionRevision,
+        expectedPackageRevision: install.packageRevision,
+      },
+      {
+        updates: [{ resourceId: prompt!.id, targetScope: "user", preference: "disabled" }],
+      },
+      120_000,
+    );
+    expect(disabled.ok, JSON.stringify(disabled.error)).toBe(true);
+    const disabledResult = disabled.result as {
+      packageSnapshot: { resources: Array<{ id: string; enabled: boolean }> };
+    };
+    expect(disabledResult.packageSnapshot.resources.find((item) => item.id === prompt!.id)?.enabled).toBe(false);
+
+    const enabled = await host.request(
+      "resource.setPreferences",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: ws.id,
+        expectedWorkspaceRevision: ws.revision,
+        expectedSessionId: disabled.sessionId,
+        expectedSessionRevision: disabled.sessionRevision,
+        expectedPackageRevision: disabled.packageRevision,
+      },
+      {
+        updates: [{ resourceId: prompt!.id, targetScope: "user", preference: "enabled" }],
+      },
+      120_000,
+    );
+    expect(enabled.ok, JSON.stringify(enabled.error)).toBe(true);
+    const enabledResult = enabled.result as {
+      packageSnapshot: { resources: Array<{ id: string; enabled: boolean }> };
+    };
+    expect(enabledResult.packageSnapshot.resources.find((item) => item.id === prompt!.id)?.enabled).toBe(true);
+
+    const settingsText = await import("node:fs/promises").then(({ readFile }) =>
+      readFile(join(agentDir, "settings.json"), "utf8"),
+    );
+    const settings = JSON.parse(settingsText) as { packages?: unknown[] };
+    expect(settings.packages).toContainEqual(expect.stringContaining("full-package"));
+    expect(settings.packages?.some((item) => typeof item === "object" && item !== null && "prompts" in item)).toBe(false);
+
+    const remove = await host.request(
+      "package.remove",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: ws.id,
+        expectedWorkspaceRevision: ws.revision,
+        expectedSessionId: enabled.sessionId,
+        expectedSessionRevision: enabled.sessionRevision,
+        expectedPackageRevision: enabled.packageRevision,
+      },
+      { packageId: packageRecord!.id },
+      120_000,
+    );
+    expect(remove.ok, JSON.stringify(remove.error)).toBe(true);
+  }, 360_000);
 
   it("installs and removes a local project package after workspace selection", async () => {
     const project = emptyProject(root, "project-pkg-remove");

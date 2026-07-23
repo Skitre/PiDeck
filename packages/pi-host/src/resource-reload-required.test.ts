@@ -16,6 +16,14 @@ function mockFactory(opts: {
   graphBusyAfterAgentAcquire?: boolean;
   agentBusy?: boolean;
 }): WorkspaceGraphFactory {
+  const globalSettings = {
+    packages: [] as unknown[],
+    extensions: [] as string[],
+  };
+  const projectSettings = {
+    packages: [] as unknown[],
+    extensions: [] as string[],
+  };
   const g = {
     resourceReloadRequired: opts.resourceReloadRequired,
     agentSession: {
@@ -64,6 +72,14 @@ function mockFactory(opts: {
     settingsManager: {
       flush: async () => {},
       drainErrors: () => [],
+      getGlobalSettings: () => globalSettings,
+      getProjectSettings: () => projectSettings,
+      setExtensionPaths: vi.fn((paths: string[]) => {
+        globalSettings.extensions = paths;
+      }),
+      setProjectExtensionPaths: vi.fn((paths: string[]) => {
+        projectSettings.extensions = paths;
+      }),
     },
     resourceIdMap: new Map(),
     resourceLoader: {
@@ -74,8 +90,7 @@ function mockFactory(opts: {
       workspaceId: "w1",
       scope: "all" as const,
       configured: [],
-      packageResources: [],
-      topLevelResources: [],
+      resources: [],
       updateCheck: { supported: false },
       diagnostics: [],
       resourceReloadRequired: opts.resourceReloadRequired,
@@ -190,6 +205,16 @@ const reloadCtx = {
     expectedPackageRevision: 1,
   },
   params: null,
+};
+
+const preferenceCtx = {
+  ...reloadCtx,
+  id: "req-resource-preference",
+  params: {
+    resourceId: "resource-extension",
+    targetScope: "user",
+    preference: "disabled",
+  },
 };
 
 describe("RESOURCE_RELOAD_FAILED prompt block", () => {
@@ -398,6 +423,60 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
     if (!("error" in allowed)) {
       expect((allowed.result as { accepted: boolean }).accepted).toBe(true);
     }
+  });
+
+  it("flushes settings, reloads resources, rebuilds snapshot, then emits", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const g = factory.getGraph()!;
+    const server = factory.getServer()!;
+    const order: string[] = [];
+    g.settingsManager!.flush = vi.fn(async () => { order.push("flush"); });
+    g.agentSession!.reload = vi.fn(async () => { order.push("reload"); });
+    g.packageManager!.resolve = vi.fn(async () => {
+      order.push("snapshot");
+      return { extensions: [], skills: [], prompts: [], themes: [] };
+    });
+    server.emit = vi.fn((event: string) => {
+      if (event === "package.snapshot") order.push("emit");
+    }) as never;
+
+    const result = await createPackageHandlers(factory)["package.reloadResources"]!(
+      reloadCtx as never,
+    );
+    expect("error" in result).toBe(false);
+    expect(order).toEqual(["flush", "reload", "snapshot", "emit"]);
+  });
+
+  it("preserves the extension module cache only for resource preference changes", async () => {
+    const preferenceFactory = mockFactory({ resourceReloadRequired: false });
+    const preferenceGraph = preferenceFactory.getGraph()!;
+    preferenceGraph.resourceIdMap.set("resource-extension", {
+      type: "extension",
+      scope: "user",
+      path: "/tmp/.pi/extensions/example.ts",
+      baseDir: "/tmp/.pi",
+      relativePath: "extensions/example.ts",
+      origin: "top-level",
+      configurableScopes: ["user"],
+    });
+
+    const preferenceOut = await createPackageHandlers(preferenceFactory)[
+      "resource.setPreference"
+    ]!(preferenceCtx as never);
+
+    expect("error" in preferenceOut).toBe(false);
+    expect(preferenceGraph.agentSession!.reload).toHaveBeenCalledWith({
+      preserveExtensionCache: true,
+    });
+
+    const reloadFactory = mockFactory({ resourceReloadRequired: false });
+    const reloadGraph = reloadFactory.getGraph()!;
+    const reloadOut = await createPackageHandlers(reloadFactory)["package.reloadResources"]!(
+      reloadCtx as never,
+    );
+
+    expect("error" in reloadOut).toBe(false);
+    expect(reloadGraph.agentSession!.reload).toHaveBeenCalledWith(undefined);
   });
 
   it("clean package failure does not advance the authoritative package revision", async () => {

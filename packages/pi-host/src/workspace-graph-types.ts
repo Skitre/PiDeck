@@ -14,6 +14,7 @@ import type {
   PackageSnapshot,
   SessionSnapshot,
 } from "@pideck/protocol";
+import type { ResourceIdMap } from "./package-snapshot.js";
 
 export type WorkspaceGraph = {
   workspaceId: string;
@@ -30,19 +31,8 @@ export type WorkspaceGraph = {
   packageSnapshot: PackageSnapshot | null;
   sessionSnapshot: SessionSnapshot | null;
   toolRevision: number;
-  /** private resourceId -> metadata map for top-level toggles */
-  resourceIdMap: Map<
-    string,
-    {
-      type: "extension" | "skill" | "prompt" | "theme";
-      scope: "user" | "project" | "temporary";
-      path: string;
-      baseDir?: string;
-      origin: "package" | "top-level";
-      packageSource?: string;
-      packageScope?: "user" | "project";
-    }
-  >;
+  /** Private resourceId -> metadata map for package and standalone preferences. */
+  resourceIdMap: ResourceIdMap;
   unsubscribeAgent: (() => void) | null;
   extensionUiActivate: (() => Promise<() => void>) | null;
   extensionUiCleanup: (() => void) | null;

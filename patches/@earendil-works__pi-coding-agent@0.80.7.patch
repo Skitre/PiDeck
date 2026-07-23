@@ -17,3 +17,49 @@ index 575a208f581631bd98561b36ada62e31c235eb56..be5e786751d3fe636bfc4b32d73e8393
      extensionCacheCwd = resolvedCwd;
      return { cwd: resolvedCwd, generation: extensionCacheGeneration };
  }
+diff --git a/dist/core/resource-loader.js b/dist/core/resource-loader.js
+--- a/dist/core/resource-loader.js
++++ b/dist/core/resource-loader.js
+@@ -216,6 +216,6 @@ export class DefaultResourceLoader {
+     async reload(options) {
+         resetTimings("extensions");
+-        if (this.loaded) {
++        if (this.loaded && !options?.preserveExtensionCache) {
+             clearExtensionCache();
+         }
+         let preTrustExtensions;
+diff --git a/dist/core/resource-loader.d.ts b/dist/core/resource-loader.d.ts
+--- a/dist/core/resource-loader.d.ts
++++ b/dist/core/resource-loader.d.ts
+@@ -24,5 +24,6 @@ export interface ResourceLoaderReloadOptions {
+         extensionsResult: LoadExtensionsResult;
+     }) => Promise<boolean>;
++    preserveExtensionCache?: boolean;
+ }
+ export interface ResourceLoader {
+     getExtensions(): LoadExtensionsResult;
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -2026,7 +2026,9 @@ export class AgentSession {
+         await this.settingsManager.reload();
+         this.syncQueueModesFromSettings();
+         resetApiProviders();
+-        await this._resourceLoader.reload();
++        await this._resourceLoader.reload({
++            preserveExtensionCache: options?.preserveExtensionCache,
++        });
+         this._buildRuntime({
+             activeToolNames: this.getActiveToolNames(),
+             flagValues: previousFlagValues,
+diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
+--- a/dist/core/agent-session.d.ts
++++ b/dist/core/agent-session.d.ts
+@@ -498,6 +498,7 @@ export declare class AgentSession {
+     private _bindExtensionCore;
+     private _refreshToolRegistry;
+     private _buildRuntime;
+     reload(options?: {
+         beforeSessionStart?: () => void | Promise<void>;
++        preserveExtensionCache?: boolean;
+     }): Promise<void>;
