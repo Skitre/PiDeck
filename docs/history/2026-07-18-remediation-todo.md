@@ -47,7 +47,7 @@ This list uses verified scope and severity rather than copying the review labels
 
 ## Maintenance
 
-- [ ] Split `workspace-graph-factory.ts` by trust, session, package, and extension ownership.
+- [x] Split `workspace-graph-factory.ts` by Workspace lifecycle, Session runtime cache, and Extension UI lifecycle ownership. (2026-07-24: the Factory is now a compatibility facade; `workspace-lifecycle.ts` owns graph build/commit/rollback and retained Workspaces, `session-runtime-cache.ts` owns active/background/retained runtime state, locks and event routing, and `extension-ui-lifecycle.ts` is a stateless wrapper over the existing stateful bridge. Trust is not a separate state module because Workspace construction fixes `projectTrusted: true`. Package mutation/filter/snapshot already have dedicated modules; Workspace lifecycle only performs build-time initialization and the initial snapshot.)
 - [ ] Virtualize or window long transcript and session lists. (2026-07-19 partial: `reuseStableRows` + memoized rows make the stable transcript prefix skip re-render during streaming; true virtualization still open.)
 - [ ] Make packaged dependency archives reproducible.
 - [ ] Align E2E PATH isolation with release smoke tests.

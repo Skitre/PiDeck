@@ -16,7 +16,7 @@ import {
 } from "@pideck/protocol";
 import { logger } from "./logger.js";
 import { buildSessionSnapshot } from "./session-snapshot.js";
-import { bindExtensionUi } from "./extension-ui-bridge.js";
+import { bindForCandidate } from "./extension-ui-lifecycle.js";
 import { type GraphOperationKind } from "./locks.js";
 import {
   extractLatestAssistantText,
@@ -24,6 +24,10 @@ import {
 } from "./session-title.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import type { ManagedSessionInfo, WorkspaceGraph } from "./workspace-graph-types.js";
+import {
+  captureActiveSessionState,
+  commitActiveSessionState,
+} from "./session-runtime-cache.js";
 import { sessionStorageDirs as resolveSessionStorageDirs } from "./session-storage.js";
 
 function sessionStorageDirs(factory: WorkspaceGraphFactory, g: WorkspaceGraph) {
@@ -415,20 +419,7 @@ export async function createSession(
 
   try {
     // C4 candidate-commit: build new session fully before disposing old (B-SESSION-TXN-01)
-    const prev = {
-      sessionManager: g.sessionManager,
-      agentSession: g.agentSession,
-      extensionsResult: g.extensionsResult,
-      resourceLoader: g.resourceLoader,
-      toolRevision: g.toolRevision,
-      sessionSnapshot: g.sessionSnapshot,
-      extensionUiActivate: g.extensionUiActivate,
-      extensionUiCleanup: g.extensionUiCleanup,
-      extensionUiUpdateIdentity: g.extensionUiUpdateIdentity,
-      unsubscribeAgent: g.unsubscribeAgent,
-      sessionId: server.identity.sessionId,
-      sessionRevision: server.identity.sessionRevision,
-    };
+    const prev = captureActiveSessionState(g, server.identity);
 
     const sessionManager = SessionManager.create(g.canonicalCwd);
     if (name) {
@@ -459,13 +450,12 @@ export async function createSession(
       sessionRevision,
     };
     try {
-      const extensionUiBinding = await bindExtensionUi(session, extensionsResult, {
-        emit: (event, payload) =>
-          server.emitForIdentity(candidateIdentity, event, payload),
-        emitForIdentity: (identity, event, payload) =>
-          server.emitForIdentity(identity, event, payload),
-        getIdentity: () => candidateIdentity,
-      });
+      const extensionUiBinding = await bindForCandidate(
+        session,
+        extensionsResult,
+        server,
+        candidateIdentity,
+      );
       extensionUiActivate = extensionUiBinding.activate;
       extensionUiCleanup = extensionUiBinding.cleanup;
       extensionUiUpdateIdentity = extensionUiBinding.updateIdentity;
@@ -512,18 +502,20 @@ export async function createSession(
 
     // Temporarily commit candidate identity so blocking Extension UI can respond,
     // but do not publish a ready Session until bindExtensions has completed.
-    g.sessionManager = sessionManager;
-    g.agentSession = session;
-    g.extensionsResult = extensionsResult;
-    g.resourceLoader = candidateResourceLoader;
-    g.toolRevision = 1;
-    g.extensionUiActivate = extensionUiActivate;
-    g.extensionUiCleanup = extensionUiCleanup;
-    g.extensionUiUpdateIdentity = extensionUiUpdateIdentity;
-    g.unsubscribeAgent = unsubscribeAgent;
-    server.identity.sessionId = sessionId;
-    server.identity.sessionRevision = sessionRevision;
-    g.sessionSnapshot = sessionSnapshot;
+    commitActiveSessionState(g, server.identity, {
+      sessionManager,
+      agentSession: session,
+      extensionsResult,
+      resourceLoader: candidateResourceLoader,
+      toolRevision: 1,
+      sessionSnapshot,
+      extensionUiActivate,
+      extensionUiCleanup,
+      extensionUiUpdateIdentity,
+      unsubscribeAgent,
+      sessionId,
+      sessionRevision,
+    });
 
     let publishExtensionUi = () => {};
     try {
@@ -538,18 +530,7 @@ export async function createSession(
         /* ignore */
       }
       await factory.disposeAgentSessionOnly(session);
-      g.sessionManager = prev.sessionManager;
-      g.agentSession = prev.agentSession;
-      g.extensionsResult = prev.extensionsResult;
-      g.resourceLoader = prev.resourceLoader;
-      g.toolRevision = prev.toolRevision;
-      g.sessionSnapshot = prev.sessionSnapshot;
-      g.extensionUiActivate = prev.extensionUiActivate;
-      g.extensionUiCleanup = prev.extensionUiCleanup;
-      g.extensionUiUpdateIdentity = prev.extensionUiUpdateIdentity;
-      g.unsubscribeAgent = prev.unsubscribeAgent;
-      server.identity.sessionId = prev.sessionId;
-      server.identity.sessionRevision = prev.sessionRevision;
+      commitActiveSessionState(g, server.identity, prev);
       candidateSession = null;
       extensionUiActivate = null;
       extensionUiCleanup = null;
@@ -594,11 +575,11 @@ export async function createSession(
     extensionUiUpdateIdentity = null;
     unsubscribeAgent = null;
 
-    server.emit("session.snapshot", g.sessionSnapshot);
-    server.emit("agent.toolsChanged", g.sessionSnapshot.tools);
+    server.emit("session.snapshot", sessionSnapshot);
+    server.emit("agent.toolsChanged", sessionSnapshot.tools);
     if (retainedPrevious) factory.announceRetainedRuntime(retainedPrevious);
     publishExtensionUi();
-    return g.sessionSnapshot;
+    return sessionSnapshot;
   } catch (err) {
     try {
       unsubscribeAgent?.();
@@ -731,13 +712,12 @@ export async function openSession(
         sessionId,
         sessionRevision,
       };
-      const extensionUiBinding = await bindExtensionUi(session, extensionsResult, {
-        emit: (event, payload) =>
-          server.emitForIdentity(candidateIdentity, event, payload),
-        emitForIdentity: (identity, event, payload) =>
-          server.emitForIdentity(identity, event, payload),
-        getIdentity: () => candidateIdentity,
-      });
+      const extensionUiBinding = await bindForCandidate(
+        session,
+        extensionsResult,
+        server,
+        candidateIdentity,
+      );
       const candidateExtensionUiActivate = extensionUiBinding.activate;
       candidateExtensionUiCleanup = extensionUiBinding.cleanup;
       candidateExtensionUiUpdateIdentity = extensionUiBinding.updateIdentity;
@@ -754,35 +734,24 @@ export async function openSession(
         toolRevision: 1,
       });
 
-      const prev = {
-        sessionManager: g.sessionManager,
-        agentSession: g.agentSession,
-        extensionsResult: g.extensionsResult,
-        resourceLoader: g.resourceLoader,
-        toolRevision: g.toolRevision,
-        sessionSnapshot: g.sessionSnapshot,
-        extensionUiActivate: g.extensionUiActivate,
-        extensionUiCleanup: g.extensionUiCleanup,
-        extensionUiUpdateIdentity: g.extensionUiUpdateIdentity,
-        unsubscribeAgent: g.unsubscribeAgent,
-        sessionId: server.identity.sessionId,
-        sessionRevision: server.identity.sessionRevision,
-      };
+      const prev = captureActiveSessionState(g, server.identity);
 
       const retainedPrevious = factory.retainBusySession(g, prev);
 
-      g.sessionManager = sessionManager;
-      g.agentSession = session;
-      g.extensionsResult = extensionsResult;
-      g.resourceLoader = candidateResourceLoader;
-      g.toolRevision = 1;
-      g.extensionUiActivate = candidateExtensionUiActivate;
-      g.extensionUiCleanup = candidateExtensionUiCleanup;
-      g.extensionUiUpdateIdentity = candidateExtensionUiUpdateIdentity;
-      g.unsubscribeAgent = candidateUnsubscribeAgent;
-      g.sessionSnapshot = sessionSnapshot;
-      server.identity.sessionId = sessionId;
-      server.identity.sessionRevision = sessionRevision;
+      commitActiveSessionState(g, server.identity, {
+        sessionManager,
+        agentSession: session,
+        extensionsResult,
+        resourceLoader: candidateResourceLoader,
+        toolRevision: 1,
+        sessionSnapshot,
+        extensionUiActivate: candidateExtensionUiActivate,
+        extensionUiCleanup: candidateExtensionUiCleanup,
+        extensionUiUpdateIdentity: candidateExtensionUiUpdateIdentity,
+        unsubscribeAgent: candidateUnsubscribeAgent,
+        sessionId,
+        sessionRevision,
+      });
 
       let publishExtensionUi = () => {};
       try {
@@ -797,18 +766,7 @@ export async function openSession(
           /* ignore */
         }
         await factory.disposeAgentSessionOnly(session);
-        g.sessionManager = prev.sessionManager;
-        g.agentSession = prev.agentSession;
-        g.extensionsResult = prev.extensionsResult;
-        g.resourceLoader = prev.resourceLoader;
-        g.toolRevision = prev.toolRevision;
-        g.sessionSnapshot = prev.sessionSnapshot;
-        g.extensionUiActivate = prev.extensionUiActivate;
-        g.extensionUiCleanup = prev.extensionUiCleanup;
-        g.extensionUiUpdateIdentity = prev.extensionUiUpdateIdentity;
-        g.unsubscribeAgent = prev.unsubscribeAgent;
-        server.identity.sessionId = prev.sessionId;
-        server.identity.sessionRevision = prev.sessionRevision;
+        commitActiveSessionState(g, server.identity, prev);
         candidateSession = null;
         candidateExtensionUiCleanup = null;
         candidateExtensionUiUpdateIdentity = null;

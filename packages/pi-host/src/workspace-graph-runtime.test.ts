@@ -601,18 +601,35 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
       fakeSession(true, ACTIVE_SESSION_ID),
     );
     Reflect.set(factory, "graph", previous);
-    const internal = factory as unknown as {
-      retainGraph: (graph: WorkspaceGraph) => Promise<void>;
-      tryReactivateRetainedGraph: (args: {
-        canonical: string;
-        previousGraph: WorkspaceGraph | null;
-        revision: number;
-        sessionRevision: number;
-        packageRevision: number;
-      }) => Promise<unknown>;
+    const factoryInternals = factory as unknown as {
+      workspaceLifecycle: {
+        retainGraph: (graph: WorkspaceGraph) => Promise<void>;
+        tryReactivateRetainedGraph: (args: {
+          canonical: string;
+          previousGraph: WorkspaceGraph | null;
+          revision: number;
+          sessionRevision: number;
+          packageRevision: number;
+        }) => Promise<unknown>;
+        buildServices: () => Promise<{ graph: WorkspaceGraph }>;
+        disposeRetainedGraphs: () => Promise<void>;
+      };
+      sessionRuntimeCache: {
+        disposeRetainedSessionRuntimes: (graph: WorkspaceGraph) => Promise<void>;
+      };
     };
+    const internal = factoryInternals.workspaceLifecycle;
 
-    return { root, retainedDir, identity, server, factory, previous, internal };
+    return {
+      root,
+      retainedDir,
+      identity,
+      server,
+      factory,
+      previous,
+      internal,
+      sessionRuntimeCache: factoryInternals.sessionRuntimeCache,
+    };
   }
 
   it("keeps the active graph and identity when retained graph preparation fails", async () => {
@@ -657,14 +674,14 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
         candidateSession,
       );
       vi.spyOn(
-        state.factory as unknown as {
+        state.internal as unknown as {
           buildServices: () => Promise<{ graph: WorkspaceGraph }>;
         },
         "buildServices",
       ).mockResolvedValue({ graph: candidate });
-      vi.spyOn(state.factory, "activateExtensionUi").mockRejectedValue(
-        new Error("extension activation failed"),
-      );
+      candidate.extensionUiActivate = async () => {
+        throw new Error("extension activation failed");
+      };
       const originalIdentity = { ...state.identity };
 
       const result = await state.factory.setCurrent(state.retainedDir, "switch-failed");
@@ -754,10 +771,10 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
     const state = setup();
     try {
       const disposeSessions = vi
-        .spyOn(state.factory, "disposeRetainedSessionRuntimes")
+        .spyOn(state.sessionRuntimeCache, "disposeRetainedSessionRuntimes")
         .mockResolvedValue();
       const disposeWorkspaces = vi
-        .spyOn(state.factory, "disposeRetainedGraphs")
+        .spyOn(state.internal, "disposeRetainedGraphs")
         .mockResolvedValue();
 
       await state.factory.invalidateRetainedRuntimeCaches();

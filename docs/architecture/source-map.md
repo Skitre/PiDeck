@@ -14,13 +14,16 @@ Layers map to implementation paths. Current development verification follows
 | Contracts maps | `packages/protocol/src/contracts.ts` | protocol-coverage + deep validateSuccessResult/EventPayload |
 | Pi Host entry | `packages/pi-host/src/main.ts` | `host.integration.test.ts`, `workspace-package.integration.test.ts` |
 | Protocol server | `packages/pi-host/src/server.ts` | integration (shutdown after cleanup) |
-| Workspace graph factory | `packages/pi-host/src/workspace-graph-factory.ts` | integration (candidate-commit, immediate project-resource load) |
+| Workspace graph facade | `packages/pi-host/src/workspace-graph-factory.ts` | `workspace-graph-runtime.test.ts` (facade and cross-module transactions) |
 | Workspace graph types | `packages/pi-host/src/workspace-graph-types.ts` | via factory tests |
+| Workspace lifecycle / retained graphs | `packages/pi-host/src/workspace-lifecycle.ts` | `workspace-lifecycle.test.ts`, retained Workspace runtime regressions |
+| Session runtime cache / retained sessions | `packages/pi-host/src/session-runtime-cache.ts` | `session-runtime-cache.test.ts`, multi-Session runtime regressions |
 | Session lifecycle ops | `packages/pi-host/src/session-lifecycle.ts` | `session-file-lifecycle`, session-controller integration |
 | Package filters | `packages/pi-host/src/package-filters.ts` | `package-filters.test.ts` |
 | Package controller | `packages/pi-host/src/package-controller.ts` | integration + disk fingerprint + resource-reload-required |
 | Agent controller | `packages/pi-host/src/agent-controller.ts` | integration |
 | Extension UI bridge | `packages/pi-host/src/extension-ui-bridge.ts` | `extension-ui-bridge.test.ts` + integration |
+| Extension UI lifecycle helpers | `packages/pi-host/src/extension-ui-lifecycle.ts` | `extension-ui-lifecycle.test.ts`; thin binding/activation/slot cleanup wrapper, while the bridge owns pending RPC and UI state |
 | Extension UI fixture integration | `packages/pi-host/src/extension-ui.integration.test.ts` | real DefaultResourceLoader path |
 | Temp agent helpers | `packages/pi-host/src/test-helpers/temp-agent.ts` | used by integration tests |
 | Sidecar spike (dev diag) | `packages/pi-host/src/spike/sidecar-extension-spike.ts` | `pnpm spike:sidecar` |
