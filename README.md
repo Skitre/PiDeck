@@ -45,6 +45,27 @@ For macOS desktop development, Xcode Command Line Tools are sufficient:
 xcode-select --install
 ```
 
+For Windows desktop development, install:
+
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with **Desktop development with C++** selected.
+- [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). It is already present on most Windows 11 installations.
+- [Rustup](https://rustup.rs/) with the stable toolchain.
+
+In PowerShell, `fnm` plus Corepack can provide the pinned Node and pnpm versions:
+
+```powershell
+winget install Schniz.fnm
+fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+fnm install 22.19.0
+fnm use 22.19.0
+
+npm install --global corepack@latest
+corepack enable pnpm
+corepack prepare pnpm@9.15.0 --activate
+```
+
+To load `fnm` automatically in future PowerShell sessions, add the `fnm env` line to `$PROFILE`.
+
 One way to install the expected Node and pnpm versions on macOS is:
 
 ```bash

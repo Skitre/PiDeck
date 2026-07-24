@@ -45,6 +45,27 @@ macOS 可以通过 `tauri:dev` 运行完整应用。Windows 专用的 `dev:fast`
 xcode-select --install
 ```
 
+在 Windows 上进行桌面开发，请安装：
+
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)，并勾选 **Desktop development with C++**。
+- [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。大多数 Windows 11 系统已经自带。
+- [Rustup](https://rustup.rs/)，并使用 stable 工具链。
+
+在 PowerShell 中，可以使用 `fnm` 和 Corepack 安装项目所需的 Node 与 pnpm 版本：
+
+```powershell
+winget install Schniz.fnm
+fnm env --use-on-cd --shell powershell | Out-String | Invoke-Expression
+fnm install 22.19.0
+fnm use 22.19.0
+
+npm install --global corepack@latest
+corepack enable pnpm
+corepack prepare pnpm@9.15.0 --activate
+```
+
+如需让 `fnm` 在之后的 PowerShell 会话中自动加载，请将 `fnm env` 那一行加入 `$PROFILE`。
+
 在 macOS 上，可以通过 `fnm` 和 Corepack 安装项目所需的 Node 与 pnpm 版本：
 
 ```bash
