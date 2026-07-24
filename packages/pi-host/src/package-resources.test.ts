@@ -660,6 +660,11 @@ describe("resource preference batches", () => {
 
 describe("package identity normalization", () => {
   it("uses SDK prefixes and scope-relative bases", () => {
+    const agentDir = process.platform === "win32" ? "C:/agent" : "/agent";
+    const cwd = process.platform === "win32" ? "C:/workspace" : "/workspace";
+    const expectedAgentDir = process.platform === "win32" ? "c:/agent" : "/agent";
+    const expectedCwd = process.platform === "win32" ? "c:/workspace" : "/workspace";
+
     expect(normalizePackageIdentity("npm:foo@1.2.3")).toEqual({
       identity: "npm:foo",
       kind: "npm",
@@ -680,21 +685,21 @@ describe("package identity normalization", () => {
     expect(normalizePackageIdentity("git+https://github.com/owner/repo.git").kind).toBe("local");
     expect(normalizePackageIdentity("foo", {
       scope: "user",
-      agentDir: "C:/agent",
-      cwd: "C:/workspace",
-    })).toEqual({ identity: "local:c:/agent/foo", kind: "local" });
+      agentDir,
+      cwd,
+    })).toEqual({ identity: `local:${expectedAgentDir}/foo`, kind: "local" });
     const user = normalizePackageIdentity("./shared", {
       scope: "user",
-      agentDir: "C:/agent",
-      cwd: "C:/workspace",
+      agentDir,
+      cwd,
     });
     const project = normalizePackageIdentity("./shared", {
       scope: "project",
-      agentDir: "C:/agent",
-      cwd: "C:/workspace",
+      agentDir,
+      cwd,
     });
-    expect(user.identity).toBe("local:c:/agent/shared");
-    expect(project.identity).toBe("local:c:/workspace/.pi/shared");
+    expect(user.identity).toBe(`local:${expectedAgentDir}/shared`);
+    expect(project.identity).toBe(`local:${expectedCwd}/.pi/shared`);
     expect(user.identity).not.toBe(project.identity);
   });
 });

@@ -9,6 +9,7 @@ import {
   writeFileSync,
   rmSync,
   existsSync,
+  realpathSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
@@ -121,7 +122,7 @@ class HostProcess {
 function emptyProject(root: string, name: string): string {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
-  return dir;
+  return realpathSync(dir);
 }
 
 function projectWithResource(root: string, name: string): string {
