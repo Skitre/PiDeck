@@ -70,6 +70,8 @@ export function createSettingsHandlers(
           return { error: createHostError("AGENT_BUSY", "Agent is busy", { retryable: true }) };
         }
 
+        await factory.invalidateRetainedRuntimeCaches?.();
+
         const params = ctx.params as {
           patch: {
             defaultThinkingLevel?: string;

@@ -42,6 +42,8 @@ export type WorkspaceGraph = {
   backgroundSessions: Map<string, BackgroundSessionRuntime>;
   /** Idle runtimes parked for fast switching within this workspace. */
   retainedSessions: Map<string, BackgroundSessionRuntime>;
+  /** Disk/config fingerprint captured when this graph was parked. */
+  retainedFingerprint?: string;
 };
 
 export type BackgroundSessionRuntime = {

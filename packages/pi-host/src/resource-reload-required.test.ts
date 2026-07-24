@@ -160,6 +160,7 @@ function mockFactory(opts: {
     hasBusySessions: () => opts.agentBusy === true || !g.agentSession.isIdle,
     setSessionRunId: () => {},
     clearSessionRunId: () => {},
+    invalidateRetainedRuntimeCaches: vi.fn(async () => {}),
     setActiveSessionName: vi.fn((name: string) => {
       g.agentSession.setSessionName(name);
       const snapshot = { sessionId: "s1", name };
@@ -345,6 +346,18 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
     expect("error" in packageOut && packageOut.error.code).toBe("AGENT_BUSY");
     expect("error" in settingsOut && settingsOut.error.code).toBe("AGENT_BUSY");
     expect("error" in modelOut && modelOut.error.code).toBe("AGENT_BUSY");
+  });
+
+  it("invalidates retained runtimes before applying settings", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const out = await createSettingsHandlers(factory)["piSettings.patch"]!({
+      ...promptCtx,
+      id: "req-settings-patch",
+      params: { patch: {} },
+    } as never);
+
+    expect("error" in out).toBe(false);
+    expect(factory.invalidateRetainedRuntimeCaches).toHaveBeenCalledTimes(1);
   });
 
   it("agent.setActiveTools rechecks the agent operation lock after acquiring the graph lock", async () => {

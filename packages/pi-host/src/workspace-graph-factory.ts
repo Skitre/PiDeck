@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, realpathSync } from "node:fs";
-import { resolve as pathResolve } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { join, resolve as pathResolve } from "node:path";
 import {
   AgentSession,
   createAgentSession,
@@ -201,10 +201,18 @@ export class WorkspaceGraphFactory {
    */
   async disposeAgentSession(g: WorkspaceGraph): Promise<void> {
     g.extensionUiActivate = null;
-    g.extensionUiCleanup?.();
+    try {
+      g.extensionUiCleanup?.();
+    } catch {
+      /* ignore Extension UI cleanup failure during disposal */
+    }
     g.extensionUiCleanup = null;
     g.extensionUiUpdateIdentity = null;
-    g.unsubscribeAgent?.();
+    try {
+      g.unsubscribeAgent?.();
+    } catch {
+      /* ignore subscription cleanup failure during disposal */
+    }
     g.unsubscribeAgent = null;
     if (g.agentSession) {
       await this.disposeAgentSessionOnly(g.agentSession);
@@ -751,6 +759,39 @@ export class WorkspaceGraphFactory {
     return canonicalCwd.toLocaleLowerCase();
   }
 
+  private retainedGraphFingerprint(g: WorkspaceGraph): string {
+    const hash = createHash("sha256");
+    const visit = (path: string): void => {
+      if (!existsSync(path)) {
+        hash.update(`missing:${path}\n`);
+        return;
+      }
+      try {
+        const stat = lstatSync(path);
+        hash.update(`${path}|${stat.mode}|${stat.size}|${Math.trunc(stat.mtimeMs)}\n`);
+        if (!stat.isDirectory()) return;
+        for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) =>
+          a.name.localeCompare(b.name),
+        )) {
+          visit(join(path, entry.name));
+        }
+      } catch (err) {
+        hash.update(
+          `error:${path}:${err instanceof Error ? err.message : String(err)}\n`,
+        );
+      }
+    };
+
+    visit(join(g.canonicalCwd, ".pi"));
+    visit(join(this.deps.agentDir, "settings.json"));
+    visit(join(this.deps.agentDir, "models.json"));
+    visit(join(this.deps.agentDir, "auth.json"));
+    for (const directory of ["packages", "npm", "git"]) {
+      visit(join(this.deps.agentDir, directory));
+    }
+    return hash.digest("hex");
+  }
+
   /**
    * Quiesce an idle graph and park it for instant reactivation. Retained
    * graphs must not emit anything: emitForIdentity throws for a non-current
@@ -779,6 +820,7 @@ export class WorkspaceGraphFactory {
     }
     g.extensionUiCleanup = null;
     g.extensionUiUpdateIdentity = null;
+    g.retainedFingerprint = this.retainedGraphFingerprint(g);
 
     const key = this.retainedGraphKey(g.canonicalCwd);
     const existing = this.retainedGraphs.get(key);
@@ -811,6 +853,14 @@ export class WorkspaceGraphFactory {
     }
   }
 
+  /** Drop every idle runtime that may have captured old settings or resources. */
+  async invalidateRetainedRuntimeCaches(): Promise<void> {
+    if (this.graph) {
+      await this.disposeRetainedSessionRuntimes(this.graph);
+    }
+    await this.disposeRetainedGraphs();
+  }
+
   /**
    * Fast workspace switch: reactivate a retained graph under the caller's
    * already-held serviceGraphLock. Returns null when no retained graph is
@@ -833,6 +883,16 @@ export class WorkspaceGraphFactory {
     if (!server) return null;
     const g = this.takeRetainedGraph(args.canonical);
     if (!g) return null;
+
+    const retainedFingerprint = g.retainedFingerprint;
+    g.retainedFingerprint = undefined;
+    if (!retainedFingerprint || retainedFingerprint !== this.retainedGraphFingerprint(g)) {
+      logger.info("Retained workspace changed on disk; rebuilding", {
+        cwd: args.canonical,
+      });
+      await this.disposeGraph(g);
+      return null;
+    }
 
     if (!g.servicesReady || !g.agentSession) {
       await this.disposeGraph(g);
@@ -871,8 +931,35 @@ export class WorkspaceGraphFactory {
       g.extensionUiActivate = binding.activate;
       g.extensionUiCleanup = binding.cleanup;
       g.extensionUiUpdateIdentity = binding.updateIdentity;
+      binding.updateIdentity(candidateIdentity);
+
+      g.packageSnapshot = await buildPackageSnapshot({
+        revision: args.packageRevision,
+        workspaceId: g.workspaceId,
+        scope: "all",
+        packageManager: g.packageManager!,
+        settingsManager: g.settingsManager!,
+        resourceLoader: g.resourceLoader,
+        cwd: g.canonicalCwd,
+        agentDir: this.deps.agentDir,
+        packageUpdateCheck: this.deps.packageUpdateCheck,
+        resourceIdMap: g.resourceIdMap,
+        resourceReloadRequired: g.resourceReloadRequired,
+      });
+      g.sessionSnapshot = buildSessionSnapshot({
+        session,
+        sessionManager,
+        cwd: args.canonical,
+        sessionId,
+        revision: args.sessionRevision,
+        workspaceId: g.workspaceId,
+        toolRevision: g.toolRevision,
+      });
+      g.unsubscribeAgent = session.subscribe((event) => {
+        this.handleAgentEvent(g, session, event);
+      });
     } catch (err) {
-      logger.warn("retained graph Extension rebind failed; rebuilding workspace", {
+      logger.warn("retained graph preparation failed; rebuilding workspace", {
         cwd: args.canonical,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -880,14 +967,7 @@ export class WorkspaceGraphFactory {
       return null;
     }
 
-    g.unsubscribeAgent = session.subscribe((event) => {
-      this.handleAgentEvent(g, session, event);
-    });
-
-    // Commit: park the outgoing graph, promote the retained one.
-    if (args.previousGraph) {
-      await this.retainGraph(args.previousGraph);
-    }
+    const previousIdentity = server.getIdentity();
     g.revision = args.revision;
     this.graph = g;
     server.identity.workspaceId = g.workspaceId;
@@ -896,37 +976,27 @@ export class WorkspaceGraphFactory {
     server.identity.sessionRevision = args.sessionRevision;
     server.identity.packageRevision = args.packageRevision;
 
-    g.packageSnapshot = await buildPackageSnapshot({
-      revision: args.packageRevision,
-      workspaceId: g.workspaceId,
-      scope: "all",
-      packageManager: g.packageManager!,
-      settingsManager: g.settingsManager!,
-      resourceLoader: g.resourceLoader,
-      cwd: g.canonicalCwd,
-      agentDir: this.deps.agentDir,
-      packageUpdateCheck: this.deps.packageUpdateCheck,
-      resourceIdMap: g.resourceIdMap,
-      resourceReloadRequired: g.resourceReloadRequired,
-    });
-    g.sessionSnapshot = buildSessionSnapshot({
-      session,
-      sessionManager,
-      cwd: args.canonical,
-      sessionId,
-      revision: args.sessionRevision,
-      workspaceId: g.workspaceId,
-      toolRevision: g.toolRevision,
-    });
-
     let publishExtensionUi = () => {};
     try {
       publishExtensionUi = await this.activateExtensionUi(g);
     } catch (err) {
-      logger.warn("retained graph Extension activate failed", {
+      logger.warn("retained graph Extension activate failed; rebuilding workspace", {
         cwd: args.canonical,
         error: err instanceof Error ? err.message : String(err),
       });
+      this.graph = args.previousGraph;
+      server.identity.workspaceId = previousIdentity.workspaceId;
+      server.identity.workspaceRevision = previousIdentity.workspaceRevision;
+      server.identity.sessionId = previousIdentity.sessionId;
+      server.identity.sessionRevision = previousIdentity.sessionRevision;
+      server.identity.packageRevision = previousIdentity.packageRevision;
+      await this.disposeGraph(g);
+      return null;
+    }
+
+    // Commit: only quiesce the outgoing graph after the retained candidate is ready.
+    if (args.previousGraph) {
+      await this.retainGraph(args.previousGraph);
     }
 
     server.setPhase("ready");
@@ -1107,9 +1177,7 @@ export class WorkspaceGraphFactory {
         return { error: built.error };
       }
 
-      if (previousGraph) {
-        await this.retainGraph(previousGraph);
-      }
+      const previousIdentity = server.getIdentity();
       this.graph = built.graph;
       server.identity.workspaceId = workspaceId;
       server.identity.workspaceRevision = revision;
@@ -1126,6 +1194,17 @@ export class WorkspaceGraphFactory {
           err instanceof Error ? err.message : "Extension bind failed",
         );
         await this.disposeGraph(this.graph);
+        if (previousGraph) {
+          this.graph = previousGraph;
+          server.identity.workspaceId = previousIdentity.workspaceId;
+          server.identity.workspaceRevision = previousIdentity.workspaceRevision;
+          server.identity.sessionId = previousIdentity.sessionId;
+          server.identity.sessionRevision = previousIdentity.sessionRevision;
+          server.identity.packageRevision = previousIdentity.packageRevision;
+          server.setPhase("ready");
+          server.setLastError(undefined);
+          return { error };
+        }
         await this.commitWorkspaceFailure({
           previousGraph: null,
           workspaceId,
@@ -1137,6 +1216,10 @@ export class WorkspaceGraphFactory {
           error,
         });
         return { error };
+      }
+
+      if (previousGraph) {
+        await this.retainGraph(previousGraph);
       }
 
       server.setPhase("ready");

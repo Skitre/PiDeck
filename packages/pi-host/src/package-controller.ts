@@ -419,9 +419,9 @@ async function mutatePackageUnderLock(
       };
     }
 
-    // Cached idle Sessions own resource loaders and extension runtimes from
-    // before this mutation. Drop them before disk/config changes can diverge.
-    await factory.disposeRetainedSessionRuntimes?.(g);
+    // Cached runtimes own resource loaders and extension/model state from
+    // before this mutation. Drop Session and Workspace caches together.
+    await factory.invalidateRetainedRuntimeCaches?.();
 
     try {
       await runMutation(factory, g, kind, ctx.params, operationId);

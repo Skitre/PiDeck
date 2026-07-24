@@ -68,6 +68,24 @@ export function modelOptionLabel(model: ModelSummary): string {
   return `${model.provider}/${model.name || model.modelId}`;
 }
 
+export function canRequestModelList(args: {
+  hasHost: boolean;
+  hasWorkspace: boolean;
+  hasSession: boolean;
+  connecting: boolean;
+  rehydrating: boolean;
+  desynchronized: boolean;
+}): boolean {
+  return (
+    args.hasHost &&
+    args.hasWorkspace &&
+    args.hasSession &&
+    !args.connecting &&
+    !args.rehydrating &&
+    !args.desynchronized
+  );
+}
+
 export function ContextUsageRing() {
   const contextUsage = useAppStore((s) => s.session?.contextUsage);
   const breakdown = contextUsage?.breakdown;
@@ -139,6 +157,9 @@ export function ModelControls() {
   const setSession = useAppStore((s) => s.applySessionSnapshot);
   const thinkingLevels = useAppStore((s) => s.thinkingLevels);
   const providerConfigRevision = useAppStore((s) => s.providerConfigRevision);
+  const connecting = useAppStore((s) => s.connecting);
+  const rehydrating = useAppStore((s) => s.rehydrating);
+  const desynchronized = useAppStore((s) => s.desynchronized);
   const setThinkingLevels = useAppStore((s) => s.setThinkingLevels);
   const pushNotification = useAppStore((s) => s.pushNotification);
   const [models, setModels] = useState<ModelSummary[]>([]);
@@ -158,7 +179,19 @@ export function ModelControls() {
   const sessionRevision = session?.revision;
 
   useEffect(() => {
-    if (!host || !workspace || !session) {
+    if (
+      !host ||
+      !workspace ||
+      !session ||
+      !canRequestModelList({
+        hasHost: Boolean(host),
+        hasWorkspace: Boolean(workspace),
+        hasSession: Boolean(session),
+        connecting,
+        rehydrating,
+        desynchronized,
+      })
+    ) {
       listRequest.current += 1;
       setModels([]);
       setEnabledProviders(undefined);
@@ -231,6 +264,9 @@ export function ModelControls() {
     sessionId,
     sessionRevision,
     providerConfigRevision,
+    connecting,
+    rehydrating,
+    desynchronized,
     setThinkingLevels,
   ]);
 

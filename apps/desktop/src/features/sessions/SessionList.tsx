@@ -31,6 +31,7 @@ import {
   workspaceContext,
 } from "../../lib/bridge/host-context";
 import type { SessionSnapshot, SessionSummary } from "@pideck/protocol";
+import { requestSessionOpenWithRetry } from "../../lib/bridge/session-open-request";
 import {
   sessionCatalogItems,
   type SessionCatalogEntry,
@@ -338,11 +339,25 @@ export function SessionList({
     const startedAt = performance.now();
     setSessionMutationPending(true);
     try {
-      const res = await hostClient.request(
-        "session.open",
-        nullableSessionContext(host, workspace),
-        { sessionPath: path },
+      const openContext = nullableSessionContext(host, workspace);
+      const res = await requestSessionOpenWithRetry(
+        () =>
+          hostClient.request(
+            "session.open",
+            openContext,
+            { sessionPath: path },
+          ),
+        undefined,
+        () => {
+          const current = useAppStore.getState();
+          return (
+            current.host?.hostInstanceId === openContext.expectedHostInstanceId &&
+            current.workspace?.id === openContext.expectedWorkspaceId &&
+            current.workspace?.revision === openContext.expectedWorkspaceRevision
+          );
+        },
       );
+      if (!res) return;
       console.info(
         `[session] open took ${Math.round(performance.now() - startedAt)}ms ok=${res.ok}`,
       );
@@ -355,14 +370,17 @@ export function SessionList({
         return;
       }
       if (!res.ok) {
-        if (target && res.error?.code !== "AGENT_BUSY") {
+        if (target && res.error?.retryable !== true) {
           setSessionRuntimeState(
             target.sessionId,
             "error",
             res.error?.message ?? "Open session failed",
           );
         }
-        pushNotification(res.error?.message ?? "Open session failed", "error");
+        pushNotification(
+          res.error?.message ?? "Open session failed",
+          res.error?.retryable === true ? "warning" : "error",
+        );
         return;
       }
       setSession(res.result);

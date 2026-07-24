@@ -311,9 +311,8 @@ async function refreshRegistry(factory: WorkspaceGraphFactory, rebindCurrentMode
   rebindCurrentSessionModel(graph.agentSession, factory.deps.modelRegistry);
 }
 
-async function invalidateRetainedSessions(factory: WorkspaceGraphFactory): Promise<void> {
-  const graph = factory.getGraph();
-  if (graph) await factory.disposeRetainedSessionRuntimes?.(graph);
+async function invalidateRetainedRuntimes(factory: WorkspaceGraphFactory): Promise<void> {
+  await factory.invalidateRetainedRuntimeCaches?.();
 }
 
 async function alignCurrentSessionModel(
@@ -463,7 +462,7 @@ export function createProviderHandlers(
         if (!isObject(raw)) {
           return { error: createHostError("MODEL_NOT_FOUND", `Provider not found: ${providerId}`) };
         }
-        await invalidateRetainedSessions(factory);
+        await invalidateRetainedRuntimes(factory);
         const nextEnabled = new Set(resolveEnabledProviders(
           config,
           factory.getGraph()?.agentSession?.model?.provider,
@@ -546,7 +545,7 @@ export function createProviderHandlers(
           Array.isArray(existing.models),
         );
         if (modelConflict) return { error: modelConflict };
-        await invalidateRetainedSessions(factory);
+        await invalidateRetainedRuntimes(factory);
         const merged = mergeProvider(existing, draft);
         if (params.apiKey !== undefined || params.clearApiKey === true) delete merged.apiKey;
         if (draft.id !== originalId) delete config.providers[originalId];
@@ -621,7 +620,7 @@ export function createProviderHandlers(
         if (config.providers[providerId] === undefined) {
           return { error: createHostError("MODEL_NOT_FOUND", `Provider not found: ${providerId}`) };
         }
-        await invalidateRetainedSessions(factory);
+        await invalidateRetainedRuntimes(factory);
         const enabledBefore = resolveEnabledProviders(
           config,
           factory.getGraph()?.agentSession?.model?.provider,

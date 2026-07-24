@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ModelSummary } from "@pideck/protocol";
 import {
+  canRequestModelList,
   includeCurrentModel,
   modelOptionLabel,
   requestModelListWithRetry,
@@ -52,6 +53,25 @@ describe("includeCurrentModel", () => {
 describe("modelOptionLabel", () => {
   it("prefixes the display name with the Provider ID", () => {
     expect(modelOptionLabel(current)).toBe("muapi/Grok 4.5");
+  });
+});
+
+describe("canRequestModelList", () => {
+  const ready = {
+    hasHost: true,
+    hasWorkspace: true,
+    hasSession: true,
+    connecting: false,
+    rehydrating: false,
+    desynchronized: false,
+  };
+
+  it("waits until recovery has a synchronized Host generation", () => {
+    expect(canRequestModelList(ready)).toBe(true);
+    expect(canRequestModelList({ ...ready, connecting: true })).toBe(false);
+    expect(canRequestModelList({ ...ready, rehydrating: true })).toBe(false);
+    expect(canRequestModelList({ ...ready, desynchronized: true })).toBe(false);
+    expect(canRequestModelList({ ...ready, hasSession: false })).toBe(false);
   });
 });
 

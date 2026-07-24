@@ -19,6 +19,7 @@ import {
 import { classifyToolSnapshot } from "../lib/stores/tool-revision";
 import { expectedIdentityForEvent, isBackgroundExtensionUiRequest } from "./event-identity";
 import { mergeHostIdentity, nullableSessionContext } from "../lib/bridge/host-context";
+import { requestSessionOpenWithRetry } from "../lib/bridge/session-open-request";
 import {
   persistDesktopSettings,
   persistRecentDesktopLocation,
@@ -575,12 +576,30 @@ export function App() {
                     hydrated.workspace?.servicesReady &&
                     hydrated.session?.sessionPath !== sessionPathToRestore
                   ) {
-                    const restored = await hostClient.request(
-                      "session.open",
-                      nullableSessionContext(hydrated.host, hydrated.workspace),
-                      { sessionPath: sessionPathToRestore },
-                      180_000,
+                    const restoreContext = nullableSessionContext(
+                      hydrated.host,
+                      hydrated.workspace,
                     );
+                    const restored = await requestSessionOpenWithRetry(
+                      () =>
+                        hostClient.request(
+                          "session.open",
+                          restoreContext,
+                          { sessionPath: sessionPathToRestore },
+                          180_000,
+                        ),
+                      undefined,
+                      () => {
+                        const current = useAppStore.getState();
+                        return (
+                          !cancelled &&
+                          current.host?.hostInstanceId === restoreContext.expectedHostInstanceId &&
+                          current.workspace?.id === restoreContext.expectedWorkspaceId &&
+                          current.workspace?.revision === restoreContext.expectedWorkspaceRevision
+                        );
+                      },
+                    );
+                    if (!restored) continue;
                     if (restored.ok) {
                       const currentHost = useAppStore.getState().host;
                       if (currentHost) {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-21",
+  "updatedAt": "2026-07-24",
   "claimStatus": "not-complete",
   "acceptedRelease": null,
   "requirements": [
@@ -32,7 +32,7 @@
     {
       "id": "recovery",
       "implementationStatus": "implemented",
-      "evidence": ["apps/desktop/src/lib/stores/epoch-store.test.ts", "apps/desktop/src/lib/bridge/rehydrate.test.ts"]
+      "evidence": ["apps/desktop/src/lib/stores/epoch-store.test.ts", "apps/desktop/src/lib/bridge/rehydrate.test.ts", "apps/desktop/src/lib/bridge/session-open-request.test.ts"]
     },
     {
       "id": "error-visibility",

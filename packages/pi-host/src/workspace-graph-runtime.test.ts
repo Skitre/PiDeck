@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { HostEventName, HostIdentity } from "@pideck/protocol";
 import type { PiHostServer } from "./server.js";
@@ -72,6 +75,44 @@ function fakeSessionSnapshot(
       active: [],
     },
   } as BackgroundSessionRuntime["sessionSnapshot"];
+}
+
+function fakeWorkspaceGraph(
+  canonicalCwd: string,
+  workspaceId: string,
+  session: AgentSession,
+): WorkspaceGraph {
+  const sessionId = session.sessionId;
+  return {
+    workspaceId,
+    cwd: canonicalCwd,
+    canonicalCwd,
+    revision: 1,
+    servicesReady: true,
+    settingsManager: {
+      getGlobalSettings: () => ({}),
+      getProjectSettings: () => ({}),
+    },
+    packageManager: {
+      listConfiguredPackages: () => [],
+      resolve: async () => ({ extensions: [], skills: [], prompts: [], themes: [] }),
+    },
+    resourceLoader: null,
+    sessionManager: { getSessionId: () => sessionId },
+    agentSession: session,
+    extensionsResult: null,
+    packageSnapshot: null,
+    sessionSnapshot: fakeSessionSnapshot(sessionId, 1, true),
+    toolRevision: 1,
+    resourceIdMap: new Map(),
+    unsubscribeAgent: vi.fn(),
+    extensionUiActivate: null,
+    extensionUiCleanup: vi.fn(),
+    extensionUiUpdateIdentity: null,
+    resourceReloadRequired: false,
+    backgroundSessions: new Map(),
+    retainedSessions: new Map(),
+  } as unknown as WorkspaceGraph;
 }
 
 describe("WorkspaceGraphFactory multi-Session routing", () => {
@@ -518,5 +559,213 @@ describe("WorkspaceGraphFactory multi-Session routing", () => {
 
     expect("error" in result && result.error.code).toBe("AGENT_BUSY");
     expect(server.serviceGraphLock.isHeld()).toBe(false);
+  });
+});
+
+describe("WorkspaceGraphFactory retained Workspace recovery", () => {
+  function setup() {
+    const root = mkdtempSync(join(tmpdir(), "pideck-retained-workspace-"));
+    const agentDir = join(root, "agent");
+    const currentDir = join(root, "current");
+    const retainedDir = join(root, "retained");
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(currentDir, { recursive: true });
+    mkdirSync(retainedDir, { recursive: true });
+
+    const identity: HostIdentity = {
+      hostInstanceId: HOST_ID,
+      workspaceId: WORKSPACE_ID,
+      workspaceRevision: 7,
+      sessionId: ACTIVE_SESSION_ID,
+      sessionRevision: 9,
+      packageRevision: 4,
+    };
+    const server = {
+      identity,
+      serviceGraphLock: new TryMutex(),
+      getIdentity: () => ({ ...identity }),
+      emit: vi.fn(),
+      emitForIdentity: vi.fn(),
+      setPhase: vi.fn(),
+      setLastError: vi.fn(),
+    } as unknown as PiHostServer;
+    const factory = new WorkspaceGraphFactory({
+      agentDir,
+      packageUpdateCheck: false,
+    } as GraphFactoryDeps);
+    factory.bindServer(server);
+
+    const previous = fakeWorkspaceGraph(
+      currentDir,
+      WORKSPACE_ID,
+      fakeSession(true, ACTIVE_SESSION_ID),
+    );
+    Reflect.set(factory, "graph", previous);
+    const internal = factory as unknown as {
+      retainGraph: (graph: WorkspaceGraph) => Promise<void>;
+      tryReactivateRetainedGraph: (args: {
+        canonical: string;
+        previousGraph: WorkspaceGraph | null;
+        revision: number;
+        sessionRevision: number;
+        packageRevision: number;
+      }) => Promise<unknown>;
+    };
+
+    return { root, retainedDir, identity, server, factory, previous, internal };
+  }
+
+  it("keeps the active graph and identity when retained graph preparation fails", async () => {
+    const state = setup();
+    try {
+      const retainedSession = fakeSession(true, BACKGROUND_SESSION_ID);
+      const retained = fakeWorkspaceGraph(
+        state.retainedDir,
+        "55555555-5555-4555-8555-555555555555",
+        retainedSession,
+      );
+      retained.packageManager = null;
+      await state.internal.retainGraph(retained);
+      const originalIdentity = { ...state.identity };
+
+      const result = await state.internal.tryReactivateRetainedGraph({
+        canonical: state.retainedDir,
+        previousGraph: state.previous,
+        revision: 8,
+        sessionRevision: 10,
+        packageRevision: 5,
+      });
+
+      expect(result).toBeNull();
+      expect(state.factory.getGraph()).toBe(state.previous);
+      expect(state.identity).toEqual(originalIdentity);
+      expect(state.previous.extensionUiCleanup).not.toHaveBeenCalled();
+      expect(state.previous.unsubscribeAgent).not.toHaveBeenCalled();
+      expect(retainedSession.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the active graph when a newly built Workspace fails activation", async () => {
+    const state = setup();
+    try {
+      const candidateSession = fakeSession(true, BACKGROUND_SESSION_ID);
+      const candidate = fakeWorkspaceGraph(
+        state.retainedDir,
+        "88888888-8888-4888-8888-888888888888",
+        candidateSession,
+      );
+      vi.spyOn(
+        state.factory as unknown as {
+          buildServices: () => Promise<{ graph: WorkspaceGraph }>;
+        },
+        "buildServices",
+      ).mockResolvedValue({ graph: candidate });
+      vi.spyOn(state.factory, "activateExtensionUi").mockRejectedValue(
+        new Error("extension activation failed"),
+      );
+      const originalIdentity = { ...state.identity };
+
+      const result = await state.factory.setCurrent(state.retainedDir, "switch-failed");
+
+      expect("error" in result && result.error.code).toBe("WORKSPACE_SWITCH_FAILED");
+      expect(state.factory.getGraph()).toBe(state.previous);
+      expect(state.identity).toEqual(originalIdentity);
+      expect(state.previous.extensionUiCleanup).not.toHaveBeenCalled();
+      expect(state.previous.unsubscribeAgent).not.toHaveBeenCalled();
+      expect(candidateSession.dispose).toHaveBeenCalledTimes(1);
+      expect(state.server.setPhase).toHaveBeenCalledWith("ready");
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back the active graph and identity when retained activation fails", async () => {
+    const state = setup();
+    try {
+      const retainedSession = fakeSession(true, BACKGROUND_SESSION_ID);
+      Reflect.set(
+        retainedSession,
+        "bindExtensions",
+        vi.fn(async () => {
+          throw new Error("extension activation failed");
+        }),
+      );
+      const retained = fakeWorkspaceGraph(
+        state.retainedDir,
+        "66666666-6666-4666-8666-666666666666",
+        retainedSession,
+      );
+      await state.internal.retainGraph(retained);
+      const originalIdentity = { ...state.identity };
+
+      const result = await state.internal.tryReactivateRetainedGraph({
+        canonical: state.retainedDir,
+        previousGraph: state.previous,
+        revision: 8,
+        sessionRevision: 10,
+        packageRevision: 5,
+      });
+
+      expect(result).toBeNull();
+      expect(state.factory.getGraph()).toBe(state.previous);
+      expect(state.identity).toEqual(originalIdentity);
+      expect(state.previous.extensionUiCleanup).not.toHaveBeenCalled();
+      expect(state.previous.unsubscribeAgent).not.toHaveBeenCalled();
+      expect(retainedSession.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  });
+
+  it("discards a retained graph when project resources changed on disk", async () => {
+    const state = setup();
+    try {
+      const retainedSession = fakeSession(true, BACKGROUND_SESSION_ID);
+      const retained = fakeWorkspaceGraph(
+        state.retainedDir,
+        "77777777-7777-4777-8777-777777777777",
+        retainedSession,
+      );
+      await state.internal.retainGraph(retained);
+      const extensionsDir = join(state.retainedDir, ".pi", "extensions");
+      mkdirSync(extensionsDir, { recursive: true });
+      writeFileSync(join(extensionsDir, "changed.ts"), "export default () => {};\n");
+
+      const result = await state.internal.tryReactivateRetainedGraph({
+        canonical: state.retainedDir,
+        previousGraph: state.previous,
+        revision: 8,
+        sessionRevision: 10,
+        packageRevision: 5,
+      });
+
+      expect(result).toBeNull();
+      expect(state.factory.getGraph()).toBe(state.previous);
+      expect(retainedSession.bindExtensions).not.toHaveBeenCalled();
+      expect(retainedSession.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates retained Session and Workspace runtimes together", async () => {
+    const state = setup();
+    try {
+      const disposeSessions = vi
+        .spyOn(state.factory, "disposeRetainedSessionRuntimes")
+        .mockResolvedValue();
+      const disposeWorkspaces = vi
+        .spyOn(state.factory, "disposeRetainedGraphs")
+        .mockResolvedValue();
+
+      await state.factory.invalidateRetainedRuntimeCaches();
+
+      expect(disposeSessions).toHaveBeenCalledWith(state.previous);
+      expect(disposeWorkspaces).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
   });
 });
