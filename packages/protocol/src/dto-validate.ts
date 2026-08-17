@@ -1838,9 +1838,10 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         : "invalid agent.runNow result";
     case "agent.prompt":
       return isPlainObject(result) &&
-        hasExactKeys(result, ["accepted", "runId"]) &&
+        hasExactKeys(result, ["accepted", "runId"], ["session"]) &&
         result.accepted === true &&
-        isUuid(result.runId)
+        isUuid(result.runId) &&
+        (result.session === undefined || isSessionSnapshot(result.session))
         ? null
         : "invalid agent.prompt result";
     case "extensionUi.configure":

@@ -52,10 +52,26 @@ function resolveAgentDir(): string {
   return join(homedir(), ".pi", "agent");
 }
 
-function resolveInitialCwd(): string | null {
-  const arg = process.argv.find((a) => a.startsWith("--initial-cwd="));
-  const value = arg?.slice("--initial-cwd=".length).trim();
+function resolveArg(prefix: string): string | null {
+  const arg = process.argv.find((a) => a.startsWith(prefix));
+  const value = arg?.slice(prefix.length).trim();
   return value ? value : null;
+}
+
+function resolveInitialCwd(): string | null {
+  return resolveArg("--initial-cwd=");
+}
+
+function resolveInitialSessionBootstrap(): {
+  sessionPath?: string;
+  continueRecent?: boolean;
+} {
+  const sessionPath = resolveArg("--initial-session=");
+  const continueRecent = process.argv.includes("--continue-recent");
+  return {
+    ...(sessionPath ? { sessionPath } : {}),
+    ...(continueRecent ? { continueRecent: true } : {}),
+  };
 }
 
 /**
@@ -326,7 +342,11 @@ async function main(): Promise<void> {
   if (initialCwd) {
     const preloadStarted = Date.now();
     try {
-      const preload = await graphFactory.setCurrent(initialCwd, randomUUID());
+      const preload = await graphFactory.setCurrent(
+        initialCwd,
+        randomUUID(),
+        resolveInitialSessionBootstrap(),
+      );
       if ("error" in preload) {
         logger.warn("initial workspace preload failed", {
           cwd: initialCwd,

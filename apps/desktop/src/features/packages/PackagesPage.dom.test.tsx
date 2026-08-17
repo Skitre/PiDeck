@@ -102,26 +102,9 @@ function snapshot(overrides: Partial<PackageSnapshot> = {}): PackageSnapshot {
   return {
     revision: 1,
     workspaceId: "w1",
-    scope: "all",
+    scope: "user",
     configured: [
       packageRecord(),
-      packageRecord({
-        id: "package:project:theme",
-        identity: "local:theme",
-        source: "./theme",
-        kind: "local",
-        scope: "project",
-        displayName: "Workspace theme",
-        projectOverride: { source: ".pi/settings.json", overrideCount: 2 },
-        resourceCounts: {
-          extensions: 0,
-          skills: 0,
-          prompts: 0,
-          themes: 1,
-          enabled: 1,
-          disabled: 0,
-        },
-      }),
       packageRecord({
         id: "package:user:legacy-theme",
         identity: "local:legacy-theme",
@@ -130,7 +113,6 @@ function snapshot(overrides: Partial<PackageSnapshot> = {}): PackageSnapshot {
         scope: "user",
         displayName: "Legacy theme",
         effective: false,
-        shadowedByPackageId: "package:project:theme",
         resourceCounts: null,
         resourceCountsState: "unknownShadowed",
       }),
@@ -154,15 +136,6 @@ function snapshot(overrides: Partial<PackageSnapshot> = {}): PackageSnapshot {
         scope: "temporary",
         packageId: undefined,
         control: { kind: "owner-extension", ownerResourceId: owner.id },
-      }),
-      resource({
-        id: "resource:project:prompt",
-        type: "prompt",
-        name: "Project prompt",
-        path: "C:/workspace/.pi/prompt.md",
-        scope: "project",
-        origin: "top-level",
-        packageId: undefined,
       }),
     ],
     updateCheck: { supported: true },
@@ -263,7 +236,7 @@ describe("PackagesPage DOM workflows", () => {
     expect(request).toHaveBeenCalledWith(
       "package.list",
       expect.objectContaining({ expectedWorkspaceId: "w1" }),
-      { scope: "all", includeResources: true },
+      { scope: "user", includeResources: true },
       60_000,
     );
 
@@ -273,18 +246,11 @@ describe("PackagesPage DOM workflows", () => {
     expect(toolsRow).toHaveTextContent("1.0.0");
     expect(toolsRow).toHaveTextContent("2 resources");
     expect(toolsRow).toHaveTextContent("1 diagnostic");
-    expect(
-      screen.getByRole("button", { name: /Legacy theme.*Replaced by project/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Legacy theme/ })).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Search installed packages"), "workspace");
-    await user.selectOptions(screen.getByLabelText("Package scope"), "project");
-    await user.selectOptions(screen.getByLabelText("Contained resource type"), "theme");
+    await user.type(screen.getByLabelText("Search installed packages"), "legacy");
 
-    expect(screen.getByRole("button", { name: /Workspace theme.*Project/ })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Workspace theme.*Workspace overrides/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Legacy theme/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Tools" })).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Search installed packages"));
@@ -294,7 +260,7 @@ describe("PackagesPage DOM workflows", () => {
     expect(screen.getByRole("button", { name: /Tools.*User/ })).toBeInTheDocument();
   });
 
-  it("groups package resources with project tri-state controls and keeps runtime rows read-only", async () => {
+  it("groups package resources with user preference controls and keeps runtime rows read-only", async () => {
     const user = userEvent.setup();
     render(<PackagesPage />);
     const installedTab = await screen.findByRole("button", { name: "Installed" });
@@ -308,7 +274,7 @@ describe("PackagesPage DOM workflows", () => {
     expect(installedTab).toHaveAttribute("data-state", "inactive");
     expect(resourcesTab).toHaveAttribute("aria-pressed", "true");
     expect(resourcesTab).toHaveAttribute("data-state", "active");
-    await user.click(screen.getByRole("button", { name: "project" }));
+    expect(screen.queryByRole("button", { name: "project" })).not.toBeInTheDocument();
 
     for (const name of ["All", "Extensions", "Skills", "Prompts", "Themes"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
@@ -320,11 +286,13 @@ describe("PackagesPage DOM workflows", () => {
 
     const toolsControls = screen.getByRole("group", { name: "Tools package" });
     expect(
-      within(toolsControls).getByRole("button", { name: "inherit all resources in Tools package" }),
-    ).toHaveAttribute("aria-pressed", "true");
+      within(toolsControls).queryByRole("button", {
+        name: "inherit all resources in Tools package",
+      }),
+    ).not.toBeInTheDocument();
     expect(
       within(toolsControls).getByRole("button", { name: "enabled all resources in Tools package" }),
-    ).toBeInTheDocument();
+    ).toHaveAttribute("aria-pressed", "true");
     expect(
       within(toolsControls).getByRole("button", {
         name: "disabled all resources in Tools package",
@@ -334,17 +302,14 @@ describe("PackagesPage DOM workflows", () => {
     expect(screen.getByRole("button", { name: "Provided by Tools extension" })).toBeInTheDocument();
     const runtimeRow = screen.getByText("Dynamic review").closest("li");
     expect(runtimeRow).not.toBeNull();
-    expect(within(runtimeRow!).queryByTitle("enabled in project scope")).not.toBeInTheDocument();
+    expect(within(runtimeRow!).queryByTitle("enabled in user scope")).not.toBeInTheDocument();
 
     await user.click(
       within(toolsControls).getByRole("button", {
         name: "disabled all resources in Tools package",
       }),
     );
-    expect(
-      screen.getByRole("dialog", { name: "Confirm project resource change" }),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Apply change" }));
+    expect(screen.queryByRole("dialog", { name: "Confirm project resource change" })).toBeNull();
     await waitFor(() => {
       const mutations = request.mock.calls.filter(
         ([method]) => method === "resource.setPreferences",
@@ -357,10 +322,10 @@ describe("PackagesPage DOM workflows", () => {
           updates: [
             {
               resourceId: "resource:extension:tools",
-              targetScope: "project",
+              targetScope: "user",
               preference: "disabled",
             },
-            { resourceId: "resource:skill:review", targetScope: "project", preference: "disabled" },
+            { resourceId: "resource:skill:review", targetScope: "user", preference: "disabled" },
           ],
         },
         615_000,
@@ -605,20 +570,14 @@ describe("PackagesPage DOM workflows", () => {
     expect(screen.getByLabelText("Resource owner")).toHaveValue("");
   });
 
-  it("opens a replaced user package's resources in User mode", async () => {
+  it("opens a user package's resources without a project mode toggle", async () => {
     const user = userEvent.setup();
     render(<PackagesPage />);
-    await user.click(
-      await screen.findByRole("button", { name: /Legacy theme.*Replaced by project/ }),
-    );
+    await user.click(await screen.findByRole("button", { name: /Legacy theme/ }));
     await user.click(screen.getByRole("button", { name: "Manage resources" }));
 
     expect(screen.getByLabelText("Resource owner")).toHaveValue("package:user:legacy-theme");
-    expect(screen.getByRole("button", { name: "user" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "project" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(screen.queryByRole("button", { name: "project" })).not.toBeInTheDocument();
   });
 
   it("requires an install review and shows executable-code security context", async () => {

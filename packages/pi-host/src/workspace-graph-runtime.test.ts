@@ -1093,7 +1093,7 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
     }
   });
 
-  it("discards a retained graph when project resources changed on disk", async () => {
+  it("does not discard a retained graph when workspace .pi resources change", async () => {
     const state = setup();
     try {
       const retainedSession = fakeSession(true, BACKGROUND_SESSION_ID);
@@ -1102,10 +1102,12 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
         "77777777-7777-4777-8777-777777777777",
         retainedSession,
       );
+      const before = await state.internal.retainedGraphFingerprint(retained);
       await state.internal.retainGraph(retained);
       const extensionsDir = join(state.retainedDir, ".pi", "extensions");
       mkdirSync(extensionsDir, { recursive: true });
       writeFileSync(join(extensionsDir, "changed.ts"), "export default () => {};\n");
+      const after = await state.internal.retainedGraphFingerprint(retained);
 
       const result = await state.internal.tryReactivateRetainedGraph({
         canonical: state.retainedDir,
@@ -1115,10 +1117,10 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
         packageRevision: 5,
       });
 
-      expect(result).toBeNull();
-      expect(state.factory.getGraph()).toBe(state.previous);
-      expect(retainedSession.bindExtensions).not.toHaveBeenCalled();
-      expect(retainedSession.dispose).toHaveBeenCalledTimes(1);
+      expect(after).toBe(before);
+      expect(result).not.toBeNull();
+      expect(state.factory.getGraph()).toBe(retained);
+      expect(retainedSession.dispose).not.toHaveBeenCalled();
     } finally {
       rmSync(state.root, { recursive: true, force: true });
     }
@@ -1202,7 +1204,7 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
     }
   });
 
-  it("keeps a busy retained graph when project resources changed on disk", async () => {
+  it("keeps a busy retained graph when workspace .pi resources change", async () => {
     const state = setup();
     try {
       const retainedSession = fakeSession(false, BACKGROUND_SESSION_ID);
@@ -1242,13 +1244,7 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
         "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         fakeSession(true, BACKGROUND_SESSION_ID),
       );
-      const installedPath = join(
-        state.retainedDir,
-        ".pi",
-        "npm",
-        "node_modules",
-        "example-package",
-      );
+      const installedPath = join(state.agentDir, "npm", "node_modules", "example-package");
       const dependencyFile = join(installedPath, "node_modules", "dependency", "index.js");
       const gitObject = join(installedPath, ".git", "objects", "test-object");
       const manifest = join(installedPath, "package.json");
@@ -1260,7 +1256,7 @@ describe("WorkspaceGraphFactory retained Workspace recovery", () => {
       retained.packageManager!.listConfiguredPackages = () => [
         {
           source: "npm:example-package",
-          scope: "project",
+          scope: "user",
           filtered: false,
           installedPath,
         },

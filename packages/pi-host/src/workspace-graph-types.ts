@@ -23,6 +23,7 @@ import type {
 } from "@pideck/protocol";
 import type { ResourceIdMap } from "./package-snapshot.js";
 import type { AttachmentStore } from "./attachment-store.js";
+import type { UserResourceCache } from "./user-resource-cache.js";
 
 export type WorkspaceGraph = {
   workspaceId: string;
@@ -105,4 +106,6 @@ export type GraphFactoryDeps = {
    */
   recordMigrationMilestone?: (milestone: MigrationMilestone) => Promise<void>;
   packageUpdateCheck: boolean;
+  /** Process-wide user/global Extension cache. Created by the factory when omitted. */
+  userResourceCache?: UserResourceCache;
 };

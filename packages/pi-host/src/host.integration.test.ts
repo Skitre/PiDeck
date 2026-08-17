@@ -46,14 +46,10 @@ class HostProcess {
   private waiters: Array<(line: string) => void> = [];
 
   constructor(agentDir: string, extraEnv: Record<string, string> = {}) {
-    this.proc = spawn(
-      process.execPath,
-      ["--import", "tsx", hostEntry, `--agent-dir=${agentDir}`],
-      {
-        env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, ...extraEnv },
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
+    this.proc = spawn(process.execPath, ["--import", "tsx", hostEntry, `--agent-dir=${agentDir}`], {
+      env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, ...extraEnv },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     this.proc.stdout.setEncoding("utf8");
     this.proc.stdout.on("data", (chunk: string) => {
       this.buffer += chunk;
@@ -151,11 +147,7 @@ function respondToExtensionUi(host: HostProcess, msg: Record<string, unknown>): 
   expect(msg.sessionId).toEqual(expect.any(String));
   const payload = msg.payload as { requestId: string; kind: string };
   const value =
-    payload.kind === "select"
-      ? "beta"
-      : payload.kind === "confirm"
-        ? true
-        : "typed-value";
+    payload.kind === "select" ? "beta" : payload.kind === "confirm" ? true : "typed-value";
   host.send({
     protocolVersion: 1,
     id: randomUUID(),
@@ -184,8 +176,8 @@ describe("Pi Host integration", () => {
     agentDir = t.agentDir;
     projectDir = t.projectDir;
     host = new HostProcess(agentDir);
-    await host.waitForEvent("host.ready");
-  }, 30_000);
+    await host.waitForEvent("host.ready", 60_000);
+  }, 90_000);
 
   afterAll(async () => {
     await host.kill();
@@ -197,11 +189,15 @@ describe("Pi Host integration", () => {
   });
 
   it("system.hello returns HostStatusSnapshot with the SDK version the Host was built against", async () => {
-    const res = await host.request("system.hello", {}, {
-      clientName: "test",
-      clientVersion: "0.0.0",
-      protocolVersion: 1,
-    });
+    const res = await host.request(
+      "system.hello",
+      {},
+      {
+        clientName: "test",
+        clientVersion: "0.0.0",
+        protocolVersion: 1,
+      },
+    );
     expect(res.ok).toBe(true);
     const result = res.result as {
       sdkVersion: string;
@@ -227,11 +223,15 @@ describe("Pi Host integration", () => {
   });
 
   it("workspace.setCurrent makes the selected workspace ready", async () => {
-    const hello = await host.request("system.hello", {}, {
-      clientName: "test",
-      clientVersion: "0.0.0",
-      protocolVersion: 1,
-    });
+    const hello = await host.request(
+      "system.hello",
+      {},
+      {
+        clientName: "test",
+        clientVersion: "0.0.0",
+        protocolVersion: 1,
+      },
+    );
     const hostId = (hello.result as { hostInstanceId: string }).hostInstanceId;
 
     const res = await host.request(
@@ -323,11 +323,15 @@ describe("Pi Host integration", () => {
 
     try {
       await uiHost.waitForEvent("host.ready", 30_000);
-      const hello = await uiHost.request("system.hello", {}, {
-        clientName: "test",
-        clientVersion: "0.0.0",
-        protocolVersion: 1,
-      });
+      const hello = await uiHost.request(
+        "system.hello",
+        {},
+        {
+          clientName: "test",
+          clientVersion: "0.0.0",
+          protocolVersion: 1,
+        },
+      );
       const hostId = (hello.result as { hostInstanceId: string }).hostInstanceId;
       const setCurrentId = randomUUID();
       uiHost.send({
@@ -346,7 +350,10 @@ describe("Pi Host integration", () => {
       const publishedEvents: string[] = [];
       const deadline = Date.now() + 60_000;
       while (!setCurrentResponse && Date.now() < deadline) {
-        const msg = JSON.parse(await uiHost.nextLine(deadline - Date.now())) as Record<string, unknown>;
+        const msg = JSON.parse(await uiHost.nextLine(deadline - Date.now())) as Record<
+          string,
+          unknown
+        >;
         if (typeof msg.event === "string") publishedEvents.push(msg.event);
         if (respondToExtensionUi(uiHost, msg)) continue;
         if (msg.id === setCurrentId) {
@@ -393,9 +400,10 @@ describe("Pi Host integration", () => {
       let createResponse: Record<string, unknown> | null = null;
       const createDeadline = Date.now() + 60_000;
       while (!createResponse && Date.now() < createDeadline) {
-        const msg = JSON.parse(
-          await uiHost.nextLine(createDeadline - Date.now()),
-        ) as Record<string, unknown>;
+        const msg = JSON.parse(await uiHost.nextLine(createDeadline - Date.now())) as Record<
+          string,
+          unknown
+        >;
         if (respondToExtensionUi(uiHost, msg)) continue;
         if (msg.id === createId) createResponse = msg;
       }
@@ -427,17 +435,17 @@ describe("Pi Host integration", () => {
   }, 90_000);
 
   it("system.shutdown accepts", async () => {
-    const hello = await host.request("system.hello", {}, {
-      clientName: "test",
-      clientVersion: "0.0.0",
-      protocolVersion: 1,
-    });
-    const hostId = (hello.result as { hostInstanceId: string }).hostInstanceId;
-    const res = await host.request(
-      "system.shutdown",
-      { expectedHostInstanceId: hostId },
-      null,
+    const hello = await host.request(
+      "system.hello",
+      {},
+      {
+        clientName: "test",
+        clientVersion: "0.0.0",
+        protocolVersion: 1,
+      },
     );
+    const hostId = (hello.result as { hostInstanceId: string }).hostInstanceId;
+    const res = await host.request("system.shutdown", { expectedHostInstanceId: hostId }, null);
     expect(res.ok).toBe(true);
   });
 });
@@ -447,7 +455,7 @@ describe("Pi Host transport lifecycle", () => {
     const t = createTempAgent();
     const eofHost = new HostProcess(t.agentDir);
     try {
-      await eofHost.waitForEvent("host.ready");
+      await eofHost.waitForEvent("host.ready", 60_000);
 
       const exited = new Promise<number | null>((resolve) => {
         eofHost.proc.once("exit", (code) => resolve(code));

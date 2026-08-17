@@ -1,4 +1,3 @@
-import { resolve as pathResolve } from "node:path";
 import type { AgentSession, ExtensionCommandContextActions } from "@earendil-works/pi-coding-agent";
 import {
   createHostError,
@@ -25,6 +24,10 @@ import {
   type WorkspaceGraph,
 } from "./workspace-graph-types.js";
 import {
+  sessionPathsEqual,
+  type WorkspaceSessionBootstrap,
+} from "./workspace-session-bootstrap.js";
+import {
   archiveSession,
   cleanupArchivedSessions,
   createSession,
@@ -38,6 +41,7 @@ import {
   setActiveSessionName,
   setSessionRuntimeName,
 } from "./session-lifecycle.js";
+import { UserResourceCache } from "./user-resource-cache.js";
 
 export class WorkspaceGraphFactory {
   /** @internal — session-lifecycle module */
@@ -45,12 +49,14 @@ export class WorkspaceGraphFactory {
   /** @internal — session-lifecycle module */
   server: PiHostServer | null = null;
   readonly deps: GraphFactoryDeps;
+  readonly userResourceCache: UserResourceCache;
   onModelHealthChanged?: () => void;
   private readonly sessionRuntimeCache: SessionRuntimeCache;
   private readonly workspaceLifecycle: WorkspaceLifecycle;
 
   constructor(deps: GraphFactoryDeps) {
-    this.deps = deps;
+    this.userResourceCache = deps.userResourceCache ?? new UserResourceCache(deps.agentDir);
+    this.deps = { ...deps, userResourceCache: this.userResourceCache };
     this.sessionRuntimeCache = new SessionRuntimeCache({
       getGraph: () => this.graph,
       getServer: () => this.server,
@@ -253,6 +259,7 @@ export class WorkspaceGraphFactory {
   async setCurrent(
     cwd: string,
     requestId: string,
+    bootstrap?: WorkspaceSessionBootstrap,
   ): Promise<
     | {
         workspace: WorkspaceSnapshot;
@@ -260,7 +267,7 @@ export class WorkspaceGraphFactory {
       }
     | { error: HostError }
   > {
-    return this.workspaceLifecycle.setCurrent(cwd, requestId);
+    return this.workspaceLifecycle.setCurrent(cwd, requestId, bootstrap);
   }
 
   /** @internal — session-lifecycle module */
@@ -311,12 +318,7 @@ export class WorkspaceGraphFactory {
 
   /** @internal — session-lifecycle module */
   sessionPathsEqual(left: string | undefined, right: string): boolean {
-    if (!left) return false;
-    const resolvedLeft = pathResolve(left);
-    const resolvedRight = pathResolve(right);
-    return process.platform === "win32"
-      ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
-      : resolvedLeft === resolvedRight;
+    return sessionPathsEqual(left, right);
   }
 
   async createSession(requestId: string, name?: string) {

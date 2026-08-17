@@ -47,6 +47,14 @@ describe("package disk fingerprint", () => {
     expect(changed).not.toBe(first);
   });
 
+  it("ignores workspace .pi package trees", async () => {
+    const { graph, agentDir } = fixture();
+    const first = await capturePackageDiskFingerprint(graph, agentDir);
+    writeFileSync(join(graph.canonicalCwd, ".pi", "packages", "local.json"), '{"changed":true}\n');
+    const afterProjectTree = await capturePackageDiskFingerprint(graph, agentDir);
+    expect(afterProjectTree).toBe(first);
+  });
+
   it("skips dependency and VCS internals while watching configured package files", async () => {
     const { graph, agentDir } = fixture();
     const installedPath = join(agentDir, "npm", "node_modules", "example-package");

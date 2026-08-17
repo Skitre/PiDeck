@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { buildAttachmentReferenceBlock, type SerializableAgentMessage } from "@pideck/protocol";
 import {
+  branchSourceForRow,
   buildAttachedFileBlock,
   buildTranscriptRows,
+  composeBranchPromptText,
   executionTraceIsActive,
   findStreamingAssistantKey,
+  hasBranchPayload,
   messageText,
   parseUserAttachments,
   reuseStableRows,
+  userPromptEntryIds,
+  type TranscriptRow,
 } from "./transcript-model";
 
 describe("attached file blocks", () => {
@@ -52,6 +57,59 @@ describe("attached file blocks", () => {
         unitCount: 12,
       }),
     ]);
+  });
+});
+
+describe("branch source attachments", () => {
+  function userRow(copyText: string, extra?: Partial<TranscriptRow>): TranscriptRow {
+    return {
+      key: "u:0",
+      role: "user",
+      blocks: extra?.blocks ?? [],
+      copyText,
+      sourceId: "u1",
+      ...extra,
+    };
+  }
+
+  it("keeps text-file attachments for edit and regenerate", () => {
+    const row = userRow(
+      ["please review", buildAttachedFileBlock("notes.txt", "hello from disk")].join("\n\n"),
+    );
+    const source = branchSourceForRow(row, new Map([["u:0", "u1"]]), new Map([["u1", row]]));
+    expect(source).toMatchObject({
+      entryId: "u1",
+      fallbackText: "please review",
+      files: [{ name: "notes.txt", content: "hello from disk" }],
+      attachmentIds: [],
+    });
+    expect(composeBranchPromptText(source!)).toContain('<attached-file name="notes.txt">');
+    expect(hasBranchPayload(source!)).toBe(true);
+  });
+
+  it("keeps hosted document ids for a document-only message", () => {
+    const marker = buildAttachmentReferenceBlock([
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        name: "manual.pdf",
+        mediaType: "application/pdf",
+        sizeBytes: 1024,
+        status: "ready",
+        unit: "page",
+        unitCount: 12,
+      },
+    ]);
+    const row = userRow(marker);
+    const source = branchSourceForRow(row, new Map([["u:0", "u1"]]), new Map([["u1", row]]));
+    expect(source).toEqual({
+      entryId: "u1",
+      fallbackText: "",
+      images: [],
+      files: [],
+      attachmentIds: ["11111111-1111-4111-8111-111111111111"],
+    });
+    expect(hasBranchPayload(source!)).toBe(true);
+    expect(composeBranchPromptText(source!)).toBe("");
   });
 });
 
@@ -1575,5 +1633,41 @@ describe("Pi extension and session entry messages", () => {
         messageIndex: 1,
       },
     });
+  });
+});
+
+describe("userPromptEntryIds", () => {
+  it("maps each user and following assistant row to the persisted user entry", () => {
+    const rows = buildTranscriptRows([], {
+      entries: [
+        {
+          id: "u1",
+          type: "message",
+          message: { role: "user", content: "first" },
+        },
+        {
+          id: "a1",
+          type: "message",
+          message: { role: "assistant", content: [{ type: "text", text: "one" }] },
+        },
+        {
+          id: "u2",
+          type: "message",
+          message: { role: "user", content: "second" },
+        },
+        {
+          id: "a2",
+          type: "message",
+          message: { role: "assistant", content: [{ type: "text", text: "two" }] },
+        },
+      ],
+    });
+    const ids = userPromptEntryIds(rows);
+    expect(rows.map((row) => [row.role, ids.get(row.key)])).toEqual([
+      ["user", "u1"],
+      ["assistant", "u1"],
+      ["user", "u2"],
+      ["assistant", "u2"],
+    ]);
   });
 });

@@ -11,11 +11,7 @@ function packageManagerFixture() {
     { source: "npm:shared", scope: "user", filtered: false, installedPath: "C:/user/shared" },
     { source: "npm:shared", scope: "project", filtered: false, installedPath: "C:/project/shared" },
   ];
-  const resource = (
-    path: string,
-    origin: "package" | "top-level",
-    scope: "user" | "project",
-  ) => ({
+  const resource = (path: string, origin: "package" | "top-level", scope: "user" | "project") => ({
     path,
     enabled: true,
     metadata: {
@@ -114,6 +110,72 @@ describe("Package snapshot projections", () => {
     expect(graph.packageSnapshot).toBe(canonical);
     expect(graph.resourceIdMap).toBe(canonicalMap);
     expect([...graph.resourceIdMap.keys()]).toEqual(["canonical"]);
+  });
+
+  it("package.list projects only user packages even when asked for all or project", async () => {
+    const graph = {
+      workspaceId: "w1",
+      packageManager: packageManagerFixture(),
+      settingsManager,
+      packageSnapshot: null,
+      resourceIdMap: new Map(),
+      resourceReloadRequired: false,
+    };
+    const server = {
+      identity: new IdentityState(),
+      serviceGraphLock: new TryMutex(),
+    };
+    const factory = {
+      getServer: () => server,
+      getGraph: () => graph,
+      checkIdentity: () => null,
+      deps: { packageUpdateCheck: true },
+    } as unknown as WorkspaceGraphFactory;
+
+    for (const scope of ["all", "project", "user"] as const) {
+      const out = await createPackageHandlers(factory)["package.list"]!({
+        id: `list-${scope}`,
+        context: {},
+        params: { scope, includeResources: true },
+      } as never);
+      expect("error" in out).toBe(false);
+      const snapshot = (out as { result: PackageSnapshot }).result;
+      expect(snapshot.scope).toBe("user");
+      expect(snapshot.configured.every((pkg) => pkg.scope === "user")).toBe(true);
+      expect(snapshot.resources.every((resource) => resource.scope === "user")).toBe(true);
+    }
+  });
+
+  it("rejects project-scope package install and resource preferences", async () => {
+    const factory = {
+      getServer: () => ({
+        identity: new IdentityState(),
+        serviceGraphLock: new TryMutex(),
+      }),
+    } as unknown as WorkspaceGraphFactory;
+    const handlers = createPackageHandlers(factory);
+
+    const install = await handlers["package.install"]!({
+      id: "install-project",
+      context: {},
+      params: { source: "npm:tools", scope: "project" },
+    } as never);
+    expect(install).toMatchObject({
+      error: { code: "INVALID_REQUEST" },
+    });
+
+    const preference = await handlers["resource.setPreference"]!({
+      id: "pref-project",
+      context: {},
+      params: {
+        resourceId: "resource:extension:tools",
+        targetScope: "project",
+        preference: "disabled",
+      },
+    } as never);
+    expect(preference).toMatchObject({
+      error: { code: "INVALID_REQUEST" },
+    });
   });
 });
 

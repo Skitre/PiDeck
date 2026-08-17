@@ -32,11 +32,14 @@ import {
   LoaderCircle,
   MessageCircleQuestion,
   PanelRightOpen,
+  Pencil,
   Puzzle,
+  RotateCw,
   Terminal,
 } from "lucide-react";
 import { useAppStore } from "../../lib/stores/app-store";
 import { requestFork } from "../../lib/fork-actions";
+import { requestPromptFromEntry, requestRegenerateInSession } from "../../lib/tree-actions";
 import { requestDockBrowser } from "../../lib/dock-browser";
 import { openSystemUrl } from "../../lib/open-system-url";
 import { isSafeExternalUrl, sanitizeAgentText } from "./markdown-utils";
@@ -51,8 +54,13 @@ import {
   buildTranscriptRows,
   executionTraceIsActive,
   findStreamingAssistantKey,
+  branchPromptInput,
+  branchSourceForRow,
+  hasBranchPayload,
   parseUserAttachments,
   reuseStableRows,
+  userPromptEntryIds,
+  type BranchSource,
   type TranscriptContentBlock,
   type TranscriptBlock,
   type TranscriptRow,
@@ -141,6 +149,18 @@ export function Transcript() {
     [messages, session?.entries, session?.leafId, session?.extensionMessageRenders],
   );
   prevRowsRef.current = rows;
+  const promptEntryIds = useMemo(() => userPromptEntryIds(rows), [rows]);
+  const userRowsByEntryId = useMemo(() => {
+    const map = new Map<string, TranscriptRow>();
+    for (const row of rows) {
+      if (row.role === "user" && row.sourceId) map.set(row.sourceId, row);
+    }
+    return map;
+  }, [rows]);
+  const [editing, setEditing] = useState<{ entryId: string; text: string } | null>(null);
+  useEffect(() => {
+    setEditing(null);
+  }, [session?.sessionId]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -547,6 +567,8 @@ export function Transcript() {
           )}
           {visibleRows.map((row) => {
             const streaming = row.key === streamingAssistantKey;
+            const working = row.key === workingHeaderKey;
+            const branch = branchSourceForRow(row, promptEntryIds, userRowsByEntryId);
             return (
               <div
                 className="transcript-row"
@@ -569,6 +591,7 @@ export function Transcript() {
                       ? event.target.closest<HTMLAnchorElement>("a[href]")
                       : null;
                   const linkUrl = anchor && isSafeExternalUrl(anchor.href) ? anchor.href : null;
+                  const idle = useAppStore.getState().session?.isIdle ?? false;
                   openContextMenu({
                     x: event.clientX,
                     y: event.clientY,
@@ -609,11 +632,48 @@ export function Transcript() {
                             },
                           ]
                         : []),
+                      ...(row.role === "user" && branch
+                        ? [
+                            {
+                              id: "transcript.edit",
+                              label: t("transcriptEdit"),
+                              icon: Pencil,
+                              separatorBefore: Boolean(linkUrl || selectionInside),
+                              disabled: !idle,
+                              onSelect: () => {
+                                setEditing({
+                                  entryId: branch.entryId,
+                                  text: branch.fallbackText,
+                                });
+                              },
+                            },
+                          ]
+                        : []),
+                      ...(row.role === "assistant" && branch && !working
+                        ? [
+                            {
+                              id: "transcript.regenerate",
+                              label: t("transcriptRegenerate"),
+                              icon: RotateCw,
+                              separatorBefore: Boolean(linkUrl || selectionInside),
+                              disabled: !idle,
+                              onSelect: () => {
+                                const prompt = branchPromptInput(branch);
+                                void requestRegenerateInSession(branch.entryId, {
+                                  fallbackText: prompt.text,
+                                  images: prompt.images,
+                                  attachmentIds: prompt.attachmentIds,
+                                });
+                              },
+                            },
+                          ]
+                        : []),
                       {
                         id: "transcript.copyMessage",
                         label: t("menuCopyMessage"),
                         icon: Copy,
-                        separatorBefore: linkUrl ? !selectionInside : selectionInside,
+                        separatorBefore:
+                          Boolean(branch) || (linkUrl ? !selectionInside : selectionInside),
                         disabled: !row.copyText,
                         onSelect: () => navigator.clipboard.writeText(row.copyText),
                       },
@@ -625,7 +685,33 @@ export function Transcript() {
                   row={row}
                   mode={streaming ? "streaming" : "static"}
                   showCaret={Boolean(streaming)}
-                  working={row.key === workingHeaderKey}
+                  working={working}
+                  branch={branch}
+                  editing={editing?.entryId === branch?.entryId ? editing : null}
+                  onStartEdit={
+                    branch
+                      ? () =>
+                          setEditing({
+                            entryId: branch.entryId,
+                            text: branch.fallbackText,
+                          })
+                      : undefined
+                  }
+                  onChangeEdit={(text) =>
+                    setEditing((current) => (current ? { ...current, text } : current))
+                  }
+                  onCancelEdit={() => setEditing(null)}
+                  onSubmitEdit={
+                    branch && editing?.entryId === branch.entryId
+                      ? async () => {
+                          const sent = await requestPromptFromEntry(
+                            branch.entryId,
+                            branchPromptInput(branch, editing.text),
+                          );
+                          if (sent) setEditing(null);
+                        }
+                      : undefined
+                  }
                 />
               </div>
             );
@@ -697,11 +783,23 @@ const TranscriptRowView = memo(function TranscriptRowView({
   mode,
   showCaret,
   working,
+  branch,
+  editing,
+  onStartEdit,
+  onChangeEdit,
+  onCancelEdit,
+  onSubmitEdit,
 }: {
   row: TranscriptRow;
   mode: "streaming" | "static";
   showCaret: boolean;
   working: boolean;
+  branch?: BranchSource;
+  editing?: { entryId: string; text: string } | null;
+  onStartEdit?: () => void;
+  onChangeEdit?: (text: string) => void;
+  onCancelEdit?: () => void;
+  onSubmitEdit?: () => void | Promise<void>;
 }) {
   const t = useT();
   if (row.role === "user") {
@@ -760,17 +858,44 @@ const TranscriptRowView = memo(function TranscriptRowView({
             ))}
           </div>
         )}
-        {parsed.text && (
-          <div className="theme-user-message whitespace-pre-wrap break-words rounded-xl rounded-br-md bg-surface-overlay px-3.5 py-2.5 text-sm leading-6">
-            {parsed.text}
+        {editing ? (
+          <UserMessageEditor
+            text={editing.text}
+            canSend={Boolean(
+              editing.text.trim() ||
+              (branch &&
+                hasBranchPayload({
+                  fallbackText: editing.text,
+                  images: branch.images,
+                  files: branch.files,
+                  attachmentIds: branch.attachmentIds,
+                })),
+            )}
+            onChange={onChangeEdit}
+            onCancel={onCancelEdit}
+            onSubmit={onSubmitEdit}
+          />
+        ) : (
+          parsed.text && (
+            <div className="theme-user-message whitespace-pre-wrap break-words rounded-xl rounded-br-md bg-surface-overlay px-3.5 py-2.5 text-sm leading-6">
+              {parsed.text}
+            </div>
+          )
+        )}
+        {!editing && (
+          <div className="mt-1 flex h-7 items-center justify-end gap-1">
+            {branch && onStartEdit && (
+              <EditMessageButton
+                onStartEdit={onStartEdit}
+                className="opacity-0 group-hover:opacity-100"
+              />
+            )}
+            <CopyMessageButton
+              text={stripAttachmentReferenceBlocks(row.copyText)}
+              className="opacity-0 group-hover:opacity-100"
+            />
           </div>
         )}
-        <div className="mt-1 flex h-7 items-center justify-end">
-          <CopyMessageButton
-            text={stripAttachmentReferenceBlocks(row.copyText)}
-            className="opacity-0 group-hover:opacity-100"
-          />
-        </div>
       </div>
     );
   }
@@ -824,6 +949,16 @@ const TranscriptRowView = memo(function TranscriptRowView({
       <div className="mt-2 flex h-7 items-center gap-2">
         <DurationLabel startedAt={row.startedAt} endedAt={row.endedAt} active={working} />
         <div className="ml-auto flex items-center gap-1">
+          {!working && branch && (
+            <RegenerateMessageButton
+              entryId={branch.entryId}
+              fallbackText={branch.fallbackText}
+              images={branch.images}
+              files={branch.files}
+              attachmentIds={branch.attachmentIds}
+              className="opacity-0 group-hover/assistant:opacity-100"
+            />
+          )}
           {!working && row.sourceEndId && (
             <ForkFromTurnButton
               entryId={row.sourceEndId}
@@ -840,6 +975,150 @@ const TranscriptRowView = memo(function TranscriptRowView({
     </div>
   );
 });
+
+function EditMessageButton({
+  onStartEdit,
+  className = "",
+}: {
+  onStartEdit: () => void;
+  className?: string;
+}) {
+  const t = useT();
+  const idle = useAppStore((s) => s.session?.isIdle ?? false);
+  return (
+    <button
+      type="button"
+      title={t("transcriptEdit")}
+      aria-label={t("transcriptEdit")}
+      disabled={!idle}
+      className={`flex size-6 items-center justify-center rounded text-muted transition-opacity hover:bg-surface-overlay hover:text-foreground disabled:opacity-40 ${className}`}
+      onClick={onStartEdit}
+    >
+      <Pencil size={13} />
+    </button>
+  );
+}
+
+function UserMessageEditor({
+  text,
+  canSend,
+  onChange,
+  onCancel,
+  onSubmit,
+}: {
+  text: string;
+  canSend: boolean;
+  onChange?: (text: string) => void;
+  onCancel?: () => void;
+  onSubmit?: () => void | Promise<void>;
+}) {
+  const t = useT();
+  const idle = useAppStore((s) => s.session?.isIdle ?? false);
+  const [pending, setPending] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const node = textareaRef.current;
+    if (!node) return;
+    node.focus();
+    node.selectionStart = node.value.length;
+    node.selectionEnd = node.value.length;
+  }, []);
+
+  const submit = () => {
+    if (!idle || pending || !canSend || !onSubmit) return;
+    setPending(true);
+    void Promise.resolve(onSubmit()).finally(() => setPending(false));
+  };
+
+  return (
+    <div className="min-w-[16rem] sm:min-w-[22rem]">
+      <textarea
+        ref={textareaRef}
+        value={text}
+        disabled={pending}
+        aria-label={t("transcriptEdit")}
+        className="theme-user-message max-h-64 min-h-[4.5rem] w-full resize-y rounded-xl rounded-br-md border border-accent/40 bg-surface-overlay px-3.5 py-2.5 text-sm leading-6 outline-none"
+        onChange={(event) => onChange?.(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel?.();
+            return;
+          }
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            submit();
+          }
+        }}
+      />
+      <div className="mt-1 flex h-7 items-center justify-end gap-1">
+        <button
+          type="button"
+          className="h-7 rounded-md px-2 text-xs text-muted hover:bg-surface-overlay hover:text-foreground"
+          onClick={onCancel}
+        >
+          {t("commonCancel")}
+        </button>
+        <button
+          type="button"
+          disabled={!idle || pending || !canSend}
+          className="flex h-7 items-center gap-1 rounded-md bg-accent px-2 text-xs text-accent-foreground hover:opacity-90 disabled:opacity-40"
+          onClick={submit}
+        >
+          {pending ? <LoaderCircle size={12} className="animate-spin" /> : null}
+          {t("transcriptEditSend")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RegenerateMessageButton({
+  entryId,
+  fallbackText,
+  images,
+  files,
+  attachmentIds,
+  className = "",
+}: {
+  entryId: string;
+  fallbackText: string;
+  images: BranchSource["images"];
+  files: BranchSource["files"];
+  attachmentIds: string[];
+  className?: string;
+}) {
+  const t = useT();
+  const idle = useAppStore((s) => s.session?.isIdle ?? false);
+  const [pending, setPending] = useState(false);
+  return (
+    <button
+      type="button"
+      title={t("transcriptRegenerate")}
+      aria-label={t("transcriptRegenerate")}
+      disabled={!idle || pending}
+      className={`flex size-6 items-center justify-center rounded text-muted transition-opacity hover:bg-surface-overlay hover:text-foreground disabled:opacity-40 ${className}`}
+      onClick={() => {
+        setPending(true);
+        const prompt = branchPromptInput({
+          entryId,
+          fallbackText,
+          images,
+          files,
+          attachmentIds,
+        });
+        void requestRegenerateInSession(entryId, {
+          fallbackText: prompt.text,
+          images: prompt.images,
+          attachmentIds: prompt.attachmentIds,
+        }).finally(() => setPending(false));
+      }}
+    >
+      {pending ? <LoaderCircle size={13} className="animate-spin" /> : <RotateCw size={13} />}
+    </button>
+  );
+}
 
 /** Fork the conversation keeping history through this assistant turn. */
 function ForkFromTurnButton({ entryId, className = "" }: { entryId: string; className?: string }) {

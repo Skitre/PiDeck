@@ -28,7 +28,7 @@
 
 When a workspace is selected, Host immediately creates a **cwd-bound** graph:
 
-- `SettingsManager` (explicit `projectTrusted`)
+- `SettingsManager` (explicit `projectTrusted: false`)
 - `DefaultPackageManager`
 - `DefaultResourceLoader`
 - `SessionManager`
@@ -46,7 +46,7 @@ eviction dispose and rebuild the graph under `serviceGraphLock`.
 | Messages / tools / compaction | AgentSession |
 | Sessions on disk | SessionManager |
 | Packages | DefaultPackageManager + SettingsManager |
-| Workspace selection policy | Pi Host (`projectTrusted: true`) |
+| Workspace selection policy | Pi Host (`projectTrusted: false`; user/global packages only) |
 | Desktop theme, agentDir bootstrap | Rust DesktopSettingsStore |
 | Protocol validation | packages/protocol |
 

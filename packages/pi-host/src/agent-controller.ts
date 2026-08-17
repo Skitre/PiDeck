@@ -10,10 +10,15 @@ import {
   type ModelSummary,
   type QueueSnapshot,
   type SerializableImage,
+  type SessionSnapshot,
 } from "@pideck/protocol";
 import type { AgentOperationLock } from "./locks.js";
 import type { MethodHandler, PiHostServer } from "./server.js";
-import type { BackgroundSessionRuntime, WorkspaceGraphFactory } from "./workspace-graph-factory.js";
+import type {
+  BackgroundSessionRuntime,
+  WorkspaceGraph,
+  WorkspaceGraphFactory,
+} from "./workspace-graph-factory.js";
 import { buildSessionSnapshot, buildToolSnapshot } from "./session-snapshot.js";
 import { rebindCurrentSessionModel } from "./model-thinking.js";
 import { getEnabledProviderIds, getProviderModelAllowLists } from "./provider-models-config.js";
@@ -48,6 +53,75 @@ function toSdkImages(images: SerializableImage[] | undefined): ImageContent[] | 
 
 /** Upper bound for waiting on session.abort() while holding the graph lock. */
 const ABORT_SETTLE_TIMEOUT_MS = 15_000;
+
+function projectPinnedSessionSnapshot(args: {
+  factory: WorkspaceGraphFactory;
+  graph: WorkspaceGraph;
+  session: AgentSession;
+  sessionManager: NonNullable<WorkspaceGraph["sessionManager"]>;
+  requestIdentity: HostIdentity;
+  originatingToolRevision: number;
+}): { snapshot: SessionSnapshot; background?: BackgroundSessionRuntime } {
+  const stillCurrentGraph = args.factory.getGraph() === args.graph;
+  const active = stillCurrentGraph && args.graph.agentSession === args.session;
+  const background =
+    stillCurrentGraph && !active
+      ? [...args.graph.backgroundSessions.values()].find(
+          (runtime) => runtime.agentSession === args.session,
+        )
+      : undefined;
+  const liveIdentity = args.factory.getServer()?.getIdentity();
+  const projectionIdentity = active ? (liveIdentity ?? args.requestIdentity) : args.requestIdentity;
+  const snapshot = buildSessionSnapshot({
+    session: args.session,
+    sessionManager: background?.sessionManager ?? args.sessionManager,
+    cwd: args.graph.canonicalCwd,
+    sessionId:
+      background?.sessionId ?? projectionIdentity.sessionId ?? args.session.sessionId ?? "",
+    revision: background?.sessionRevision ?? projectionIdentity.sessionRevision,
+    workspaceId: args.graph.workspaceId,
+    toolRevision:
+      background?.toolRevision ?? (active ? args.graph.toolRevision : args.originatingToolRevision),
+  });
+  if (active) args.graph.sessionSnapshot = snapshot;
+  else if (background) background.sessionSnapshot = snapshot;
+  return { snapshot, background };
+}
+
+async function navigatePinnedSession(args: {
+  factory: WorkspaceGraphFactory;
+  session: AgentSession;
+  sessionManager: NonNullable<WorkspaceGraph["sessionManager"]>;
+  graph: WorkspaceGraph;
+  identity: HostIdentity;
+  originatingToolRevision: number;
+  targetId: string;
+}): Promise<{ error: HostError } | { cancelled: true } | { session: SessionSnapshot }> {
+  if (!args.session.isIdle) {
+    return { error: createHostError("AGENT_BUSY", "Agent busy", { retryable: true }) };
+  }
+  let outcome: { cancelled: boolean };
+  try {
+    outcome = await args.session.navigateTree(args.targetId, { summarize: false });
+  } catch (error) {
+    return {
+      error: createHostError(
+        "INVALID_REQUEST",
+        error instanceof Error ? error.message : "Session entry not found",
+      ),
+    };
+  }
+  if (outcome.cancelled) return { cancelled: true };
+  const { snapshot } = projectPinnedSessionSnapshot({
+    factory: args.factory,
+    graph: args.graph,
+    session: args.session,
+    sessionManager: args.sessionManager,
+    requestIdentity: args.identity,
+    originatingToolRevision: args.originatingToolRevision,
+  });
+  return { session: snapshot };
+}
 
 export function summarizeModel(model: Model<any>): ModelSummary {
   return {
@@ -320,96 +394,140 @@ export function createAgentHandlers(
         };
       }
 
-      if (server.serviceGraphLock.isHeld()) {
-        const kind = server.serviceGraphLock.getOwner()?.operationKind;
-        operationLock.release(ctx.id);
-        return {
-          error: createHostError(
-            kind?.startsWith("package") || kind?.startsWith("resource.setPreference")
-              ? "PACKAGE_MUTATION_BUSY"
-              : "SERVICE_GRAPH_BUSY",
-            kind?.startsWith("package") || kind?.startsWith("resource.setPreference")
-              ? "Package mutation in progress"
-              : "Service graph is busy",
-            { retryable: true },
-          ),
-        };
-      }
-
-      // Re-check identity after both sides of the lock handoff.
-      const stale2 = factory.checkIdentity(ctx.context, {
-        requireWorkspace: true,
-        requireSession: true,
-      });
-      if (stale2) {
-        operationLock.release(ctx.id);
-        return { error: stale2 };
-      }
-
-      // Pre-flight auth check: without credentials the SDK fails deep inside
-      // the detached task below, and its CLI-era guidance ("/login") loops in
-      // the GUI. checkAuth resolves stored/config/env credentials the same way
-      // the request path does, so env-provided keys pass silently. A throw
-      // means the check itself failed (e.g. a network probe) — fall through
-      // and let the real request surface the truth instead of blocking on a
-      // false negative.
-      const currentModel = g.agentSession.model;
-      if (currentModel) {
-        let authConfigured: boolean | undefined;
-        try {
-          authConfigured =
-            (await factory.deps.modelRuntime.checkAuth(currentModel.provider)) !== undefined;
-        } catch {
-          authConfigured = undefined;
-        }
-        if (authConfigured === false) {
-          operationLock.release(ctx.id);
+      let lockTransferred = false;
+      try {
+        if (server.serviceGraphLock.isHeld()) {
+          const kind = server.serviceGraphLock.getOwner()?.operationKind;
           return {
             error: createHostError(
-              "AUTH_REQUIRED",
-              `No credentials configured for provider "${currentModel.provider}". Sign in from Settings → Providers, then try again.`,
-              { details: { providerId: currentModel.provider } },
+              kind?.startsWith("package") || kind?.startsWith("resource.setPreference")
+                ? "PACKAGE_MUTATION_BUSY"
+                : "SERVICE_GRAPH_BUSY",
+              kind?.startsWith("package") || kind?.startsWith("resource.setPreference")
+                ? "Package mutation in progress"
+                : "Service graph is busy",
+              { retryable: true },
             ),
           };
         }
-      }
 
-      const params = ctx.params as {
-        text: string;
-        images?: SerializableImage[];
-        attachmentIds?: string[];
-        streamingBehavior?: "steer" | "followUp";
-        attachQueuedImages?: boolean;
-      };
-      let prompt: { text: string; attachmentIds: string[] };
-      try {
-        prompt = await buildPromptWithAttachments({
-          factory,
-          sessionId: server.identity.sessionId!,
-          text: params.text,
-          attachmentIds: params.attachmentIds,
+        // Re-check identity after both sides of the lock handoff.
+        const stale2 = factory.checkIdentity(ctx.context, {
+          requireWorkspace: true,
+          requireSession: true,
         });
-      } catch (error) {
-        operationLock.release(ctx.id);
-        return { error: attachmentHostError(error) };
-      }
-      const promptImages =
-        toSdkImages(params.images) ??
-        (params.attachQueuedImages ? takeQueuedImages(g.agentSession, params.text) : undefined);
-      const runId = startDetachedPrompt({
-        requestId: ctx.id,
-        factory,
-        server,
-        session: g.agentSession,
-        operationLock,
-        runIdentity: server.getIdentity(),
-        text: prompt.text,
-        images: promptImages,
-        streamingBehavior: params.streamingBehavior,
-      });
-      commitPromptAttachments(factory, server.identity.sessionId!, prompt.attachmentIds);
+        if (stale2) {
+          return { error: stale2 };
+        }
 
-      return { result: { accepted: true, runId } };
+        const session = g.agentSession;
+        const sessionManager = g.sessionManager;
+        const sessionId = server.identity.sessionId;
+        if (!session || !sessionManager || !sessionId) {
+          return { error: createHostError("AGENT_NOT_READY", "No active session") };
+        }
+        const runIdentity = server.getIdentity();
+        const originatingToolRevision = g.toolRevision;
+
+        // Pre-flight auth check: without credentials the SDK fails deep inside
+        // the detached task below, and its CLI-era guidance ("/login") loops in
+        // the GUI. checkAuth resolves stored/config/env credentials the same way
+        // the request path does, so env-provided keys pass silently. A throw
+        // means the check itself failed (e.g. a network probe) — fall through
+        // and let the real request surface the truth instead of blocking on a
+        // false negative.
+        const currentModel = session.model;
+        if (currentModel) {
+          let authConfigured: boolean | undefined;
+          try {
+            authConfigured =
+              (await factory.deps.modelRuntime.checkAuth(currentModel.provider)) !== undefined;
+          } catch {
+            authConfigured = undefined;
+          }
+          if (authConfigured === false) {
+            return {
+              error: createHostError(
+                "AUTH_REQUIRED",
+                `No credentials configured for provider "${currentModel.provider}". Sign in from Settings → Providers, then try again.`,
+                { details: { providerId: currentModel.provider } },
+              ),
+              identity: runIdentity,
+            };
+          }
+        }
+
+        const params = ctx.params as {
+          text: string;
+          images?: SerializableImage[];
+          attachmentIds?: string[];
+          streamingBehavior?: "steer" | "followUp";
+          attachQueuedImages?: boolean;
+          fromEntryId?: string;
+        };
+        let prompt: { text: string; attachmentIds: string[] };
+        try {
+          prompt = await buildPromptWithAttachments({
+            factory,
+            sessionId,
+            text: params.text,
+            attachmentIds: params.attachmentIds,
+          });
+        } catch (error) {
+          return { error: attachmentHostError(error), identity: runIdentity };
+        }
+        let navigatedSession: SessionSnapshot | undefined;
+        if (params.fromEntryId) {
+          const navigated = await navigatePinnedSession({
+            factory,
+            session,
+            sessionManager,
+            graph: g,
+            identity: runIdentity,
+            originatingToolRevision,
+            targetId: params.fromEntryId,
+          });
+          if ("error" in navigated) {
+            return { error: navigated.error, identity: runIdentity };
+          }
+          if ("cancelled" in navigated) {
+            return {
+              error: createHostError("INVALID_REQUEST", "Branch switch was cancelled"),
+              identity: runIdentity,
+            };
+          }
+          navigatedSession = navigated.session;
+        }
+        const promptImages =
+          toSdkImages(params.images) ??
+          (params.attachQueuedImages ? takeQueuedImages(session, params.text) : undefined);
+        // startDetachedPrompt owns release from this point, including sync
+        // failure before the background task starts.
+        lockTransferred = true;
+        const runId = startDetachedPrompt({
+          requestId: ctx.id,
+          factory,
+          server,
+          session,
+          operationLock,
+          runIdentity,
+          text: prompt.text,
+          images: promptImages,
+          streamingBehavior: params.streamingBehavior,
+        });
+        commitPromptAttachments(factory, sessionId, prompt.attachmentIds);
+
+        return {
+          result: {
+            accepted: true,
+            runId,
+            ...(navigatedSession ? { session: navigatedSession } : {}),
+          },
+          identity: runIdentity,
+        };
+      } finally {
+        if (!lockTransferred) operationLock.release(ctx.id);
+      }
     },
 
     "agent.steer": async (ctx) => {
@@ -935,28 +1053,16 @@ export function createAgentHandlers(
 
         const params = (ctx.params ?? {}) as { instructions?: string };
         const result = await session.compact(params.instructions);
-        const stillCurrentGraph = factory.getGraph() === g;
-        const active = stillCurrentGraph && g.agentSession === session;
-        const background =
-          stillCurrentGraph && !active
-            ? [...g.backgroundSessions.values()].find((runtime) => runtime.agentSession === session)
-            : undefined;
-        const projectionIdentity = active ? server.getIdentity() : requestIdentity;
-        backgroundAfterCompact = background;
-        const snap = buildSessionSnapshot({
+        const projected = projectPinnedSessionSnapshot({
+          factory,
+          graph: g,
           session,
-          sessionManager: background?.sessionManager ?? sessionManager,
-          cwd: g.canonicalCwd,
-          sessionId:
-            background?.sessionId ?? projectionIdentity.sessionId ?? session.sessionId ?? "",
-          revision: background?.sessionRevision ?? projectionIdentity.sessionRevision,
-          workspaceId: g.workspaceId,
-          toolRevision:
-            background?.toolRevision ?? (active ? g.toolRevision : originatingToolRevision),
+          sessionManager,
+          requestIdentity,
+          originatingToolRevision,
         });
-        if (active) g.sessionSnapshot = snap;
-        else if (background) background.sessionSnapshot = snap;
-        return { result: { result, session: snap }, identity: requestIdentity };
+        backgroundAfterCompact = projected.background;
+        return { result: { result, session: projected.snapshot }, identity: requestIdentity };
       } finally {
         operationLock.release(ctx.id);
         if (backgroundAfterCompact) {

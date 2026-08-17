@@ -17,7 +17,6 @@ import {
 import { Dialog, primaryButton, secondaryButton } from "../../components/Dialog";
 import type {
   HostRequestParams,
-  HostStatusSnapshot,
   PackageCatalog,
   PackageCatalogItem,
   PackageMutationResult,
@@ -25,19 +24,15 @@ import type {
   ResourceRecord,
   ResourcePreferenceUpdate,
   ResourceType,
-  WorkspaceSnapshot,
 } from "@pideck/protocol";
 import { hostClient } from "../../lib/bridge/host-client";
 import {
   captureRequestGeneration,
-  captureWorkspaceAuthorization,
   hostContext,
-  isCurrentWorkspaceAuthorization,
   isExpectedPackageMutationCompletion,
   mergeHostIdentity,
   sessionPackageContext,
   workspaceContext,
-  type WorkspaceAuthorization,
 } from "../../lib/bridge/host-context";
 import { useAppStore } from "../../lib/stores/app-store";
 import { useT, type Translate } from "../../lib/i18n/use-t";
@@ -62,7 +57,6 @@ import {
   sortCatalogItems,
   summarizeResources,
   type CatalogSort,
-  type PackageScopeFilter,
   type ResourceListItem,
   type ResourceMode,
   type ResourceOriginFilter,
@@ -80,13 +74,6 @@ type MutationMethod =
   | "resource.setPreference"
   | "resource.setPreferences";
 
-export type PendingProjectMutation = {
-  method: MutationMethod;
-  params: HostRequestParams[MutationMethod];
-  allowReconcileRetry?: boolean;
-  authorization: WorkspaceAuthorization;
-};
-
 type MutationReview = {
   kind: "install" | "update" | "remove";
   method: "package.install" | "package.update" | "package.updateAll" | "package.remove";
@@ -95,7 +82,6 @@ type MutationReview = {
     | HostRequestParams["package.update"]
     | HostRequestParams["package.updateAll"]
     | HostRequestParams["package.remove"];
-  authorization?: WorkspaceAuthorization;
   packages: PackageRecord[];
 };
 
@@ -108,16 +94,6 @@ const PACKAGE_LIST_BUSY_RETRY_MAX_MS = 2_000;
 
 const inputClass =
   "box-border h-8 min-h-8 min-w-0 rounded-md border border-border bg-surface px-2 text-xs text-foreground placeholder:text-muted focus:border-focus";
-
-export function reconcileProjectGateAuthorization(
-  host: HostStatusSnapshot | null,
-  workspace: WorkspaceSnapshot | null,
-  projectGate: PendingProjectMutation,
-): PendingProjectMutation | null {
-  return isCurrentWorkspaceAuthorization(host, workspace, projectGate.authorization)
-    ? projectGate
-    : null;
-}
 
 function scopeLabel(t: Translate, scope: PackageRecord["scope"] | ResourceRecord["scope"]): string {
   return scope === "temporary"
@@ -145,37 +121,6 @@ function singularType(t: Translate, type: ResourceType): string {
       : type === "prompt"
         ? t("typePrompt")
         : t("typeTheme");
-}
-
-function Segmented<T extends string>({
-  value,
-  values,
-  onChange,
-}: {
-  value: T;
-  values: readonly T[];
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div
-      data-ui="segmented"
-      className="inline-flex h-8 rounded-md border border-border bg-surface p-0.5"
-    >
-      {values.map((item) => (
-        <button
-          key={item}
-          type="button"
-          aria-pressed={value === item}
-          data-ui="segmented-item"
-          data-state={value === item ? "active" : "inactive"}
-          className={`rounded px-2 text-xs capitalize ${value === item ? "bg-selection text-selection-foreground" : "text-muted hover:text-foreground"}`}
-          onClick={() => onChange(item)}
-        >
-          {item}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 function TypeBadge({ type }: { type: ResourceType }) {
@@ -283,22 +228,19 @@ export function PackagesPage() {
   const [tab, setTab] = useState<"installed" | "resources" | "market">("installed");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [installedQuery, setInstalledQuery] = useState("");
-  const [installedScope, setInstalledScope] = useState<PackageScopeFilter>("all");
   const [installedType, setInstalledType] = useState<ResourceTypeFilter>("all");
   const [resourceQuery, setResourceQuery] = useState("");
-  const [resourceMode, setResourceMode] = useState<ResourceMode>("user");
+  const resourceMode: ResourceMode = "user";
   const [resourceType, setResourceType] = useState<ResourceTypeFilter>("all");
   const [resourceOrigin, setResourceOrigin] = useState<ResourceOriginFilter>("all");
   const [resourceOwnerId, setResourceOwnerId] = useState("");
   const [installSource, setInstallSource] = useState("");
-  const [installScope, setInstallScope] = useState<"user" | "project">("user");
   const [marketCatalog, setMarketCatalog] = useState<PackageCatalog | null>(null);
   const [marketState, setMarketState] = useState<LoadState>("idle");
   const [marketError, setMarketError] = useState("");
   const [marketQuery, setMarketQuery] = useState("");
   const [marketType, setMarketType] = useState<ResourceTypeFilter>("all");
   const [marketSort, setMarketSort] = useState<CatalogSort>("downloads");
-  const [marketScope, setMarketScope] = useState<"user" | "project">("user");
   const marketRequest = useRef(0);
   const [busy, setBusy] = useState(false);
   const [pendingPreferenceUpdates, setPendingPreferenceUpdates] = useState<
@@ -306,7 +248,6 @@ export function PackagesPage() {
   >([]);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [loadError, setLoadError] = useState("");
-  const [projectGate, setProjectGate] = useState<PendingProjectMutation | null>(null);
   const [review, setReview] = useState<MutationReview | null>(null);
   const [dismissedProgressOp, setDismissedProgressOp] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -319,8 +260,8 @@ export function PackagesPage() {
   );
   const selected = allPackages.find((item) => item.id === selectedId);
   const installedFilters = useMemo(
-    () => ({ query: installedQuery, scope: installedScope, type: installedType }),
-    [installedQuery, installedScope, installedType],
+    () => ({ query: installedQuery, scope: "all" as const, type: installedType }),
+    [installedQuery, installedType],
   );
   const visiblePackages = useMemo(
     () => filterInstalledPackages(allPackages, allResources, installedFilters),
@@ -487,15 +428,13 @@ export function PackagesPage() {
     if (!host || !workspace) return;
     const params: HostRequestParams["package.install"] = {
       source: item.installSource,
-      scope: marketScope,
+      scope: "user",
     };
     setReview({
       kind: "install",
       method: "package.install",
       params,
       packages: [],
-      authorization:
-        marketScope === "project" ? captureWorkspaceAuthorization(host, workspace) : undefined,
     });
   }
 
@@ -522,17 +461,6 @@ export function PackagesPage() {
     setPendingPreferenceUpdates([]);
   }, [workspace?.id, workspace?.revision]);
 
-  useEffect(() => {
-    if (!projectGate) return;
-    const reconciled = reconcileProjectGateAuthorization(host, workspace, projectGate);
-    if (reconciled !== projectGate) setProjectGate(reconciled);
-  }, [host, workspace, projectGate]);
-
-  useEffect(() => {
-    if (!review?.authorization) return;
-    if (!isCurrentWorkspaceAuthorization(host, workspace, review.authorization)) setReview(null);
-  }, [host, workspace, review]);
-
   function applyMutationResult(result: PackageMutationResult) {
     applyPackageMutationResult(result);
     if (result.status === "partialFailure" || result.reconcileRequired) {
@@ -548,55 +476,12 @@ export function PackagesPage() {
     }
   }
 
-  function isProjectMutation<M extends MutationMethod>(
-    method: M,
-    params: HostRequestParams[M],
-  ): boolean {
-    if (method === "package.install")
-      return (params as HostRequestParams["package.install"]).scope === "project";
-    if (method === "package.updateAll") return allPackages.some((item) => item.scope === "project");
-    if (method === "package.remove" || method === "package.update") {
-      const packageId = (params as HostRequestParams["package.remove"]).packageId;
-      return allPackages.find((item) => item.id === packageId)?.scope === "project";
-    }
-    if (method === "resource.setPreference") {
-      return (params as HostRequestParams["resource.setPreference"]).targetScope === "project";
-    }
-    if (method === "resource.setPreferences") {
-      return (params as HostRequestParams["resource.setPreferences"]).updates.some(
-        (update) => update.targetScope === "project",
-      );
-    }
-    return false;
-  }
-
   async function runMutation<M extends MutationMethod>(
     method: M,
     params: HostRequestParams[M],
-    options?: { allowReconcileRetry?: boolean; projectAuthorization?: WorkspaceAuthorization },
+    options?: { allowReconcileRetry?: boolean },
   ) {
     if (!host || !workspace) return;
-    if (isProjectMutation(method, params)) {
-      if (!options?.projectAuthorization) {
-        setProjectGate({
-          method,
-          params: params as HostRequestParams[MutationMethod],
-          allowReconcileRetry: options?.allowReconcileRetry,
-          authorization: captureWorkspaceAuthorization(host, workspace),
-        });
-        return;
-      }
-      if (
-        !isCurrentWorkspaceAuthorization(
-          useAppStore.getState().host,
-          useAppStore.getState().workspace,
-          options.projectAuthorization,
-        )
-      ) {
-        pushNotification(t("notifPackagesProjectConfirmExpired"), "warning");
-        return;
-      }
-    }
     if (
       (reloadRequired || reconcileRequired) &&
       method !== "package.reloadResources" &&
@@ -661,29 +546,23 @@ export function PackagesPage() {
     if (!host || !workspace || !installSource.trim()) return;
     const params: HostRequestParams["package.install"] = {
       source: installSource.trim(),
-      scope: installScope,
+      scope: "user",
     };
     setReview({
       kind: "install",
       method: "package.install",
       params,
       packages: [],
-      authorization:
-        installScope === "project" ? captureWorkspaceAuthorization(host, workspace) : undefined,
     });
   }
 
   function beginRemoveReview(pkg: PackageRecord) {
     if (!host || !workspace) return;
-    // Capture the project authorization up front so a project-scoped removal
-    // needs exactly one dialog instead of chaining into the generic gate.
     setReview({
       kind: "remove",
       method: "package.remove",
       params: { packageId: pkg.id },
       packages: [pkg],
-      authorization:
-        pkg.scope === "project" ? captureWorkspaceAuthorization(host, workspace) : undefined,
     });
   }
 
@@ -696,53 +575,15 @@ export function PackagesPage() {
       method: plan.method,
       params: plan.params,
       packages: plan.packages,
-      authorization: plan.touchesProject
-        ? captureWorkspaceAuthorization(host, workspace)
-        : undefined,
     });
   }
 
   function confirmReview() {
     if (!review) return;
-    if (
-      review.authorization &&
-      !isCurrentWorkspaceAuthorization(
-        useAppStore.getState().host,
-        useAppStore.getState().workspace,
-        review.authorization,
-      )
-    ) {
-      setReview(null);
-      pushNotification(t("notifPackagesProjectConfirmExpired"), "warning");
-      return;
-    }
     const pending = review;
     setReview(null);
     if (pending.kind === "install") setInstallSource("");
-    void runMutation(pending.method, pending.params as never, {
-      projectAuthorization: pending.authorization,
-    });
-  }
-
-  function confirmProjectMutation() {
-    const pending = projectGate;
-    if (!pending) return;
-    if (
-      !isCurrentWorkspaceAuthorization(
-        useAppStore.getState().host,
-        useAppStore.getState().workspace,
-        pending.authorization,
-      )
-    ) {
-      setProjectGate(null);
-      pushNotification(t("notifPackagesProjectConfirmExpired"), "warning");
-      return;
-    }
-    setProjectGate(null);
-    void runMutation(pending.method, pending.params as never, {
-      allowReconcileRetry: pending.allowReconcileRetry,
-      projectAuthorization: pending.authorization,
-    });
+    void runMutation(pending.method, pending.params as never);
   }
 
   async function checkUpdates() {
@@ -826,9 +667,7 @@ export function PackagesPage() {
   }
 
   function managePackageResources(packageId: string) {
-    const pkg = allPackages.find((item) => item.id === packageId);
     setResourceOwnerId(packageId);
-    setResourceMode(pkg?.scope === "user" && pkg.effective === false ? "user" : "project");
     setTab("resources");
   }
 
@@ -1070,18 +909,13 @@ export function PackagesPage() {
               data-ui="segmented"
               className="inline-flex h-8 rounded-md border border-border p-0.5"
             >
-              {(resourceMode === "project"
-                ? ["inherit", "enabled", "disabled"]
-                : ["enabled", "disabled"]
-              ).map((value) => (
+              {(["enabled", "disabled"] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
                   title={t("packagesPrefScopeTitle", {
-                    value: preferenceLabel(t, value as Preference),
-                    mode: t(
-                      resourceMode === "project" ? "packagesScopeProject" : "packagesScopeUser",
-                    ),
+                    value: preferenceLabel(t, value),
+                    mode: t("packagesScopeUser"),
                   })}
                   data-ui="segmented-item"
                   data-state={preference === value ? "active" : "inactive"}
@@ -1240,9 +1074,6 @@ export function PackagesPage() {
                   {(review.params as HostRequestParams["package.install"]).scope}
                 </dd>
               </dl>
-              {review.authorization && (
-                <p className="mt-3 text-warning">{t("packagesProjectSettingsWarning")}</p>
-              )}
             </>
           ) : review.kind === "remove" ? (
             <>
@@ -1265,9 +1096,6 @@ export function PackagesPage() {
                     : ""}
                 </dd>
               </dl>
-              {review.authorization && (
-                <p className="mt-3 text-warning">{t("packagesProjectSettingsWarning")}</p>
-              )}
             </>
           ) : (
             <>
@@ -1280,22 +1108,8 @@ export function PackagesPage() {
                   </li>
                 ))}
               </ul>
-              {review.authorization && (
-                <p className="mt-3 text-warning">{t("packagesUpdateProjectWarning")}</p>
-              )}
             </>
           )}
-        </Dialog>
-      )}
-
-      {projectGate && (
-        <Dialog
-          title={t("packagesProjectGateTitle")}
-          confirmLabel={t("packagesProjectGateConfirm")}
-          onCancel={() => setProjectGate(null)}
-          onConfirm={confirmProjectMutation}
-        >
-          <p>{t("packagesProjectGateBody")}</p>
         </Dialog>
       )}
 
@@ -1489,15 +1303,6 @@ export function PackagesPage() {
               <option value="downloads">{t("packagesMarketSortDownloads")}</option>
               <option value="recent">{t("packagesMarketSortRecent")}</option>
             </select>
-            <select
-              className={inputClass}
-              aria-label={t("packagesInstallScope")}
-              value={marketScope}
-              onChange={(event) => setMarketScope(event.target.value as "user" | "project")}
-            >
-              <option value="user">{t("packagesScopeUser")}</option>
-              <option value="project">{t("packagesScopeProject")}</option>
-            </select>
             <button
               type="button"
               className={secondaryButton}
@@ -1644,15 +1449,6 @@ export function PackagesPage() {
                   onChange={(event) => setInstallSource(event.target.value)}
                 />
                 <div className="flex gap-2">
-                  <select
-                    className={inputClass}
-                    aria-label={t("packagesInstallScope")}
-                    value={installScope}
-                    onChange={(event) => setInstallScope(event.target.value as "user" | "project")}
-                  >
-                    <option value="user">{t("packagesScopeUser")}</option>
-                    <option value="project">{t("packagesScopeProject")}</option>
-                  </select>
                   <button
                     type="button"
                     className={primaryButton}
@@ -1679,16 +1475,6 @@ export function PackagesPage() {
                   onChange={(event) => setInstalledQuery(event.target.value)}
                 />
               </label>
-              <select
-                aria-label={t("packagesFilterScope")}
-                className={inputClass}
-                value={installedScope}
-                onChange={(event) => setInstalledScope(event.target.value as PackageScopeFilter)}
-              >
-                <option value="all">{t("packagesFilterAllScopes")}</option>
-                <option value="user">{t("packagesScopeUser")}</option>
-                <option value="project">{t("packagesScopeProject")}</option>
-              </select>
               <select
                 aria-label={t("packagesFilterType")}
                 className={inputClass}
@@ -1724,7 +1510,6 @@ export function PackagesPage() {
                       className={`${secondaryButton} mt-3`}
                       onClick={() => {
                         setInstalledQuery("");
-                        setInstalledScope("all");
                         setInstalledType("all");
                       }}
                     >
@@ -2001,11 +1786,6 @@ export function PackagesPage() {
         <div className="flex min-h-0 flex-1 flex-col">
           {packageUpdateActions}
           <div className="flex flex-wrap items-center gap-2 border-b border-border p-3">
-            <Segmented
-              value={resourceMode}
-              values={["user", "project"] as const}
-              onChange={setResourceMode}
-            />
             <label className="relative min-w-48 flex-1 sm:max-w-sm">
               <Search
                 size={13}
@@ -2095,17 +1875,6 @@ export function PackagesPage() {
               })}
             </span>
             <span className="ml-auto" />
-            {resourceMode === "project" && (
-              <button
-                type="button"
-                title={t("packagesBatchInheritTitle")}
-                className={secondaryButton}
-                disabled={mutationBlocked || !configurableVisible.length}
-                onClick={() => batchPreference("inherit")}
-              >
-                {t("packagesInheritAllShown")}
-              </button>
-            )}
             <button
               type="button"
               title={t("packagesBatchEnableTitle")}
@@ -2142,10 +1911,7 @@ export function PackagesPage() {
                     : hasActiveResourceFilters(resourceFilters)
                       ? t("packagesNoResourcesMatch")
                       : t("packagesNoResourcesInMode", {
-                          mode:
-                            resourceMode === "user"
-                              ? t("packagesScopeUser")
-                              : t("packagesScopeProject"),
+                          mode: t("packagesScopeUser"),
                         })}
                 </p>
                 <p className="mt-1 text-xs">

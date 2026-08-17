@@ -73,7 +73,7 @@ describe("Package view models", () => {
       scope: "project",
     });
 
-    expect(PACKAGE_LIST_PARAMS).toEqual({ scope: "all", includeResources: true });
+    expect(PACKAGE_LIST_PARAMS).toEqual({ scope: "user", includeResources: true });
     expect(planPackageUpdate([userPackage, projectPackage], true)).toEqual({
       method: "package.updateAll",
       params: null,

@@ -13,8 +13,9 @@ incremental writes under a file lock), and PiDeck's Settings → General →
 | Project | `<workspace>/.pi/settings.json` | Only loaded when the project is trusted |
 
 Project settings deep-merge over global settings (project wins). PiDeck's More
-settings block opens the **global** file; PiDeck currently hardcodes
-`projectTrusted: true`, so a project file is always read when present.
+settings block opens the **global** file. PiDeck hardcodes
+`projectTrusted: false`, so a project file is not merged. Compaction and other
+overrides live only in `~/.pi/agent/settings.json`.
 
 ## What takes effect in PiDeck
 
@@ -43,7 +44,7 @@ Never applied in PiDeck (writing them changes nothing):
 
 - `sessionDir` — resolved at SessionManager construction; the Host always uses
   the default per-workspace session directories
-- `defaultProjectTrust` — the Host hardcodes `projectTrusted: true`
+- `defaultProjectTrust` — the Host hardcodes `projectTrusted: false`
 - `enabledModels` — only consumed by the Pi CLI/TUI model list
 - TUI-only keys (16): `theme`, `terminal.*`, `editorPaddingX`, `outputPad`,
   `autocompleteMaxVisible`, `showHardwareCursor`, `doubleEscapeAction`,

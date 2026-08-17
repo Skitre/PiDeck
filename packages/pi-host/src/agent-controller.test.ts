@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Model } from "@earendil-works/pi-ai";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { createAgentHandlers, summarizeModel } from "./agent-controller.js";
+import { AttachmentStoreError } from "./attachment-store.js";
 import { AgentOperationLock, TryMutex } from "./locks.js";
 import { GraphOperationRegistry } from "./operation-lifecycle.js";
 import type { PiHostServer } from "./server.js";
@@ -1069,6 +1070,313 @@ describe("agent.compact concurrency", () => {
         background,
       );
     });
+  });
+});
+
+describe("agent.prompt fromEntryId", () => {
+  it("navigates the current session then prompts without a second lock handoff", async () => {
+    const fixture = stableHandlerFixture(Promise.resolve());
+    (fixture.session as unknown as { isIdle: boolean }).isIdle = true;
+    const navigateTree = vi.fn(async () => ({ cancelled: false }));
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = navigateTree;
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+
+    const outcome = await handler({
+      id: "prompt-from-entry",
+      context: {},
+      params: { text: "ask again", fromEntryId: "u1" },
+    } as never);
+
+    expect("error" in outcome).toBe(false);
+    if (!("result" in outcome)) return;
+    expect(navigateTree).toHaveBeenCalledExactlyOnceWith("u1", { summarize: false });
+    await vi.waitFor(() => {
+      expect(fixture.session.prompt).toHaveBeenCalled();
+    });
+    const result = outcome.result as {
+      accepted: true;
+      runId: string;
+      session?: { leafId?: string };
+    };
+    expect(result.accepted).toBe(true);
+    expect(result.session).toBeTruthy();
+  });
+
+  it("does not prompt when the tree navigation is cancelled", async () => {
+    const fixture = stableHandlerFixture(Promise.resolve());
+    (fixture.session as unknown as { isIdle: boolean }).isIdle = true;
+    const navigateTree = vi.fn(async () => ({ cancelled: true }));
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = navigateTree;
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+
+    const outcome = await handler({
+      id: "prompt-from-entry-cancel",
+      context: {},
+      params: { text: "ask again", fromEntryId: "u1" },
+    } as never);
+
+    expect("error" in outcome && outcome.error.code).toBe("INVALID_REQUEST");
+    expect(fixture.session.prompt).not.toHaveBeenCalled();
+    expect(fixture.sessionOperationLock.isHeld()).toBe(false);
+  });
+
+  it("validates attachments before navigating fromEntryId", async () => {
+    const fixture = stableHandlerFixture(Promise.resolve());
+    (fixture.session as unknown as { isIdle: boolean }).isIdle = true;
+    const navigateTree = vi.fn(async () => ({ cancelled: false }));
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = navigateTree;
+    const prepareForPrompt = vi
+      .fn()
+      .mockRejectedValue(new AttachmentStoreError("not_ready", "manual.pdf is not ready"));
+    (fixture.factory as unknown as { deps: unknown }).deps = {
+      attachmentStore: { prepareForPrompt, commitToSession: vi.fn() },
+    };
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+
+    const outcome = await handler({
+      id: "prompt-from-entry-attachment",
+      context: {},
+      params: {
+        text: "",
+        fromEntryId: "u1",
+        attachmentIds: ["11111111-1111-4111-8111-111111111111"],
+      },
+    } as never);
+
+    expect("error" in outcome && outcome.error.code).toBe("INVALID_REQUEST");
+    expect(prepareForPrompt).toHaveBeenCalled();
+    expect(navigateTree).not.toHaveBeenCalled();
+    expect(fixture.session.prompt).not.toHaveBeenCalled();
+    expect(fixture.sessionOperationLock.isHeld()).toBe(false);
+  });
+
+  it("refuses fromEntryId while the session is not idle", async () => {
+    const fixture = stableHandlerFixture(Promise.resolve());
+    const navigateTree = vi.fn(async () => ({ cancelled: false }));
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = navigateTree;
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+
+    const outcome = await handler({
+      id: "prompt-from-entry-busy",
+      context: {},
+      params: { text: "ask again", fromEntryId: "u1" },
+    } as never);
+
+    expect("error" in outcome && outcome.error.code).toBe("AGENT_BUSY");
+    expect(navigateTree).not.toHaveBeenCalled();
+    expect(fixture.session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("releases the session operation lock when fromEntryId is missing", async () => {
+    const fixture = stableHandlerFixture(Promise.resolve());
+    (fixture.session as unknown as { isIdle: boolean }).isIdle = true;
+    const navigateTree = vi.fn(async () => {
+      throw new Error("Entry not found: stale-id");
+    });
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = navigateTree;
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+
+    const outcome = await handler({
+      id: "prompt-from-entry-missing",
+      context: {},
+      params: { text: "ask again", fromEntryId: "stale-id" },
+    } as never);
+
+    expect("error" in outcome && outcome.error.code).toBe("INVALID_REQUEST");
+    expect(fixture.session.prompt).not.toHaveBeenCalled();
+    expect(fixture.sessionOperationLock.isHeld()).toBe(false);
+    expect(fixture.sessionOperationLock.tryAcquire("next-prompt")).toBe(true);
+    fixture.sessionOperationLock.release("next-prompt");
+
+    const retry = await handler({
+      id: "prompt-after-invalid-entry",
+      context: {},
+      params: { text: "retry" },
+    } as never);
+    expect("error" in retry).toBe(false);
+    await vi.waitFor(() => {
+      expect(fixture.session.prompt).toHaveBeenCalled();
+    });
+  });
+
+  it("keeps navigate, prompt, and attachments on the session that acquired the lock", async () => {
+    const gate = deferred();
+    const fixture = stableHandlerFixture(Promise.resolve());
+    (fixture.session as unknown as { isIdle: boolean }).isIdle = true;
+    const originalNavigate = vi.fn(async () => ({ cancelled: false }));
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = originalNavigate;
+
+    const replacementLock = new AgentOperationLock();
+    const replacement = {
+      prompt: vi.fn(async () => {}),
+      navigateTree: vi.fn(async () => ({ cancelled: false })),
+      isIdle: true,
+      sessionId: "44444444-4444-4444-8444-444444444444",
+      sessionFile: "C:/sessions/replacement.jsonl",
+      sessionName: "Replacement",
+      model: undefined,
+      messages: [],
+      getSteeringMessages: () => [],
+      getFollowUpMessages: () => [],
+      getAllTools: () => [],
+      getActiveToolNames: () => [],
+      getAvailableThinkingLevels: () => ["off"],
+      extensionRunner: { getCommand: () => undefined },
+    } as unknown as AgentSession;
+
+    const originalLock = fixture.sessionOperationLock;
+    fixture.factory.getSessionOperationLock = (target) =>
+      target === fixture.session ? originalLock : replacementLock;
+
+    const prepareForPrompt = vi.fn(async (ids: string[]) => {
+      await gate.promise;
+      return [
+        {
+          id: ids[0],
+          name: "manual.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 1024,
+          status: "ready",
+          unit: "page",
+          unitCount: 3,
+        },
+      ];
+    });
+    const commitToSession = vi.fn().mockResolvedValue(undefined);
+    (fixture.factory as unknown as { deps: unknown }).deps = {
+      attachmentStore: { prepareForPrompt, commitToSession },
+    };
+
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+    const pending = handler({
+      id: "prompt-from-entry-swap",
+      context: {},
+      params: {
+        text: "ask again",
+        fromEntryId: "u1",
+        attachmentIds: ["11111111-1111-4111-8111-111111111111"],
+      },
+    } as never);
+
+    await vi.waitFor(() => {
+      expect(prepareForPrompt).toHaveBeenCalledWith(
+        ["11111111-1111-4111-8111-111111111111"],
+        "33333333-3333-4333-8333-333333333333",
+      );
+    });
+
+    const originalIdentity = fixture.server.getIdentity();
+    const originalSnapshot = {
+      sessionId: originalIdentity.sessionId!,
+      sessionPath: fixture.session.sessionFile!,
+      revision: originalIdentity.sessionRevision,
+    } as BackgroundSessionRuntime["sessionSnapshot"];
+    const background = {
+      sessionId: originalIdentity.sessionId!,
+      sessionRevision: originalIdentity.sessionRevision,
+      sessionManager: fixture.graph.sessionManager,
+      agentSession: fixture.session,
+      resourceLoader: {},
+      extensionsResult: null,
+      toolRevision: fixture.graph.toolRevision,
+      sessionSnapshot: originalSnapshot,
+      unsubscribeAgent: null,
+      extensionUiActivate: null,
+      extensionUiCleanup: null,
+      extensionUiUpdateIdentity: null,
+    } as BackgroundSessionRuntime;
+    fixture.graph.backgroundSessions.set(background.sessionId, background);
+
+    const replacementSnapshot = {
+      sessionId: replacement.sessionId,
+      revision: 2,
+    };
+    fixture.graph.agentSession = replacement;
+    Reflect.set(fixture.graph, "sessionSnapshot", replacementSnapshot);
+    fixture.server.identity.sessionId = replacement.sessionId;
+    fixture.server.identity.sessionRevision = 2;
+
+    gate.resolve();
+    const outcome = await pending;
+
+    expect("error" in outcome).toBe(false);
+    expect(outcome.identity).toEqual(originalIdentity);
+    expect(fixture.graph.sessionSnapshot).toBe(replacementSnapshot);
+    expect(background.sessionSnapshot).not.toBe(originalSnapshot);
+    expect(background.sessionSnapshot).toMatchObject({
+      sessionId: originalIdentity.sessionId,
+      revision: originalIdentity.sessionRevision,
+    });
+    expect(originalNavigate).toHaveBeenCalledExactlyOnceWith("u1", { summarize: false });
+    expect(replacement.navigateTree).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(fixture.session.prompt).toHaveBeenCalled();
+    });
+    expect(replacement.prompt).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(commitToSession).toHaveBeenCalledWith(
+        ["11111111-1111-4111-8111-111111111111"],
+        "33333333-3333-4333-8333-333333333333",
+      );
+    });
+    expect(replacementLock.isHeld()).toBe(false);
+  });
+
+  it("does not write the current graph when the originating workspace is gone", async () => {
+    const gate = deferred();
+    const fixture = stableHandlerFixture(Promise.resolve());
+    (fixture.session as unknown as { isIdle: boolean }).isIdle = true;
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = vi.fn(async () => ({
+      cancelled: false,
+    }));
+    const prepareForPrompt = vi.fn(async (ids: string[]) => {
+      await gate.promise;
+      return [
+        {
+          id: ids[0],
+          name: "manual.pdf",
+          mediaType: "application/pdf",
+          sizeBytes: 1024,
+          status: "ready",
+          unit: "page",
+          unitCount: 3,
+        },
+      ];
+    });
+    (fixture.factory as unknown as { deps: unknown }).deps = {
+      attachmentStore: { prepareForPrompt, commitToSession: vi.fn().mockResolvedValue(undefined) },
+    };
+
+    const originalIdentity = fixture.server.getIdentity();
+    const replacementSnapshot = { sessionId: "workspace-b", revision: 9 };
+    const otherGraph = {
+      agentSession: {},
+      sessionSnapshot: replacementSnapshot,
+      backgroundSessions: new Map(),
+    };
+    const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
+    const pending = handler({
+      id: "prompt-from-entry-workspace-gone",
+      context: {},
+      params: {
+        text: "ask again",
+        fromEntryId: "u1",
+        attachmentIds: ["11111111-1111-4111-8111-111111111111"],
+      },
+    } as never);
+
+    await vi.waitFor(() => {
+      expect(prepareForPrompt).toHaveBeenCalled();
+    });
+    fixture.factory.getGraph = () => otherGraph as never;
+    Reflect.set(fixture.graph, "sessionSnapshot", { sessionId: originalIdentity.sessionId });
+    gate.resolve();
+    const outcome = await pending;
+
+    expect("error" in outcome).toBe(false);
+    expect(outcome.identity).toEqual(originalIdentity);
+    expect(otherGraph.sessionSnapshot).toBe(replacementSnapshot);
+    expect(fixture.graph.sessionSnapshot).toEqual({ sessionId: originalIdentity.sessionId });
   });
 });
 

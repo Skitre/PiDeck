@@ -4,8 +4,8 @@ import { mkdir, rename, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
   AgentSession,
-  DefaultResourceLoader,
   SessionManager,
+  type DefaultResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import {
   createHostError,
@@ -28,7 +28,6 @@ import {
   MAX_LIVE_SESSIONS,
 } from "./session-runtime-cache.js";
 import { sessionStorageDirs as resolveSessionStorageDirs } from "./session-storage.js";
-import { withoutImplicitPackageInstall } from "./offline-package-resolution.js";
 import { createReadAttachmentTool } from "./attachment-tool.js";
 import { createHostAgentSession } from "./agent-session-factory.js";
 
@@ -523,20 +522,30 @@ export async function refineActiveSessionName(
   }
 }
 
-async function createSessionResourceLoader(
+function discardCandidateResourceLoader(loader: DefaultResourceLoader | undefined): void {
+  try {
+    loader?.getExtensions().runtime.invalidate("session-candidate-discarded");
+  } catch {
+    /* already stale or not a real loader */
+  }
+}
+
+export async function createSessionResourceLoader(
   factory: WorkspaceGraphFactory,
   g: WorkspaceGraph,
 ): Promise<DefaultResourceLoader> {
-  const resourceLoader = new DefaultResourceLoader({
+  if (g.resourceReloadRequired) {
+    await factory.userResourceCache.invalidate();
+  }
+  // Each AgentSession must own a fresh Extension runtime. Reusing the graph
+  // loader shares instances; disposing the previous session then marks the
+  // next session's ctx stale. Do not write the candidate onto the graph until
+  // create/bind/activate succeed — a failed candidate must not replace the
+  // active loader or clear resourceReloadRequired.
+  return factory.userResourceCache.createWorkspaceLoader({
     cwd: g.canonicalCwd,
-    agentDir: factory.deps.agentDir,
     settingsManager: g.settingsManager!,
   });
-  // Session create/open must not reach the network. Without this the SDK would
-  // npm-install or git-clone any configured package missing from disk, in a
-  // package manager PiDeck cannot cancel.
-  await withoutImplicitPackageInstall(() => resourceLoader.reload());
-  return resourceLoader;
 }
 
 /**
@@ -584,6 +593,7 @@ export async function createSession(
   }
 
   let candidateSession: AgentSession | null = null;
+  let candidateResourceLoader: DefaultResourceLoader | undefined;
   let extensionUiActivate: (() => Promise<() => void>) | null = null;
   let extensionUiCleanup: (() => void) | null = null;
   let extensionUiUpdateIdentity: ((identity: HostIdentity) => void) | null = null;
@@ -662,7 +672,7 @@ export async function createSession(
     await Promise.resolve(factory.deps.refreshModelHealth());
     factory.onModelHealthChanged?.();
     markStep("refreshModelHealth");
-    const candidateResourceLoader = await createSessionResourceLoader(factory, g);
+    candidateResourceLoader = await createSessionResourceLoader(factory, g);
     markStep("resourceLoader.reload");
 
     const created = await createHostAgentSession({
@@ -670,7 +680,7 @@ export async function createSession(
       agentDir: factory.deps.agentDir,
       modelRuntime: factory.deps.modelRuntime,
       settingsManager: g.settingsManager,
-      resourceLoader: candidateResourceLoader,
+      resourceLoader: candidateResourceLoader!,
       sessionManager,
       ...(factory.deps.attachmentStore
         ? { customTools: [createReadAttachmentTool(factory.deps.attachmentStore)] }
@@ -721,6 +731,7 @@ export async function createSession(
       } catch {
         /* ignore */
       }
+      discardCandidateResourceLoader(candidateResourceLoader);
       candidateSession = null;
       return {
         error: createHostError(
@@ -751,7 +762,7 @@ export async function createSession(
       sessionManager,
       agentSession: session,
       extensionsResult,
-      resourceLoader: candidateResourceLoader,
+      resourceLoader: candidateResourceLoader!,
       toolRevision: 1,
       sessionSnapshot,
       extensionUiActivate,
@@ -776,6 +787,7 @@ export async function createSession(
         /* ignore */
       }
       await factory.disposeAgentSessionOnly(session);
+      discardCandidateResourceLoader(candidateResourceLoader);
       commitActiveSessionState(g, server.identity, prev);
       candidateSession = null;
       extensionUiActivate = null;
@@ -791,6 +803,7 @@ export async function createSession(
       };
     }
 
+    g.resourceReloadRequired = false;
     markStep("activateExtensionUi");
 
     // The candidate is authoritative once commit and Extension activation
@@ -858,6 +871,7 @@ export async function createSession(
     if (candidateSession) {
       await factory.disposeAgentSessionOnly(candidateSession);
     }
+    discardCandidateResourceLoader(candidateResourceLoader);
     return {
       error: createHostError(
         "SESSION_SWITCH_FAILED",
@@ -974,6 +988,7 @@ export async function openSession(
     await factory.deps.recordMigrationMilestone?.("sessionOpened");
     markStep("sessionManager.open");
     let candidateSession: AgentSession | null = null;
+    let candidateResourceLoader: DefaultResourceLoader | undefined;
     let candidateExtensionUiCleanup: (() => void) | null = null;
     let candidateExtensionUiUpdateIdentity: ((identity: HostIdentity) => void) | null = null;
     let candidateExtensionUiReplayState: (() => void) | null = null;
@@ -982,7 +997,7 @@ export async function openSession(
       await Promise.resolve(factory.deps.refreshModelHealth());
       factory.onModelHealthChanged?.();
       markStep("refreshModelHealth");
-      const candidateResourceLoader = await createSessionResourceLoader(factory, g);
+      candidateResourceLoader = await createSessionResourceLoader(factory, g);
       markStep("resourceLoader.reload");
 
       const created = await createHostAgentSession({
@@ -990,7 +1005,7 @@ export async function openSession(
         agentDir: factory.deps.agentDir,
         modelRuntime: factory.deps.modelRuntime,
         settingsManager: g.settingsManager,
-        resourceLoader: candidateResourceLoader,
+        resourceLoader: candidateResourceLoader!,
         sessionManager,
         ...(factory.deps.attachmentStore
           ? { customTools: [createReadAttachmentTool(factory.deps.attachmentStore)] }
@@ -1048,7 +1063,7 @@ export async function openSession(
         sessionManager,
         agentSession: session,
         extensionsResult,
-        resourceLoader: candidateResourceLoader,
+        resourceLoader: candidateResourceLoader!,
         toolRevision: 1,
         sessionSnapshot,
         extensionUiActivate: candidateExtensionUiActivate,
@@ -1073,6 +1088,7 @@ export async function openSession(
           /* ignore */
         }
         await factory.disposeAgentSessionOnly(session);
+        discardCandidateResourceLoader(candidateResourceLoader);
         commitActiveSessionState(g, server.identity, prev);
         candidateSession = null;
         candidateExtensionUiCleanup = null;
@@ -1088,6 +1104,7 @@ export async function openSession(
         };
       }
 
+      g.resourceReloadRequired = false;
       // The candidate is authoritative once commit and Extension activation succeed.
       // Publish it before awaiting outgoing idle shutdown so slow Extension cleanup
       // cannot hold the visible conversation on the previous Session.
@@ -1143,6 +1160,7 @@ export async function openSession(
       if (candidateSession) {
         await factory.disposeAgentSessionOnly(candidateSession);
       }
+      discardCandidateResourceLoader(candidateResourceLoader);
       return {
         error: createHostError(
           "SESSION_SWITCH_FAILED",

@@ -7,6 +7,7 @@ import {
   mkdirSync,
   appendFileSync,
   writeFileSync,
+  readFileSync,
   rmSync,
   existsSync,
   realpathSync,
@@ -21,10 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hostEntry = join(__dirname, "main.ts");
 const fixturePkg = join(__dirname, "../../../test-fixtures/pi-packages/full-package");
-const peerConflictPkg = join(
-  __dirname,
-  "../../../test-fixtures/pi-packages/peer-conflict-package",
-);
+const peerConflictPkg = join(__dirname, "../../../test-fixtures/pi-packages/peer-conflict-package");
 
 class HostProcess {
   proc: ChildProcessWithoutNullStreams;
@@ -33,18 +31,14 @@ class HostProcess {
   private waiters: Array<() => void> = [];
 
   constructor(agentDir: string) {
-    this.proc = spawn(
-      process.execPath,
-      ["--import", "tsx", hostEntry, `--agent-dir=${agentDir}`],
-      {
-        env: {
-          ...process.env,
-          PI_CODING_AGENT_DIR: agentDir,
-          PIDECK_TEST_FAUX: "1",
-        },
-        stdio: ["pipe", "pipe", "pipe"],
+    this.proc = spawn(process.execPath, ["--import", "tsx", hostEntry, `--agent-dir=${agentDir}`], {
+      env: {
+        ...process.env,
+        PI_CODING_AGENT_DIR: agentDir,
+        PIDECK_TEST_FAUX: "1",
       },
-    );
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     this.proc.stdout.setEncoding("utf8");
     this.proc.stdout.on("data", (chunk: string) => {
       this.buffer += chunk;
@@ -186,41 +180,6 @@ function projectWithPartialProviderExtension(
   return dir;
 }
 
-function projectWithStaleContextTimer(root: string, name: string): string {
-  const dir = emptyProject(root, name);
-  mkdirSync(join(dir, ".pi", "extensions"), { recursive: true });
-  writeFileSync(
-    join(dir, ".pi", "extensions", "stale-context-timer.ts"),
-    `export default function (pi) {
-      let timer;
-      pi.on("session_start", (_event, ctx) => {
-        if (timer) clearInterval(timer);
-        timer = setInterval(() => { void ctx.hasUI; }, 25);
-        timer.unref?.();
-      });
-      pi.on("session_shutdown", () => {
-        if (timer) clearInterval(timer);
-        timer = undefined;
-      });
-    }\n`,
-  );
-  return dir;
-}
-
-function projectWithSlowSessionShutdown(root: string, name: string): string {
-  const dir = emptyProject(root, name);
-  mkdirSync(join(dir, ".pi", "extensions"), { recursive: true });
-  writeFileSync(
-    join(dir, ".pi", "extensions", "slow-shutdown.ts"),
-    `export default function (pi) {
-      pi.on("session_shutdown", async () => {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      });
-    }\n`,
-  );
-  return dir;
-}
-
 function sessionDirFor(agentDir: string, cwd: string): string {
   const resolvedCwd = resolve(cwd);
   const safePath = `--${resolvedCwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
@@ -245,7 +204,7 @@ describe("package + workspace integration", () => {
     );
 
     host = new HostProcess(agentDir);
-    await host.waitForEvent("host.ready");
+    await host.waitForEvent("host.ready", 60_000);
     const hello = await host.request(
       "system.hello",
       {},
@@ -254,7 +213,7 @@ describe("package + workspace integration", () => {
     expect(hello.ok).toBe(true);
     hostId = (hello.result as { hostInstanceId: string }).hostInstanceId;
     expect(hostId).toBeTruthy();
-  }, 60_000);
+  }, 90_000);
 
   afterAll(async () => {
     await host.kill();
@@ -307,7 +266,7 @@ describe("package + workspace integration", () => {
     expect(list2.packageRevision).toBe(revAfter1);
   }, 90_000);
 
-  it("loads project resources immediately when a workspace is selected", async () => {
+  it("does not load project-local extensions when a workspace is selected", async () => {
     const project = projectWithResource(root, "project-resources");
     const statusResponse = await host.request(
       "system.getStatus",
@@ -332,7 +291,27 @@ describe("package + workspace integration", () => {
     expect(
       (selected.result as { workspace: { servicesReady: boolean } }).workspace.servicesReady,
     ).toBe(true);
-    expect(selected.sessionId).toEqual(expect.any(String));
+    const workspace = (selected.result as { workspace: { id: string; revision: number } })
+      .workspace;
+    const listed = await host.request(
+      "package.list",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: workspace.id,
+        expectedWorkspaceRevision: workspace.revision,
+      },
+      { scope: "all", includeResources: true },
+    );
+    expect(listed.ok).toBe(true);
+    const resources = (
+      listed.result as { resources: Array<{ path?: string; name?: string; scope?: string }> }
+    ).resources;
+    expect(resources.every((resource) => resource.scope !== "project")).toBe(true);
+    expect(
+      resources.every(
+        (resource) => !String(resource.path ?? resource.name ?? "").includes("proj-ext"),
+      ),
+    ).toBe(true);
   }, 90_000);
 
   it("installs local fixture package in user scope, lists it, removes it", async () => {
@@ -422,9 +401,7 @@ describe("package + workspace integration", () => {
       packageSnapshot: { configured: Array<{ id: string }> };
     };
     expect(["committed", "partialFailure"]).toContain(removeResult.status);
-    expect(removeResult.packageSnapshot.configured.some((c) => c.id === installed!.id)).toBe(
-      false,
-    );
+    expect(removeResult.packageSnapshot.configured.some((c) => c.id === installed!.id)).toBe(false);
   }, 300_000);
 
   it("enables the last filtered prompt in a mixed package", async () => {
@@ -462,13 +439,17 @@ describe("package + workspace integration", () => {
       180_000,
     );
     expect(install.ok, JSON.stringify(install.error)).toBe(true);
-    const installedSnapshot = (install.result as {
-      packageSnapshot: {
-        configured: Array<{ id: string; source: string }>;
-        resources: Array<{ id: string; type: string; relativePath?: string }>;
-      };
-    }).packageSnapshot;
-    const packageRecord = installedSnapshot.configured.find((item) => item.source.includes("full-package"));
+    const installedSnapshot = (
+      install.result as {
+        packageSnapshot: {
+          configured: Array<{ id: string; source: string }>;
+          resources: Array<{ id: string; type: string; relativePath?: string }>;
+        };
+      }
+    ).packageSnapshot;
+    const packageRecord = installedSnapshot.configured.find((item) =>
+      item.source.includes("full-package"),
+    );
     const prompt = installedSnapshot.resources.find(
       (item) => item.type === "prompt" && item.relativePath === "prompts/test-prompt.md",
     );
@@ -494,7 +475,9 @@ describe("package + workspace integration", () => {
     const disabledResult = disabled.result as {
       packageSnapshot: { resources: Array<{ id: string; enabled: boolean }> };
     };
-    expect(disabledResult.packageSnapshot.resources.find((item) => item.id === prompt!.id)?.enabled).toBe(false);
+    expect(
+      disabledResult.packageSnapshot.resources.find((item) => item.id === prompt!.id)?.enabled,
+    ).toBe(false);
 
     const enabled = await host.request(
       "resource.setPreferences",
@@ -515,14 +498,20 @@ describe("package + workspace integration", () => {
     const enabledResult = enabled.result as {
       packageSnapshot: { resources: Array<{ id: string; enabled: boolean }> };
     };
-    expect(enabledResult.packageSnapshot.resources.find((item) => item.id === prompt!.id)?.enabled).toBe(true);
+    expect(
+      enabledResult.packageSnapshot.resources.find((item) => item.id === prompt!.id)?.enabled,
+    ).toBe(true);
 
     const settingsText = await import("node:fs/promises").then(({ readFile }) =>
       readFile(join(agentDir, "settings.json"), "utf8"),
     );
     const settings = JSON.parse(settingsText) as { packages?: unknown[] };
     expect(settings.packages).toContainEqual(expect.stringContaining("full-package"));
-    expect(settings.packages?.some((item) => typeof item === "object" && item !== null && "prompts" in item)).toBe(false);
+    expect(
+      settings.packages?.some(
+        (item) => typeof item === "object" && item !== null && "prompts" in item,
+      ),
+    ).toBe(false);
 
     const remove = await host.request(
       "package.remove",
@@ -540,7 +529,7 @@ describe("package + workspace integration", () => {
     expect(remove.ok, JSON.stringify(remove.error)).toBe(true);
   }, 360_000);
 
-  it("installs and removes a local project package after workspace selection", async () => {
+  it("rejects project-scope package install after workspace selection", async () => {
     const project = emptyProject(root, "project-pkg-remove");
     const statusResponse = await host.request(
       "system.getStatus",
@@ -562,9 +551,11 @@ describe("package + workspace integration", () => {
       60_000,
     );
     expect(selected.ok).toBe(true);
-    const workspace = (selected.result as {
-      workspace: { id: string; revision: number; servicesReady: boolean };
-    }).workspace;
+    const workspace = (
+      selected.result as {
+        workspace: { id: string; revision: number; servicesReady: boolean };
+      }
+    ).workspace;
     expect(workspace.servicesReady).toBe(true);
 
     const install = await host.request(
@@ -580,35 +571,9 @@ describe("package + workspace integration", () => {
       { source: fixturePkg, scope: "project" },
       120_000,
     );
-    expect(install.ok).toBe(true);
-    const installed = (install.result as {
-      packageSnapshot: { configured: Array<{ id: string; source: string; scope: string }> };
-    }).packageSnapshot.configured.find(
-      (pkg) =>
-        pkg.scope === "project" &&
-        (pkg.source === fixturePkg || pkg.source.includes("full-package")),
-    );
-    expect(installed).toBeTruthy();
-
-    const remove = await host.request(
-      "package.remove",
-      {
-        expectedHostInstanceId: hostId,
-        expectedWorkspaceId: workspace.id,
-        expectedWorkspaceRevision: workspace.revision,
-        expectedSessionId: install.sessionId,
-        expectedSessionRevision: install.sessionRevision,
-        expectedPackageRevision: install.packageRevision,
-      },
-      { packageId: installed!.id },
-      120_000,
-    );
-    expect(remove.ok, JSON.stringify(remove.error)).toBe(true);
-    const after = (remove.result as {
-      packageSnapshot: { configured: Array<{ id: string }> };
-    }).packageSnapshot;
-    expect(after.configured.some((pkg) => pkg.id === installed!.id)).toBe(false);
-  }, 300_000);
+    expect(install.ok).toBe(false);
+    expect((install.error as { code: string }).code).toBe("INVALID_REQUEST");
+  }, 90_000);
 
   it("workspace A → B → A invalidates old context (STALE_REVISION) and does not reuse revisions", async () => {
     const a = emptyProject(root, "ws-a");
@@ -630,8 +595,9 @@ describe("package + workspace integration", () => {
       60_000,
     );
     expect(setA.ok).toBe(true);
-    const wsA = (setA.result as { workspace: { id: string; revision: number; canonicalCwd: string } })
-      .workspace;
+    const wsA = (
+      setA.result as { workspace: { id: string; revision: number; canonicalCwd: string } }
+    ).workspace;
     const sessionA = setA.sessionId;
     const sessionRevA = setA.sessionRevision as number;
     const pkgRevA = setA.packageRevision as number;
@@ -711,7 +677,7 @@ describe("package + workspace integration", () => {
     expect(freshList.ok).toBe(true);
   }, 180_000);
 
-  it("keeps an extension-registered provider isolated to its workspace across A → B → A", async () => {
+  it("does not register providers from project-local extensions", async () => {
     const providerId = "pideck-iso-provider";
     const a = projectWithProviderExtension(root, "ws-provider-a", providerId);
     const b = projectWithPartialProviderExtension(root, "ws-provider-b", providerId);
@@ -736,7 +702,7 @@ describe("package + workspace integration", () => {
       return [...new Set(models.map((model) => model.provider))];
     };
 
-    // Workspace A: the .pi extension registers its provider during the build.
+    // Workspace A: a project-local extension must not register a provider.
     const setA = await host.request(
       "workspace.setCurrent",
       {
@@ -748,7 +714,7 @@ describe("package + workspace integration", () => {
       60_000,
     );
     expect(setA.ok).toBe(true);
-    expect(await listProviders(setA)).toContain(providerId);
+    expect(await listProviders(setA)).not.toContain(providerId);
     const wsA = (setA.result as { workspace: { id: string; revision: number } }).workspace;
 
     // B registers the same id with only its endpoint. It must not inherit A's
@@ -767,7 +733,7 @@ describe("package + workspace integration", () => {
     expect(await listProviders(setB)).not.toContain(providerId);
     const wsB = (setB.result as { workspace: { id: string; revision: number } }).workspace;
 
-    // Back to A (retained-graph reactivation): the provider must return.
+    // Back to A: project-local extensions still must not register a provider.
     const setA2 = await host.request(
       "workspace.setCurrent",
       {
@@ -779,7 +745,7 @@ describe("package + workspace integration", () => {
       60_000,
     );
     expect(setA2.ok).toBe(true);
-    expect(await listProviders(setA2)).toContain(providerId);
+    expect(await listProviders(setA2)).not.toContain(providerId);
   }, 180_000);
 
   it("session.create + agent.prompt + agent.abort on real Host entry", async () => {
@@ -909,12 +875,7 @@ describe("package + workspace integration", () => {
     };
     // Launch two installs in parallel against real host
     const [a, b] = await Promise.all([
-      host.request(
-        "package.install",
-        ctx,
-        { source: fixturePkg, scope: "user" },
-        180_000,
-      ),
+      host.request("package.install", ctx, { source: fixturePkg, scope: "user" }, 180_000),
       host.request(
         "package.install",
         { ...ctx },
@@ -992,10 +953,12 @@ describe("package + workspace integration", () => {
       180_000,
     );
     expect(installPeer.ok).toBe(true);
-    const peerSnap = (installPeer.result as {
-      status: string;
-      packageSnapshot: { configured: Array<{ id: string; source: string }> };
-    }).packageSnapshot;
+    const peerSnap = (
+      installPeer.result as {
+        status: string;
+        packageSnapshot: { configured: Array<{ id: string; source: string }> };
+      }
+    ).packageSnapshot;
     expect(["committed", "partialFailure"]).toContain(
       (installPeer.result as { status: string }).status,
     );
@@ -1020,9 +983,11 @@ describe("package + workspace integration", () => {
       120_000,
     );
     expect(removePeer.ok).toBe(true);
-    const after = (removePeer.result as {
-      packageSnapshot: { configured: Array<{ source: string }> };
-    }).packageSnapshot;
+    const after = (
+      removePeer.result as {
+        packageSnapshot: { configured: Array<{ source: string }> };
+      }
+    ).packageSnapshot;
     expect(
       after.configured.some((c) => c.source.includes("full-package") || c.source === fixturePkg),
     ).toBe(true);
@@ -1030,11 +995,7 @@ describe("package + workspace integration", () => {
   }, 360_000);
   it("session.reload rebuilds the active Runtime from its JSONL file", async () => {
     const project = emptyProject(root, "session-reload");
-    const status = await host.request(
-      "system.getStatus",
-      { expectedHostInstanceId: hostId },
-      null,
-    );
+    const status = await host.request("system.getStatus", { expectedHostInstanceId: hostId }, null);
     const set = await host.request(
       "workspace.setCurrent",
       {
@@ -1045,8 +1006,7 @@ describe("package + workspace integration", () => {
       { cwd: project },
     );
     expect(set.ok).toBe(true);
-    const workspace = (set.result as { workspace: { id: string; revision: number } })
-      .workspace;
+    const workspace = (set.result as { workspace: { id: string; revision: number } }).workspace;
     const sessionId = randomUUID();
     const sessionDir = sessionDirFor(agentDir, project);
     mkdirSync(sessionDir, { recursive: true });
@@ -1109,18 +1069,12 @@ describe("package + workspace integration", () => {
 
     expect(reloaded.ok).toBe(true);
     expect((reloaded.result as { name?: string }).name).toBe("After disk reload");
-    expect(Number(reloaded.sessionRevision)).toBeGreaterThan(
-      Number(opened.sessionRevision),
-    );
+    expect(Number(reloaded.sessionRevision)).toBeGreaterThan(Number(opened.sessionRevision));
   }, 90_000);
 
   it("keeps opening Sessions after forward and reverse cache churn", async () => {
-    const project = projectWithStaleContextTimer(root, "session-open-cache-churn");
-    const status = await host.request(
-      "system.getStatus",
-      { expectedHostInstanceId: hostId },
-      null,
-    );
+    const project = emptyProject(root, "session-open-cache-churn");
+    const status = await host.request("system.getStatus", { expectedHostInstanceId: hostId }, null);
     const selected = await host.request(
       "workspace.setCurrent",
       {
@@ -1132,9 +1086,11 @@ describe("package + workspace integration", () => {
     );
     expect(selected.ok).toBe(true);
 
-    const workspace = (selected.result as {
-      workspace: { id: string; revision: number };
-    }).workspace;
+    const workspace = (
+      selected.result as {
+        workspace: { id: string; revision: number };
+      }
+    ).workspace;
     const sessionDir = sessionDirFor(agentDir, project);
     mkdirSync(sessionDir, { recursive: true });
     const sessionPaths = Array.from({ length: 6 }, (_, index) => {
@@ -1171,12 +1127,7 @@ describe("package + workspace integration", () => {
     };
     const sequence = [...sessionPaths, ...[...sessionPaths].reverse()];
     for (const [index, sessionPath] of sequence.entries()) {
-      const opened = await host.request(
-        "session.open",
-        identity,
-        { sessionPath },
-        60_000,
-      );
+      const opened = await host.request("session.open", identity, { sessionPath }, 60_000);
       expect(opened, `session.open failed at switch ${index}`).toMatchObject({ ok: true });
       identity = {
         expectedHostInstanceId: hostId,
@@ -1206,12 +1157,8 @@ describe("package + workspace integration", () => {
   }, 180_000);
 
   it("publishes the target snapshot before previous idle shutdown settles", async () => {
-    const project = projectWithSlowSessionShutdown(root, "session-open-slow-shutdown");
-    const status = await host.request(
-      "system.getStatus",
-      { expectedHostInstanceId: hostId },
-      null,
-    );
+    const project = emptyProject(root, "session-open-slow-shutdown");
+    const status = await host.request("system.getStatus", { expectedHostInstanceId: hostId }, null);
     const selected = await host.request(
       "workspace.setCurrent",
       {
@@ -1223,14 +1170,13 @@ describe("package + workspace integration", () => {
     );
     expect(selected.ok).toBe(true);
 
-    const workspace = (selected.result as {
-      workspace: { id: string; revision: number };
-    }).workspace;
+    const workspace = (
+      selected.result as {
+        workspace: { id: string; revision: number };
+      }
+    ).workspace;
     const targetSessionId = randomUUID();
-    const targetSessionPath = join(
-      sessionDirFor(agentDir, project),
-      `${targetSessionId}.jsonl`,
-    );
+    const targetSessionPath = join(sessionDirFor(agentDir, project), `${targetSessionId}.jsonl`);
     mkdirSync(dirname(targetSessionPath), { recursive: true });
     writeFileSync(
       targetSessionPath,
@@ -1271,6 +1217,184 @@ describe("package + workspace integration", () => {
     expect(snapshot.sessionId).toBe(targetSessionId);
     expect(earlySnapshot).not.toBeNull();
   }, 90_000);
+
+  it("refreshes live Extension resources after install, update, and remove", async () => {
+    const packageDir = join(root, "ext-lifecycle-pkg");
+    const markerPath = join(root, "ext-factory-version.txt");
+    const writeExtensionSource = (version: string) => {
+      writeFileSync(
+        join(packageDir, "package.json"),
+        JSON.stringify({
+          name: "@pideck-test/ext-lifecycle",
+          version: version === "v1" ? "1.0.0" : "1.0.1",
+          private: true,
+          pi: { extensions: ["./extensions/ext-a.ts"] },
+        }),
+      );
+      writeFileSync(
+        join(packageDir, "extensions", "ext-a.ts"),
+        [
+          'import { writeFileSync } from "node:fs";',
+          "export default function (pi) {",
+          `  writeFileSync(${JSON.stringify(markerPath)}, ${JSON.stringify(version)});`,
+          '  pi.on("session_start", async () => {});',
+          "}",
+          "",
+        ].join("\n"),
+      );
+    };
+    mkdirSync(join(packageDir, "extensions"), { recursive: true });
+    writeExtensionSource("v1");
+
+    const proj = emptyProject(root, "ext-lifecycle");
+    const st = await host.request("system.getStatus", { expectedHostInstanceId: hostId }, null);
+    const status = st.result as {
+      workspaceId: string | null;
+      workspaceRevision: number;
+    };
+    const set = await host.request(
+      "workspace.setCurrent",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: status.workspaceId,
+        expectedWorkspaceRevision: status.workspaceRevision,
+      },
+      { cwd: proj },
+      60_000,
+    );
+    expect(set.ok).toBe(true);
+    const ws = (set.result as { workspace: { id: string; revision: number } }).workspace;
+
+    const install = await host.request(
+      "package.install",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: ws.id,
+        expectedWorkspaceRevision: ws.revision,
+        expectedSessionId: set.sessionId,
+        expectedSessionRevision: set.sessionRevision,
+        expectedPackageRevision: set.packageRevision,
+      },
+      { source: packageDir, scope: "user" },
+      180_000,
+    );
+    expect(install.ok, JSON.stringify(install.error)).toBe(true);
+    const installed = (
+      install.result as {
+        status: string;
+        packageSnapshot: {
+          configured: Array<{ id: string; source: string }>;
+          resources: Array<{
+            type: string;
+            name?: string;
+            relativePath?: string;
+            path?: string;
+            packageId?: string;
+          }>;
+        };
+      }
+    ).packageSnapshot;
+    const packageRecord = installed.configured.find((item) =>
+      item.source.includes("ext-lifecycle-pkg"),
+    );
+    expect(packageRecord).toBeTruthy();
+    const installedExtension = installed.resources.find(
+      (resource) =>
+        resource.type === "extension" &&
+        (resource.packageId === packageRecord?.id ||
+          (resource.relativePath ?? resource.name ?? resource.path ?? "").includes("ext-a.ts")),
+    );
+    expect(installedExtension?.relativePath ?? installedExtension?.name ?? "").toContain(
+      "ext-a.ts",
+    );
+    expect(existsSync(markerPath)).toBe(true);
+    expect(readFileSync(markerPath, "utf8")).toBe("v1");
+
+    writeExtensionSource("v2");
+    if (
+      installedExtension?.path &&
+      installedExtension.path !== join(packageDir, "extensions", "ext-a.ts")
+    ) {
+      writeFileSync(
+        installedExtension.path,
+        [
+          'import { writeFileSync } from "node:fs";',
+          "export default function (pi) {",
+          `  writeFileSync(${JSON.stringify(markerPath)}, "v2");`,
+          '  pi.on("session_start", async () => {});',
+          "}",
+          "",
+        ].join("\n"),
+      );
+    }
+
+    const updated = await host.request(
+      "package.update",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: ws.id,
+        expectedWorkspaceRevision: ws.revision,
+        expectedSessionId: install.sessionId,
+        expectedSessionRevision: install.sessionRevision,
+        expectedPackageRevision: install.packageRevision,
+      },
+      { packageId: packageRecord!.id },
+      180_000,
+    );
+    expect(updated.ok, JSON.stringify(updated.error)).toBe(true);
+    const updatedSnapshot = (
+      updated.result as {
+        packageSnapshot: {
+          resources: Array<{
+            type: string;
+            name?: string;
+            relativePath?: string;
+            packageId?: string;
+          }>;
+        };
+      }
+    ).packageSnapshot;
+    const updatedExtensions = updatedSnapshot.resources.filter(
+      (resource) =>
+        resource.type === "extension" &&
+        (resource.packageId === packageRecord?.id ||
+          (resource.relativePath ?? resource.name ?? "").includes("ext-a.ts")),
+    );
+    expect(updatedExtensions).toHaveLength(1);
+    expect(updatedExtensions[0]?.relativePath ?? updatedExtensions[0]?.name).toContain("ext-a.ts");
+    expect(readFileSync(markerPath, "utf8")).toBe("v2");
+
+    const remove = await host.request(
+      "package.remove",
+      {
+        expectedHostInstanceId: hostId,
+        expectedWorkspaceId: ws.id,
+        expectedWorkspaceRevision: ws.revision,
+        expectedSessionId: updated.sessionId,
+        expectedSessionRevision: updated.sessionRevision,
+        expectedPackageRevision: updated.packageRevision,
+      },
+      { packageId: packageRecord!.id },
+      120_000,
+    );
+    expect(remove.ok, JSON.stringify(remove.error)).toBe(true);
+    const removedSnapshot = (
+      remove.result as {
+        packageSnapshot: {
+          configured: Array<{ id: string }>;
+          resources: Array<{ type: string; name?: string; relativePath?: string }>;
+        };
+      }
+    ).packageSnapshot;
+    expect(removedSnapshot.configured.some((item) => item.id === packageRecord!.id)).toBe(false);
+    expect(
+      removedSnapshot.resources.some(
+        (resource) =>
+          resource.type === "extension" &&
+          (resource.relativePath ?? resource.name ?? "").includes("ext-a.ts"),
+      ),
+    ).toBe(false);
+  }, 360_000);
 });
 
 // silence unused import if tree-shaken

@@ -26,6 +26,7 @@ import {
   type PackageSourceObject,
 } from "./package-filters.js";
 import { logger } from "./logger.js";
+import type { ExtensionRefreshTransaction } from "./user-resource-cache.js";
 
 export const PACKAGE_MUTATION_TIMEOUT_MS = 10 * 60 * 1000;
 const PACKAGE_MUTATION_CANCELLATION_GRACE_MS = 5_000;
@@ -92,9 +93,6 @@ export async function capturePackageDiskFingerprint(
     join(agentDir, "packages"),
     join(agentDir, "npm"),
     join(agentDir, "git"),
-    join(g.canonicalCwd, ".pi", "packages"),
-    join(g.canonicalCwd, ".pi", "npm"),
-    join(g.canonicalCwd, ".pi", "git"),
   ]);
   const markers: string[] = [];
   try {
@@ -172,6 +170,16 @@ export async function updatePackageInScope(
   await packageManager.update(record.source, { local: record.scope === "project" });
 }
 
+export async function updateAllUserScopedPackages(
+  packageManager: NonNullable<WorkspaceGraph["packageManager"]>,
+  configured: ReadonlyArray<Pick<PackageSnapshot["configured"][number], "source" | "scope">>,
+): Promise<void> {
+  for (const record of configured) {
+    if (record.scope !== "user") continue;
+    await updatePackageInScope(packageManager, record);
+  }
+}
+
 export function createPackageHandlers(
   factory: WorkspaceGraphFactory,
 ): Partial<Record<string, MethodHandler>> {
@@ -181,10 +189,6 @@ export function createPackageHandlers(
       if (!server) {
         return { error: createHostError("HOST_NOT_READY", "Server not bound") };
       }
-      const params = ctx.params as {
-        scope: "user" | "project" | "all";
-        includeResources?: boolean;
-      };
       const { withStableGraphRead } = await import("./stable-graph-read.js");
       const out = await withStableGraphRead({
         requestId: ctx.id,
@@ -196,13 +200,13 @@ export function createPackageHandlers(
           if (!g?.packageManager || !g.settingsManager) {
             throw new Error("Workspace services not ready");
           }
-          // Reads are scoped projections only. Canonical all-scope graph state and
+          // Reads are user-scope projections only. Canonical graph state and
           // its resource ID map change exclusively during graph publication/mutation.
           const projectionResourceIds: ResourceIdMap = new Map();
           return buildPackageSnapshot({
             revision: server.identity.packageRevision,
             workspaceId: g.workspaceId,
-            scope: params.scope,
+            scope: "user",
             packageManager: g.packageManager,
             settingsManager: g.settingsManager,
             resourceLoader: g.resourceLoader,
@@ -317,6 +321,33 @@ function operationKindForPackageMutation(
       : "package.mutation";
 }
 
+function preferenceUpdatesFromParams(params: unknown): ResourcePreferenceUpdate[] {
+  return Array.isArray(params)
+    ? (params as ResourcePreferenceUpdate[])
+    : ((params as { updates?: ResourcePreferenceUpdate[] }).updates ?? [
+        params as ResourcePreferenceUpdate,
+      ]);
+}
+
+function rejectUnsupportedProjectMutation(
+  kind: MutateKind,
+  params: unknown,
+): ReturnType<typeof createHostError> | null {
+  if (kind === "install" && (params as { scope?: string }).scope === "project") {
+    return createHostError("INVALID_REQUEST", "Project-scope packages are not supported");
+  }
+  if (
+    kind === "setPreferences" &&
+    preferenceUpdatesFromParams(params).some((update) => update.targetScope === "project")
+  ) {
+    return createHostError(
+      "INVALID_REQUEST",
+      "Project-scope resource preferences are not supported",
+    );
+  }
+  return null;
+}
+
 async function mutatePackage(
   factory: WorkspaceGraphFactory,
   ctx: {
@@ -326,6 +357,8 @@ async function mutatePackage(
   },
   kind: MutateKind,
 ): Promise<{ result: unknown } | { error: ReturnType<typeof createHostError> }> {
+  const unsupported = rejectUnsupportedProjectMutation(kind, ctx.params);
+  if (unsupported) return { error: unsupported };
   const server = factory.getServer();
   if (!server) {
     return { error: createHostError("HOST_NOT_READY", "Server not bound") };
@@ -603,11 +636,19 @@ async function mutatePackageUnderLock(
     // ResourceLoader is the authoritative metadata source. Reload it before
     // constructing the final package snapshot for every clean mutation.
     if (status === "committed") {
+      let refresh: ExtensionRefreshTransaction | null = null;
+      const runnerBefore = g.agentSession?.extensionRunner;
       try {
+        await factory.userResourceCache?.invalidate();
+        refresh = g.resourceLoader
+          ? await factory.userResourceCache?.prepareLoaderExtensionRefresh(g.resourceLoader)
+          : null;
+        refresh?.apply();
         if (g.agentSession) {
           // The 0.82.1 patch drops preserveExtensionCache; every reconcile now
           // goes through the official full reload.
           await g.agentSession.reload();
+          refresh?.commit();
           const sessionRevision = server.identity.bumpSessionRevision();
           g.extensionUiUpdateIdentity?.(server.getIdentity());
           g.toolRevision = 1;
@@ -624,11 +665,17 @@ async function mutatePackageUnderLock(
           sessionChanged = true;
         } else if (g.resourceLoader) {
           await g.resourceLoader.reload();
+          refresh?.commit();
         } else {
           throw new Error("Resource loader unavailable");
         }
         g.resourceReloadRequired = false;
       } catch (err) {
+        await refresh?.settleFailure({
+          session: g.agentSession,
+          runnerBefore,
+          loader: g.resourceLoader,
+        });
         status = "partialFailure";
         reconcileRequired = true;
         g.resourceReloadRequired = true;
@@ -646,7 +693,7 @@ async function mutatePackageUnderLock(
       packageSnapshot = await buildPackageSnapshot({
         revision: rev,
         workspaceId: g.workspaceId,
-        scope: "all",
+        scope: "user",
         packageManager: g.packageManager,
         settingsManager: g.settingsManager,
         resourceLoader: g.resourceLoader,
@@ -667,7 +714,7 @@ async function mutatePackageUnderLock(
         : {
             revision: rev,
             workspaceId: g.workspaceId,
-            scope: "all",
+            scope: "user",
             configured: [],
             resources: [],
             updateCheck: { supported: factory.deps.packageUpdateCheck },
@@ -993,7 +1040,7 @@ async function runMutation(
       case "install": {
         const p = params as { source: string; scope: "user" | "project" };
         emitProgress("start", "install", p.source);
-        await pm.installAndPersist(p.source, { local: p.scope === "project" });
+        await pm.installAndPersist(p.source, { local: false });
         emitProgress("complete", "install", p.source);
         break;
       }
@@ -1022,7 +1069,7 @@ async function runMutation(
       }
       case "updateAll": {
         emitProgress("start", "update", "*");
-        await pm.update();
+        await updateAllUserScopedPackages(pm, pm.listConfiguredPackages());
         emitProgress("complete", "update", "*");
         break;
       }

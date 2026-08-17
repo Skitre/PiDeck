@@ -231,6 +231,9 @@ export type HostRequestParams = {
     /** Re-attach images remembered for this text in the host's queue
      * attachment table (used by run-now on queued items). */
     attachQueuedImages?: boolean;
+    /** Navigate the current session tree to this user entry, then prompt.
+     * Edit-resend and regenerate stay in the same session file. */
+    fromEntryId?: string;
   };
   "agent.steer": { text: string; images?: SerializableImage[]; attachmentIds?: string[] };
   "agent.followUp": { text: string; images?: SerializableImage[]; attachmentIds?: string[] };
@@ -358,7 +361,7 @@ export type HostResultMap = {
   "session.usageReport": SessionUsageReport;
   "session.searchAll": SessionSearchReport;
   "session.getCommands": { commands: CommandSummary[] };
-  "agent.prompt": { accepted: true; runId: string };
+  "agent.prompt": { accepted: true; runId: string; session?: SessionSnapshot };
   "agent.steer": { accepted: true };
   "agent.followUp": { accepted: true };
   "agent.abort": {

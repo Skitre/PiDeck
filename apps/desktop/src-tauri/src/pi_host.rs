@@ -1,4 +1,4 @@
-use crate::desktop_settings::DesktopSettingsStore;
+use crate::desktop_settings::{DesktopSettings, DesktopSettingsStore};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -459,6 +459,12 @@ pub struct PiHostManager {
     /// Workspace the Host preloads before announcing ready, so the expensive
     /// first graph build overlaps WebView/frontend startup.
     initial_workspace: Option<PathBuf>,
+    /// Last Session to reopen during that preload. Only set when it belongs to
+    /// the preloaded workspace and restoreLastSession is on.
+    initial_session: Option<PathBuf>,
+    /// Reopen the most recent Session in the preloaded workspace when no
+    /// explicit lastSessionPath is available.
+    continue_recent: bool,
     /// Restarts performed for the current host epoch (reset after stable ready).
     restart_count: Arc<AtomicU32>,
     auto_restart_once: bool,
@@ -797,7 +803,9 @@ impl PiHostManager {
             child: None,
             stdin: None,
             agent_dir: settings.resolved_agent_dir(),
-            initial_workspace: Self::initial_workspace_from(settings),
+            initial_workspace: Self::workspace_from_settings(&settings.settings),
+            initial_session: Self::session_from_settings(&settings.settings),
+            continue_recent: settings.settings.restore_last_session,
             restart_count: Arc::new(AtomicU32::new(0)),
             auto_restart_once: settings.settings.auto_restart_host_once,
             shutting_down: Arc::new(AtomicBool::new(false)),
@@ -818,17 +826,44 @@ impl PiHostManager {
         self.agent_dir = dir;
     }
 
-    fn initial_workspace_from(settings: &DesktopSettingsStore) -> Option<PathBuf> {
+    fn workspace_from_settings(settings: &DesktopSettings) -> Option<PathBuf> {
         settings
-            .settings
             .default_workspace
             .clone()
-            .or_else(|| settings.settings.last_workspace.clone())
+            .or_else(|| settings.last_workspace.clone())
             .map(PathBuf::from)
     }
 
+    fn settings_paths_equal(left: &str, right: &Path) -> bool {
+        let normalize = |value: &str| value.replace('\\', "/").trim_end_matches('/').to_string();
+        let left = normalize(left);
+        let right = normalize(&right.to_string_lossy());
+        if cfg!(windows) {
+            left.eq_ignore_ascii_case(&right)
+        } else {
+            left == right
+        }
+    }
+
+    fn session_from_settings(settings: &DesktopSettings) -> Option<PathBuf> {
+        if !settings.restore_last_session {
+            return None;
+        }
+        let session = settings.last_session_path.as_ref()?;
+        let preload = Self::workspace_from_settings(settings)?;
+        match settings.last_workspace.as_deref() {
+            Some(last) if Self::settings_paths_equal(last, &preload) => {
+                Some(PathBuf::from(session))
+            }
+            None => Some(PathBuf::from(session)),
+            Some(_) => None,
+        }
+    }
+
     pub fn set_initial_workspace(&mut self, settings: &DesktopSettingsStore) {
-        self.initial_workspace = Self::initial_workspace_from(settings);
+        self.initial_workspace = Self::workspace_from_settings(&settings.settings);
+        self.initial_session = Self::session_from_settings(&settings.settings);
+        self.continue_recent = settings.settings.restore_last_session;
     }
 
     pub fn set_auto_restart_once(&mut self, v: bool) {
@@ -1036,6 +1071,14 @@ impl PiHostManager {
         if let Some(ws) = self.initial_workspace.as_ref() {
             if ws.is_dir() {
                 cmd.arg(format!("--initial-cwd={}", ws.display()));
+            }
+        }
+        if self.continue_recent {
+            cmd.arg("--continue-recent");
+        }
+        if let Some(session) = self.initial_session.as_ref() {
+            if session.is_file() {
+                cmd.arg(format!("--initial-session={}", session.display()));
             }
         }
         cmd.env("PI_CODING_AGENT_DIR", &agent_dir);
@@ -1809,4 +1852,44 @@ fn chrono_like_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod preload_session_tests {
+    use super::*;
+
+    #[test]
+    fn preloads_last_session_when_it_belongs_to_the_startup_workspace() {
+        let settings = DesktopSettings {
+            last_workspace: Some(r"C:\repo".into()),
+            last_session_path: Some(r"C:\sessions\kept.jsonl".into()),
+            ..DesktopSettings::default()
+        };
+        assert_eq!(
+            PiHostManager::session_from_settings(&settings),
+            Some(PathBuf::from(r"C:\sessions\kept.jsonl"))
+        );
+    }
+
+    #[test]
+    fn does_not_preload_a_session_from_another_workspace() {
+        let settings = DesktopSettings {
+            default_workspace: Some(r"C:\default".into()),
+            last_workspace: Some(r"C:\repo".into()),
+            last_session_path: Some(r"C:\sessions\kept.jsonl".into()),
+            ..DesktopSettings::default()
+        };
+        assert_eq!(PiHostManager::session_from_settings(&settings), None);
+    }
+
+    #[test]
+    fn skips_session_preload_when_restore_is_disabled() {
+        let settings = DesktopSettings {
+            restore_last_session: false,
+            last_workspace: Some(r"C:\repo".into()),
+            last_session_path: Some(r"C:\sessions\kept.jsonl".into()),
+            ..DesktopSettings::default()
+        };
+        assert_eq!(PiHostManager::session_from_settings(&settings), None);
+    }
 }

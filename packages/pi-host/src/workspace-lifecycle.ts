@@ -3,8 +3,6 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { join, resolve as pathResolve, win32 } from "node:path";
 import {
   DefaultPackageManager,
-  DefaultResourceLoader,
-  SessionManager,
   SettingsManager,
   type AgentSession,
   type ExtensionCommandContextActions,
@@ -22,13 +20,16 @@ import type { ProviderOwnerToken } from "./extension-provider-ownership.js";
 import { captureFilesystemFingerprint } from "./filesystem-fingerprint.js";
 import { logger } from "./logger.js";
 import { buildPackageSnapshot } from "./package-snapshot.js";
-import { withoutImplicitPackageInstall } from "./offline-package-resolution.js";
 import { buildSessionSnapshot } from "./session-snapshot.js";
 import { createReadAttachmentTool } from "./attachment-tool.js";
 import type { SessionRuntimeCache } from "./session-runtime-cache.js";
 import type { PiHostServer } from "./server.js";
 import type { GraphFactoryDeps, WorkspaceGraph } from "./workspace-graph-types.js";
 import { createHostAgentSession } from "./agent-session-factory.js";
+import {
+  createWorkspaceSessionManager,
+  type WorkspaceSessionBootstrap,
+} from "./workspace-session-bootstrap.js";
 
 export type WorkspaceLifecycleContext = {
   deps: GraphFactoryDeps;
@@ -192,6 +193,7 @@ export class WorkspaceLifecycle {
   async setCurrent(
     cwd: string,
     requestId: string,
+    bootstrap: WorkspaceSessionBootstrap = {},
   ): Promise<{ workspace: WorkspaceSnapshot; session?: SessionSnapshot } | { error: HostError }> {
     const server = this.context.getServer();
     if (!server) {
@@ -283,6 +285,7 @@ export class WorkspaceLifecycle {
         revision,
         sessionRevision: candidateSessionRevision,
         packageRevision: candidatePackageRevision,
+        ...bootstrap,
       });
       if (operation.signal.aborted) {
         if ("graph" in built) await this.disposeGraph(built.graph);
@@ -393,7 +396,6 @@ export class WorkspaceLifecycle {
     signal?: AbortSignal,
   ): Promise<string> {
     const roots = new Set<string>([
-      join(graph.canonicalCwd, ".pi"),
       join(this.context.deps.agentDir, "settings.json"),
       join(this.context.deps.agentDir, "models.json"),
       join(this.context.deps.agentDir, "models-store.json"),
@@ -613,7 +615,7 @@ export class WorkspaceLifecycle {
       graph.packageSnapshot = await buildPackageSnapshot({
         revision: args.packageRevision,
         workspaceId: graph.workspaceId,
-        scope: "all",
+        scope: "user",
         packageManager: graph.packageManager!,
         settingsManager: graph.settingsManager!,
         resourceLoader: graph.resourceLoader,
@@ -750,6 +752,8 @@ export class WorkspaceLifecycle {
     revision: number;
     sessionRevision: number;
     packageRevision: number;
+    sessionPath?: string;
+    continueRecent?: boolean;
   }): Promise<{ graph: WorkspaceGraph } | { error: HostError }> {
     const server = this.context.getServer()!;
     const { agentDir, modelRuntime } = this.context.deps;
@@ -768,23 +772,26 @@ export class WorkspaceLifecycle {
 
     try {
       const settingsManager = SettingsManager.create(args.canonicalCwd, agentDir, {
-        projectTrusted: true,
+        projectTrusted: false,
       });
       const packageManager = new DefaultPackageManager({
         cwd: args.canonicalCwd,
         agentDir,
         settingsManager,
       });
-      const resourceLoader = new DefaultResourceLoader({
+      const cache = this.context.deps.userResourceCache;
+      if (!cache) {
+        throw new Error("User resource cache is required");
+      }
+      const resourceLoader = await cache.createWorkspaceLoader({
         cwd: args.canonicalCwd,
-        agentDir,
         settingsManager,
       });
-      // Workspace selection (including the startup preload) must not reach the
-      // network; see withoutImplicitPackageInstall.
-      await withoutImplicitPackageInstall(() => resourceLoader.reload());
       markStep("resourceLoader.reload");
-      const sessionManager = SessionManager.create(args.canonicalCwd);
+      const sessionManager = await createWorkspaceSessionManager(args.canonicalCwd, {
+        sessionPath: args.sessionPath,
+        continueRecent: args.continueRecent,
+      });
       await Promise.resolve(this.context.deps.refreshModelHealth());
       this.context.onModelHealthChanged();
       markStep("refreshModelHealth");
@@ -875,7 +882,7 @@ export class WorkspaceLifecycle {
       graph.packageSnapshot = await buildPackageSnapshot({
         revision: args.packageRevision,
         workspaceId: args.workspaceId,
-        scope: "all",
+        scope: "user",
         packageManager,
         settingsManager,
         resourceLoader,

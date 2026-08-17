@@ -483,13 +483,15 @@ export function validateRequestParams<M extends HostMethod>(
       return exactObject(
         params,
         ["text"],
-        ["images", "attachmentIds", "streamingBehavior", "attachQueuedImages"],
+        ["images", "attachmentIds", "streamingBehavior", "attachQueuedImages", "fromEntryId"],
       ) &&
         isString(params.text) &&
         validateImages(params.images) &&
         validateAttachmentIds(params.attachmentIds) &&
         (params.attachQueuedImages === undefined ||
           typeof params.attachQueuedImages === "boolean") &&
+        (params.fromEntryId === undefined ||
+          (isString(params.fromEntryId) && params.fromEntryId.length > 0)) &&
         (params.streamingBehavior === undefined ||
           params.streamingBehavior === "steer" ||
           params.streamingBehavior === "followUp")

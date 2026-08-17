@@ -8,9 +8,8 @@ import {
   isCurrentRequestGeneration,
 } from "../../lib/bridge/host-context";
 import { useAppStore } from "../../lib/stores/app-store";
-import { editDraft } from "../../lib/draft-persistence";
-import { draftTargetFor } from "../../lib/draft-target";
 import { requestFork } from "../../lib/fork-actions";
+import { requestNavigateTree } from "../../lib/tree-actions";
 import { requestWithRetry } from "../../lib/bridge/request-retry";
 import { useT } from "../../lib/i18n/use-t";
 import { flattenSessionTree, type TreeRow } from "./tree-model";
@@ -83,8 +82,6 @@ function RowRail({ row, laneCount }: { row: TreeRow; laneCount: number }) {
 export function TreePanel({ visible }: { visible: boolean }) {
   const t = useT();
   const session = useAppStore((state) => state.session);
-  const applySessionSnapshot = useAppStore((state) => state.applySessionSnapshot);
-  const pushNotification = useAppStore((state) => state.pushNotification);
   const [nodes, setNodes] = useState<SerializableSessionTreeNode[] | null>(null);
   const [leafId, setLeafId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,39 +172,9 @@ export function TreePanel({ visible }: { visible: boolean }) {
     if (!current.host || !current.workspace || !current.session) return;
     if (!current.session.isIdle || navigating) return;
     setNavigating(targetId);
-    const generation = captureRequestGeneration(current.host);
     try {
-      const res = await requestWithRetry(() =>
-        hostClient.request(
-          "agent.navigateTree",
-          activeSessionContext(current.host!, current.workspace!, current.session!),
-          { targetId },
-        ),
-      );
-      if (!res) return;
-      if (
-        !isCurrentRequestGeneration(useAppStore.getState().host, generation, {
-          session: true,
-        })
-      ) {
-        return;
-      }
-      if (!res.ok) {
-        pushNotification(res.error?.message ?? t("dockTreeSwitchFailed"), "error");
-        return;
-      }
-      if (res.result.cancelled) {
-        pushNotification(t("dockTreeSwitchCancelled"), "info");
-        return;
-      }
-      applySessionSnapshot(res.result.session);
-      if (res.result.editorText !== undefined) {
-        const target = draftTargetFor(current.workspace, res.result.session);
-        if (target) editDraft(target, res.result.editorText);
-      }
-      setRefreshSeq((seq) => seq + 1);
-    } catch (err) {
-      pushNotification(err instanceof Error ? err.message : t("dockTreeSwitchFailed"), "error");
+      const outcome = await requestNavigateTree(targetId);
+      if (outcome.applied) setRefreshSeq((seq) => seq + 1);
     } finally {
       setNavigating(null);
     }

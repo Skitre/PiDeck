@@ -30,6 +30,7 @@ import { getAppVersion } from "../lib/app-version";
 import { checkForAppUpdate } from "../lib/updater";
 import { applyLanguage } from "../lib/i18n";
 import { tCurrent, useT } from "../lib/i18n/use-t";
+import { shouldRestoreLastSession } from "./session-restore";
 import { StartupScreen, resolveStartupStage, useInitialStartupScreen } from "./StartupScreen";
 import { DraftPersistenceController } from "./DraftPersistenceController";
 import {
@@ -672,11 +673,6 @@ export function App() {
               hostClient.rejectAllPending(reason);
 
               let lastError: unknown;
-              // Restoring lastSessionPath is startup/restart semantics: only a
-              // pass that found the Host without a workspace (fresh boot or
-              // watchdog restart) may re-open it. A recovery against a live
-              // Host keeps that Host's current session authoritative.
-              let sessionRestoreEligible = false;
               for (let attempt = 0; attempt < 5 && !cancelled; attempt += 1) {
                 try {
                   const configuredPresentation =
@@ -689,7 +685,6 @@ export function App() {
                   if (expectedHostId !== "bootstrap" && status.hostInstanceId !== expectedHostId) {
                     throw new Error("Host generation changed during hello");
                   }
-                  if (!status.workspaceId) sessionRestoreEligible = true;
                   useAppStore.getState().beginHostEpoch(status);
                   const configuredSettings = useAppStore.getState().desktopSettings;
                   const configuredWorkspace =
@@ -733,10 +728,16 @@ export function App() {
                   const hydrated = useAppStore.getState();
                   if (
                     sessionPathToRestore &&
-                    sessionRestoreEligible &&
+                    shouldRestoreLastSession({
+                      reason,
+                      restoreLastSession: configuredSettings?.restoreLastSession ?? true,
+                      lastSessionPath: sessionPathToRestore,
+                      lastWorkspace: configuredSettings?.lastWorkspace,
+                      currentWorkspacePath: hydrated.workspace?.canonicalCwd,
+                      currentSessionPath: hydrated.session?.sessionPath,
+                    }) &&
                     hydrated.host &&
-                    hydrated.workspace?.servicesReady &&
-                    hydrated.session?.sessionPath !== sessionPathToRestore
+                    hydrated.workspace?.servicesReady
                   ) {
                     const restoreContext = nullableSessionContext(
                       hydrated.host,

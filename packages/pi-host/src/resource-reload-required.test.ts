@@ -2,13 +2,24 @@
  * R6: agent.prompt blocked while resourceReloadRequired until
  * package.reloadResources success path clears the flag.
  */
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createAgentSession,
+  SessionManager,
+  SettingsManager,
+  type AgentSession,
+} from "@earendil-works/pi-coding-agent";
+import { createTestModelServices } from "./test-helpers/model-runtime.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentHandlers } from "./agent-controller.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { createPackageHandlers } from "./package-controller.js";
 import { createSessionHandlers } from "./session-controller.js";
 import { logger } from "./logger.js";
 import { GraphOperationRegistry } from "./operation-lifecycle.js";
+import { UserResourceCache } from "./user-resource-cache.js";
 
 function mockFactory(opts: {
   resourceReloadRequired: boolean;
@@ -589,5 +600,116 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
     const agentHandlers = createAgentHandlers(factory);
     const blocked = await agentHandlers["agent.prompt"]!(promptCtx as never);
     expect("error" in blocked && blocked.error.code === "RESOURCE_RELOAD_FAILED").toBe(true);
+  });
+});
+
+describe("extension refresh rollback", () => {
+  const roots: string[] = [];
+  const sessions: AgentSession[] = [];
+
+  afterEach(() => {
+    for (const session of sessions.splice(0)) {
+      session.dispose();
+    }
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  async function refreshFixture() {
+    const root = mkdtempSync(join(tmpdir(), "pideck-ext-refresh-"));
+    roots.push(root);
+    const agentDir = join(root, "agent");
+    const workspace = join(root, "workspace");
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(
+      join(agentDir, "ext.js"),
+      [
+        "export default function (pi) {",
+        '  pi.on("session_start", async (_event, ctx) => { void ctx; });',
+        "}",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(agentDir, "settings.json"),
+      JSON.stringify({ extensions: [join(agentDir, "ext.js")] }),
+    );
+
+    const cache = new UserResourceCache(agentDir);
+    const settingsManager = SettingsManager.create(workspace, agentDir, { projectTrusted: false });
+    const loader = await cache.createWorkspaceLoader({
+      cwd: workspace,
+      settingsManager,
+    });
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    graph.resourceLoader = loader;
+    Object.assign(factory, { userResourceCache: cache });
+    return {
+      cache,
+      loader,
+      factory,
+      graph,
+      settingsManager,
+      agentDir,
+      workspace,
+      before: loader.getExtensions(),
+    };
+  }
+
+  it("restores the loader immediately when reload fails before the new runner is built", async () => {
+    const { loader, factory, graph, before } = await refreshFixture();
+    graph.agentSession!.reload = vi.fn(async () => {
+      throw new Error("settingsManager.reload failed");
+    });
+
+    const out = await createPackageHandlers(factory)["package.reloadResources"]!(
+      reloadCtx as never,
+    );
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      expect((out.result as { status: string }).status).toBe("partialFailure");
+    }
+    expect(loader.getExtensions().runtime).toBe(before.runtime);
+    expect(() => before.runtime.assertActive()).not.toThrow();
+    expect(graph.resourceReloadRequired).toBe(true);
+  });
+
+  it("keeps the adopted runner when a real AgentSession fails after _buildRuntime", async () => {
+    const { loader, factory, graph, settingsManager, agentDir, workspace, before } =
+      await refreshFixture();
+    const { modelRuntime } = await createTestModelServices(agentDir);
+    const { session } = await createAgentSession({
+      cwd: workspace,
+      agentDir,
+      modelRuntime,
+      settingsManager,
+      resourceLoader: loader,
+      sessionManager: SessionManager.create(workspace),
+    });
+    sessions.push(session);
+    graph.agentSession = session;
+    const runnerBefore = session.extensionRunner;
+    const originalReload = session.reload.bind(session);
+    session.reload = async () => {
+      await originalReload();
+      throw new Error("extension discovery failed");
+    };
+
+    const out = await createPackageHandlers(factory)["package.reloadResources"]!(
+      reloadCtx as never,
+    );
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      expect((out.result as { status: string }).status).toBe("partialFailure");
+    }
+    const current = loader.getExtensions();
+    expect(session.extensionRunner).not.toBe(runnerBefore);
+    expect(graph.agentSession.extensionRunner).toBe(session.extensionRunner);
+    expect(current.runtime).not.toBe(before.runtime);
+    expect(() => current.runtime.assertActive()).not.toThrow();
+    expect(() => before.runtime.assertActive()).toThrow(/user-resource-refresh/);
+    expect(graph.resourceReloadRequired).toBe(true);
   });
 });

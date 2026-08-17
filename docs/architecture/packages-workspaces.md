@@ -10,8 +10,14 @@ Workspace configuration always wins, and standalone Host processes retain the
 `waitingForWorkspace` state until given an explicit cwd.
 
 1. Desktop supplies a startup cwd, or the user picks one through `workspace.setCurrent`.
-2. Host canonicalizes the path and builds services with explicit `projectTrusted: true`.
-3. Project extensions, skills, prompts, and themes become available immediately.
+   On first launch the Host preloads that cwd and, when Restore last session is
+   on, reopens `lastSessionPath` (or the most recent Session in that workspace)
+   instead of creating an empty one. Sidebar rows are listed, not opened.
+2. Host canonicalizes the path and builds services with explicit `projectTrusted: false`.
+3. Only user/global packages from `<agentDir>` are loaded. Host loads that
+   set once per process and injects it into each Workspace graph; switching
+   Workspace does not re-import extensions. `<workspace>/.pi` packages and
+   extensions are not loaded.
 
 Workspace canonicalization follows symlinks and rejects existing non-directory
 paths with `WORKSPACE_NOT_DIRECTORY`. The canonical path is also the retained
@@ -28,9 +34,11 @@ The desktop persists the Host-returned `canonicalCwd` and uses exact string
 identity for recent Workspace entries. It does not infer platform path
 semantics or lowercase paths in React.
 
-The selected workspace is trusted by definition. Existing project extensions
-can execute local code as soon as the workspace opens. Project-scope Package
-mutations retain a separate executable-code confirmation in the desktop UI.
+PiDeck does not trust or execute project-local extensions. Selecting a
+Workspace does not run `<workspace>/.pi/extensions`. Package install, remove,
+update, and resource preferences are user-scope only; `scope: "project"` is
+rejected as `INVALID_REQUEST`. Existing `<workspace>/.pi` directories are left
+on disk.
 
 ## Package operations
 
@@ -59,12 +67,10 @@ completes successfully.
 
 ## UI
 
-The Packages page provides scope filters, install source entry, configured
-Package selection, resource toggles, standalone resources, update actions, and
-explicit confirmation before a Project Package mutation can execute code.
-Install, update, and remove all confirm through the shared review dialog
-(`components/Dialog.tsx`); removal uses the danger tone and captures the
-project authorization up front, so a project-scoped removal needs exactly one
-dialog. Update all shows the known update count and is disabled when a
-completed check found none; the progress strip reports human-readable states,
-auto-clears after completion, and can be dismissed.
+The Packages page installs and manages user-scope packages only. It provides
+install source entry, configured Package selection, resource toggles,
+standalone resources, and update actions. Install, update, and remove all
+confirm through the shared review dialog (`components/Dialog.tsx`); removal
+uses the danger tone. Update all shows the known update count and is disabled
+when a completed check found none; the progress strip reports human-readable
+states, auto-clears after completion, and can be dismissed.

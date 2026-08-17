@@ -57,7 +57,7 @@ Host's own shutdown handling remain defense in depth for that external case.
 **Owns**
 
 - Zustand projections, typed Host requests/events, and all user-facing views.
-- Explicit confirmation before Project Package mutations.
+- Package install, update, and remove confirmation for user-scope packages.
 
 **Must not**
 
@@ -68,10 +68,10 @@ Host's own shutdown handling remain defense in depth for that external case.
 The order is fixed:
 
 1. Canonicalize cwd.
-2. Create `SettingsManager` with explicit `projectTrusted: true`.
-3. Load project resources and create the cwd-bound AgentSession graph.
+2. Create `SettingsManager` with explicit `projectTrusted: false`.
+3. Apply the process-wide user/global Extension cache and create the cwd-bound AgentSession graph.
 4. Publish one ready `workspace.changed` snapshot.
 
-Selecting or restoring a workspace authorizes its existing `.pi` project
-resources to load. There is no persistent workspace trust store, pending state,
-or deny action. Existing `.pi/extensions` may execute local code immediately.
+Selecting a workspace does not load or execute `<workspace>/.pi` packages or
+extensions. User/global packages from `<agentDir>` are loaded once per Host
+process and reused across Workspace switches.

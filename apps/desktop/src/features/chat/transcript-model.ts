@@ -1241,6 +1241,73 @@ export function parseUserAttachments(raw: string): ParsedUserText {
   return { text, files, documents };
 }
 
+export type BranchSource = {
+  entryId: string;
+  fallbackText: string;
+  images: { mediaType: string; data: string }[];
+  files: { name: string; content: string }[];
+  attachmentIds: string[];
+};
+
+function imagesFromUserRow(row: TranscriptRow): BranchSource["images"] {
+  return row.blocks
+    .filter((block): block is Extract<TranscriptBlock, { kind: "image" }> => block.kind === "image")
+    .map((block) => ({ mediaType: block.mimeType, data: block.data }));
+}
+
+export function composeBranchPromptText(source: {
+  fallbackText: string;
+  files: { name: string; content: string }[];
+}): string {
+  const parts = [
+    source.fallbackText.trimEnd(),
+    ...source.files.map((file) => buildAttachedFileBlock(file.name, file.content)),
+  ];
+  return parts.filter(Boolean).join("\n\n");
+}
+
+export function hasBranchPayload(
+  source: Pick<BranchSource, "fallbackText" | "images" | "files" | "attachmentIds">,
+): boolean {
+  return Boolean(
+    source.fallbackText.trim() ||
+    source.images.length > 0 ||
+    source.files.length > 0 ||
+    source.attachmentIds.length > 0,
+  );
+}
+
+export function branchSourceForRow(
+  row: TranscriptRow,
+  promptIds: ReadonlyMap<string, string>,
+  userRows: ReadonlyMap<string, TranscriptRow>,
+): BranchSource | undefined {
+  const entryId = promptIds.get(row.key);
+  if (!entryId) return undefined;
+  const userRow = userRows.get(entryId);
+  const parsed = userRow
+    ? parseUserAttachments(userRow.copyText)
+    : { text: "", files: [], documents: [] };
+  return {
+    entryId,
+    fallbackText: parsed.text,
+    images: userRow ? imagesFromUserRow(userRow) : [],
+    files: parsed.files,
+    attachmentIds: parsed.documents.map((document) => document.id),
+  };
+}
+
+export function branchPromptInput(
+  source: BranchSource,
+  text = source.fallbackText,
+): { text: string; images: BranchSource["images"]; attachmentIds: string[] } {
+  return {
+    text: composeBranchPromptText({ fallbackText: text, files: source.files }),
+    images: source.images,
+    attachmentIds: source.attachmentIds,
+  };
+}
+
 /**
  * Streaming hot path: the reducer rebuilds `messages` on every agent event,
  * so every derived row is a fresh object even when its content is unchanged.
@@ -1250,6 +1317,25 @@ export function parseUserAttachments(raw: string): ParsedUserText {
  * identity boundary: this optimization must never alias a live key to a
  * persisted row or rewrite a persisted key.
  */
+/**
+ * Persisted user entry that produced each user/assistant row. Edit and
+ * regenerate both navigate to this id so the new turn is a sibling in the
+ * current session tree.
+ */
+export function userPromptEntryIds(rows: readonly TranscriptRow[]): ReadonlyMap<string, string> {
+  const map = new Map<string, string>();
+  let lastUser: string | undefined;
+  for (const row of rows) {
+    if (row.role === "user" && row.sourceId) {
+      lastUser = row.sourceId;
+      map.set(row.key, row.sourceId);
+    } else if (row.role === "assistant" && lastUser) {
+      map.set(row.key, lastUser);
+    }
+  }
+  return map;
+}
+
 export function reuseStableRows(
   previous: TranscriptRow[] | null,
   next: TranscriptRow[],
