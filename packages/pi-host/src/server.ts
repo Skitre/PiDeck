@@ -17,7 +17,7 @@ import {
   type ExtensionDecisionPresentation,
 } from "@pideck/protocol";
 import { IdentityState } from "./identity.js";
-import { AgentOperationLock, TryMutex } from "./locks.js";
+import { TryMutex } from "./locks.js";
 import { logger } from "./logger.js";
 import { GraphOperationRegistry } from "./operation-lifecycle.js";
 import { OutboundWriter } from "./outbound-queue.js";
@@ -74,22 +74,13 @@ export type MethodHandler = (
 
 export type HandlerContext = {
   id: string;
-  method: HostMethod;
   params: unknown;
   context: Record<string, unknown>;
-  identity: IdentityState;
-  serviceGraphLock: TryMutex;
-  agentOperationLock: AgentOperationLock;
-  getStatus: () => HostStatusSnapshot;
-  setPhase: (phase: HostPhase) => void;
-  emit: (event: HostEventName, payload: unknown) => void;
-  writeResponse: (body: unknown) => void;
 };
 
 export class PiHostServer {
   readonly identity = new IdentityState();
   readonly serviceGraphLock = new TryMutex();
-  readonly agentOperationLock = new AgentOperationLock();
   readonly graphOperations = new GraphOperationRegistry();
   private readonly shutdownController = new AbortController();
   private sequence = 0;
@@ -566,16 +557,8 @@ export class PiHostServer {
 
     const handlerCtx: HandlerContext = {
       id,
-      method,
       params,
       context,
-      identity: this.identity,
-      serviceGraphLock: this.serviceGraphLock,
-      agentOperationLock: this.agentOperationLock,
-      getStatus: () => this.buildStatus(),
-      setPhase: (p) => this.setPhase(p),
-      emit: (e, p) => this.emit(e, p),
-      writeResponse: (b) => this.writeResponse(b),
     };
 
     try {

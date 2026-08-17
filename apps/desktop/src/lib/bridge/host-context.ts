@@ -127,36 +127,6 @@ export function captureRequestGeneration(host: HostStatusSnapshot): RequestGener
   };
 }
 
-export type WorkspaceAuthorization = {
-  generation: RequestGeneration;
-  workspaceId: string;
-  workspaceRevision: number;
-};
-
-export function captureWorkspaceAuthorization(
-  host: HostStatusSnapshot,
-  workspace: WorkspaceSnapshot,
-): WorkspaceAuthorization {
-  return {
-    generation: captureRequestGeneration(host),
-    workspaceId: workspace.id,
-    workspaceRevision: workspace.revision,
-  };
-}
-
-export function isCurrentWorkspaceAuthorization(
-  host: HostStatusSnapshot | null,
-  workspace: WorkspaceSnapshot | null,
-  authorization: WorkspaceAuthorization,
-): boolean {
-  if (!workspace || workspace.id !== authorization.workspaceId) return false;
-  if (workspace.revision !== authorization.workspaceRevision) return false;
-  return isCurrentRequestGeneration(host, authorization.generation, {
-    session: true,
-    packages: true,
-  });
-}
-
 export function isExpectedPackageMutationCompletion(
   current: HostStatusSnapshot | null,
   expected: RequestGeneration,

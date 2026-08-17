@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   matchesResourcePattern,
   setPackageResourceFilter,
-  setPackageResourceTypeFilter,
   setTopLevelPathEnabled,
   toObjectSource,
   toPosixPath,
@@ -182,23 +181,6 @@ describe("matchesResourcePattern", () => {
   it("matches skill directory patterns", () => {
     expect(matchesResourcePattern("skills/review/SKILL.md", "review")).toBe(true);
     expect(matchesResourcePattern("skills/review/SKILL.md", "skills/review", true)).toBe(true);
-  });
-});
-
-describe("setPackageResourceTypeFilter", () => {
-  it("disables entire type with empty array", () => {
-    const result = setPackageResourceTypeFilter(["npm:foo"], "npm:foo", "skill", false);
-    expect(result).toEqual([{ source: "npm:foo", skills: [] }]);
-  });
-
-  it("re-enables entire type by removing key", () => {
-    const result = setPackageResourceTypeFilter(
-      [{ source: "npm:foo", skills: [] }],
-      "npm:foo",
-      "skill",
-      true,
-    );
-    expect(result).toEqual([{ source: "npm:foo" }]);
   });
 });
 

@@ -74,7 +74,6 @@ import {
   scheduleIdleMount,
   SCROLL_QUIET_MS,
 } from "./progressive-mount";
-import { subscribeTranscriptScroll } from "../../lib/transcript-navigation";
 import {
   forgetTranscriptScrollPosition,
   readTranscriptScrollPosition,
@@ -117,10 +116,6 @@ function LazyMarkdownMessage({
  */
 const INITIAL_VISIBLE_ROWS = 60;
 const SHOW_EARLIER_CHUNK = 120;
-/** Rows mounted above a jump target for reading context. */
-const JUMP_CONTEXT_ROWS = 3;
-/** Matches the transcript-jump-flash animation duration in index.css. */
-const JUMP_FLASH_MS = 1400;
 
 /** Reopen a session at its remembered reading position, else at the tail. */
 function initialHiddenFor(sessionId: string | null, rowCount: number): number {
@@ -270,70 +265,6 @@ export function Transcript() {
     }));
   }, []);
 
-  // Row-level navigation: outline/find/search request a row through the
-  // transcript-navigation bus; unmounted targets mount synchronously first
-  // and the centering runs from the layout effect once the row exists.
-  const pendingJumpKeyRef = useRef<string | null>(null);
-  const [flashRowKey, setFlashRowKey] = useState<string | null>(null);
-  const flashTimerRef = useRef<number | null>(null);
-
-  const flashRow = useCallback((key: string) => {
-    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
-    setFlashRowKey(key);
-    flashTimerRef.current = window.setTimeout(() => {
-      flashTimerRef.current = null;
-      setFlashRowKey(null);
-    }, JUMP_FLASH_MS);
-  }, []);
-  useEffect(
-    () => () => {
-      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current);
-    },
-    [],
-  );
-
-  const centerRow = useCallback(
-    (key: string): boolean => {
-      const scroller = scrollRef.current;
-      if (!scroller) return false;
-      const rowElement = scroller.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(key)}"]`);
-      if (!rowElement) return false;
-      const rowRect = rowElement.getBoundingClientRect();
-      const scrollerRect = scroller.getBoundingClientRect();
-      scroller.scrollTop +=
-        rowRect.top - scrollerRect.top - Math.max(0, (scroller.clientHeight - rowRect.height) / 2);
-      programmaticScrollTopRef.current = scroller.scrollTop;
-      scrollMetricsRef.current = {
-        top: scroller.scrollTop,
-        height: scroller.scrollHeight,
-      };
-      refreshReadingAnchor();
-      flashRow(key);
-      return true;
-    },
-    [flashRow, refreshReadingAnchor],
-  );
-
-  const scrollToRowRef = useRef<(key: string) => boolean>(() => false);
-  scrollToRowRef.current = (key) => {
-    const index = rows.findIndex((row) => row.key === key);
-    if (index < 0) return false;
-    stopFollowing();
-    if (index < hidden) {
-      pendingJumpKeyRef.current = key;
-      setHiddenState((current) => ({
-        ...current,
-        hidden: Math.max(0, Math.min(current.hidden, index - JUMP_CONTEXT_ROWS)),
-      }));
-      return true;
-    }
-    return centerRow(key);
-  };
-  useEffect(
-    () => subscribeTranscriptScroll((request) => scrollToRowRef.current(request.rowKey)),
-    [],
-  );
-
   // Save the reading position when the transcript unmounts (e.g. workspace
   // switches); session switches are handled by the render-phase reset above.
   const sessionKeyRef = useRef(sessionKey);
@@ -400,16 +331,6 @@ export function Transcript() {
   }, [hidden, mountFloor, isStreaming, following, windowFocused, mountEarlier]);
 
   useLayoutEffect(() => {
-    // A pending jump wins over batch compensation: the target row just
-    // mounted, so center it and re-baseline instead of preserving the old
-    // viewport position.
-    const pendingJumpKey = pendingJumpKeyRef.current;
-    if (pendingJumpKey !== null && centerRow(pendingJumpKey)) {
-      pendingJumpKeyRef.current = null;
-      expandAnchorRef.current = null;
-      batchStartRef.current = null;
-      return;
-    }
     // Keep the viewport anchored on the previously-visible content after
     // older rows mount above it. While pinned to the tail, snap straight to
     // the bottom instead of delta math so convergence batches can never
@@ -440,7 +361,7 @@ export function Transcript() {
       batchSizerRef.current.record(performance.now() - batchStartRef.current);
       batchStartRef.current = null;
     }
-  }, [hidden, alignToBottom, centerRow]);
+  }, [hidden, alignToBottom]);
 
   const lastAssistantRow = [...rows].reverse().find((row) => row.role === "assistant");
   const streamingAssistantKey = findStreamingAssistantKey(
@@ -573,7 +494,6 @@ export function Transcript() {
               <div
                 className="transcript-row"
                 data-row-key={row.key}
-                data-jump-flash={row.key === flashRowKey || undefined}
                 key={`${session?.sessionId ?? "session"}:${row.key}`}
                 onContextMenu={(event) => {
                   if (shouldKeepNativeContextMenu(event.nativeEvent)) return;

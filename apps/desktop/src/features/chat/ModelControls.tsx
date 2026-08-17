@@ -56,9 +56,6 @@ export function clampModelMenuWidth(
   );
 }
 
-/** Backwards-compatible alias; the shared helper lives in lib/bridge. */
-export { requestWithRetry as requestModelListWithRetry } from "../../lib/bridge/request-retry";
-
 export function includeCurrentModel(
   models: ModelSummary[],
   current: ModelSummary | undefined,

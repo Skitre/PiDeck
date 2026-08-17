@@ -183,14 +183,15 @@ describe("UserResourceCache", () => {
     await loader.reload();
     expect(loader.getExtensions().extensions[0]?.path).toContain("ext-a.js");
 
-    const previous = await cache.refreshLoaderExtensions(loader);
+    const refresh = await cache.prepareLoaderExtensionRefresh(loader);
+    expect(refresh).not.toBeNull();
+    refresh?.apply();
     await loader.reload();
     const after = loader.getExtensions();
     expect(after.extensions).toHaveLength(1);
     expect(after.extensions[0]?.path).toContain("ext-b.js");
-    expect(previous).toBe(before);
     expect(() => before.runtime.assertActive()).not.toThrow();
-    cache.disposeExtensionBundle(previous);
+    refresh?.commit();
     expect(() => before.runtime.assertActive()).toThrow(/user-resource-refresh/);
     expect(() => after.runtime.assertActive()).not.toThrow();
     expect(cacheState(first.stateKey).live).toBe(1);
@@ -212,6 +213,7 @@ describe("UserResourceCache", () => {
       settingsManager: SettingsManager.create(workspace, agentDir, { projectTrusted: false }),
     });
     expect(cacheState(first.stateKey).versions).toEqual(["v1"]);
+    const before = loader.getExtensions();
 
     writeUserExtension(agentDir, {
       version: "v2",
@@ -219,11 +221,13 @@ describe("UserResourceCache", () => {
       fileName: "user-ext.js",
     });
     await cache.invalidate();
-    const previous = await cache.refreshLoaderExtensions(loader);
+    const refresh = await cache.prepareLoaderExtensionRefresh(loader);
+    expect(refresh).not.toBeNull();
+    refresh?.apply();
     expect(cacheState(first.stateKey).versions).toEqual(["v1", "v2"]);
-    expect(() => previous?.runtime.assertActive()).not.toThrow();
-    cache.disposeExtensionBundle(previous);
-    expect(() => previous?.runtime.assertActive()).toThrow(/user-resource-refresh/);
+    expect(() => before.runtime.assertActive()).not.toThrow();
+    refresh?.commit();
+    expect(() => before.runtime.assertActive()).toThrow(/user-resource-refresh/);
     expect(loader.getExtensions().extensions[0]?.path).toContain("user-ext.js");
   });
 

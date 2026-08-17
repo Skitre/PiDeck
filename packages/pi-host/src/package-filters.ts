@@ -106,29 +106,6 @@ export function setPackageResourceFilter(
 }
 
 /**
- * Disable or enable an entire resource type for a package.
- */
-export function setPackageResourceTypeFilter(
-  sources: PackageSource[],
-  packageSource: string,
-  resourceType: "extension" | "skill" | "prompt" | "theme",
-  enabled: boolean,
-): PackageSource[] {
-  const key = TYPE_MAP[resourceType];
-  return sources.map((s) => {
-    const obj = toObjectSource(s);
-    if (obj.source !== packageSource) return s;
-    const next: PackageSourceObject = { ...obj };
-    if (enabled) {
-      delete next[key];
-    } else {
-      next[key] = [];
-    }
-    return next;
-  });
-}
-
-/**
  * Top-level path pattern toggle — PROJECT_SPEC §9.8
  * Disable: append exact -path relative to baseDir
  * Enable: remove -path; if still excluded by !pattern, append +path

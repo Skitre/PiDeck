@@ -117,32 +117,6 @@ export class UserResourceCache {
     };
   }
 
-  /**
-   * Replace the session-owned Extension runtime on a loader minted by this
-   * cache. Package install/remove/update must call this after `invalidate()`.
-   *
-   * Reloads the existing loader first so the SDK drops its cwd-keyed factory
-   * cache before same-path sources are instantiated again. The previous
-   * runtime stays active until `disposeExtensionBundle()` so
-   * `session_shutdown` can still call `pi.*`.
-   */
-  async refreshLoaderExtensions(loader: DefaultResourceLoader): Promise<ExtensionBundle | null> {
-    const holder = this.bindings.get(loader);
-    if (!holder) return null;
-    const previous = holder.current;
-    const refresh = await this.prepareLoaderExtensionRefresh(loader);
-    refresh?.apply();
-    return previous;
-  }
-
-  disposeExtensionBundle(
-    bundle: ExtensionBundle | null | undefined,
-    reason = "user-resource-refresh",
-  ): void {
-    if (!bundle) return;
-    this.disposeBundle(bundle, reason);
-  }
-
   async createWorkspaceLoader(args: {
     cwd: string;
     settingsManager: SettingsManager;

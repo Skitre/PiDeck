@@ -1341,22 +1341,6 @@ textarea:focus-visible {
   overflow-anchor: none;
 }
 
-/* Row highlight after a navigation jump (outline/find/search). Duration is
-   mirrored by JUMP_FLASH_MS in Transcript.tsx. */
-.transcript-row[data-jump-flash="true"] {
-  border-radius: 10px;
-  animation: transcript-jump-flash 1.4s ease-out;
-}
-
-@keyframes transcript-jump-flash {
-  0% {
-    background-color: color-mix(in srgb, var(--color-accent) 16%, transparent);
-  }
-  100% {
-    background-color: transparent;
-  }
-}
-
 /* Keep the long-running trace indicator on WebKit's compositor while the
    transcript is receiving frequent streaming updates. */
 .execution-trace-spinner {

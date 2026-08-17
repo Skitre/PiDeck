@@ -14,9 +14,8 @@ import { useAppStore } from "../../lib/stores/app-store";
 import { Transcript } from "./Transcript";
 import { MenuHost } from "../../components/Menu";
 import { PROGRESSIVE_BATCH_ROWS } from "./progressive-mount";
-import { requestTranscriptScroll } from "../../lib/transcript-navigation";
 import { clearTranscriptScrollPositions } from "./transcript-scroll-memory";
-import { buildAttachedFileBlock, buildTranscriptRows } from "./transcript-model";
+import { buildAttachedFileBlock } from "./transcript-model";
 
 const linkMocks = vi.hoisted(() => ({
   requestDockBrowser: vi.fn(),
@@ -429,26 +428,6 @@ describe("Transcript Session-open scrolling", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
       flushIdleToConvergence();
       expect(container.querySelectorAll(".transcript-row")).toHaveLength(150);
-    });
-
-    it("jumps to an unmounted row, mounting and flashing it", () => {
-      const longA = longSession(SESSION_A, 150);
-      act(() => useAppStore.setState({ session: longA }));
-      const { container } = render(<Transcript />);
-      expect(container.querySelectorAll(".transcript-row")).toHaveLength(60);
-
-      const targetKey = buildTranscriptRows(longA.messages)[5]!.key;
-      let handled = false;
-      act(() => {
-        handled = requestTranscriptScroll({ rowKey: targetKey });
-      });
-
-      expect(handled).toBe(true);
-      // hidden dropped to the target index minus context rows (5 - 3 = 2).
-      expect(container.querySelectorAll(".transcript-row")).toHaveLength(148);
-      const flashed = container.querySelector('[data-jump-flash="true"]');
-      expect(flashed).not.toBeNull();
-      expect(flashed).toHaveAttribute("data-row-key", targetKey);
     });
 
     it("restores the reading position when switching back to a session", () => {

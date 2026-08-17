@@ -3,23 +3,6 @@ import type { SessionCatalogEntry, SessionRuntimeState } from "../../lib/stores/
 
 export type SessionFilter = "active" | "archived";
 
-export function includeActiveSession(
-  items: SessionSummary[],
-  active: SessionSnapshot | null,
-): SessionSummary[] {
-  if (!active?.sessionPath || active.messages.length === 0) return items;
-  const listed = items.find((item) => item.sessionId === active.sessionId);
-  const current: SessionSummary = {
-    sessionId: active.sessionId,
-    sessionPath: active.sessionPath,
-    name: active.name,
-    cwd: active.cwd,
-    updatedAt: listed?.updatedAt ?? Date.now(),
-    messageCount: active.messages.length,
-  };
-  return [current, ...items.filter((item) => item.sessionId !== active.sessionId)];
-}
-
 /** Callers must pass the localized untitled label so search/render match the UI locale. */
 export function sessionDisplayName(item: Pick<SessionSummary, "name">, fallback: string): string {
   return item.name?.trim() || fallback;

@@ -7,7 +7,6 @@ import type { DesktopSettings, WorkspaceSnapshot } from "@pideck/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../lib/stores/app-store";
 import { requestDockBrowser } from "../lib/dock-browser";
-import { clearPendingChangesPanelForTest, requestChangesPanel } from "../lib/dock-changes";
 import { clearPendingTreePanelForTest, requestTreePanel } from "../lib/dock-tree";
 
 vi.mock("../features/dock/ShellTerminal", () => ({
@@ -66,7 +65,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   clearPendingTreePanelForTest();
-  clearPendingChangesPanelForTest();
 });
 
 async function openAddMenu(user: ReturnType<typeof userEvent.setup>) {
@@ -292,21 +290,5 @@ describe("RightDock pages", () => {
 
     act(() => requestTreePanel());
     expect(screen.getAllByRole("tab", { name: "Tree" })).toHaveLength(1);
-  });
-
-  it("opens the Changes page as a singleton via requestChangesPanel", async () => {
-    useAppStore.setState({ dockOpen: false });
-    render(<RightDock />);
-
-    act(() => requestChangesPanel());
-    expect(await screen.findByRole("tab", { name: "Changes" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByTestId("changes-panel")).toBeVisible();
-    expect(useAppStore.getState().dockOpen).toBe(true);
-
-    act(() => requestChangesPanel());
-    expect(screen.getAllByRole("tab", { name: "Changes" })).toHaveLength(1);
   });
 });

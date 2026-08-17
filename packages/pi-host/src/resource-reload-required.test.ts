@@ -136,7 +136,11 @@ function mockFactory(opts: {
 
   let phase = "ready";
   let graphHeldChecks = 0;
-  const releaseAgent = vi.fn();
+  const sessionOperationLock = {
+    tryAcquire: () => opts.agentBusy !== true,
+    release: vi.fn(),
+    isHeld: () => opts.agentBusy === true,
+  };
   const server = {
     identity,
     graphOperations: new GraphOperationRegistry(),
@@ -152,11 +156,6 @@ function mockFactory(opts: {
       tryAcquire: () => true,
       release: () => {},
     },
-    agentOperationLock: {
-      tryAcquire: () => opts.agentBusy !== true,
-      release: releaseAgent,
-      isHeld: () => opts.agentBusy === true,
-    },
     emit: () => {},
     getIdentity: () => identity.snapshot(),
     setPhase: (p: string) => {
@@ -170,7 +169,7 @@ function mockFactory(opts: {
     checkIdentity: () => null,
     getGraph: () => g,
     getServer: () => server,
-    getSessionOperationLock: () => server.agentOperationLock,
+    getSessionOperationLock: () => sessionOperationLock,
     hasBusySessions: () => opts.agentBusy === true || !g.agentSession.isIdle,
     hasBusyRetainedSessions: () => false,
     hasRunningSessions: () => opts.agentBusy === true || !g.agentSession.isIdle,
@@ -348,7 +347,9 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
 
     expect("error" in out && out.error.code).toBe("SERVICE_GRAPH_BUSY");
     expect(factory.getGraph()!.agentSession!.prompt).not.toHaveBeenCalled();
-    expect(factory.getServer()!.agentOperationLock.release).toHaveBeenCalledWith(promptCtx.id);
+    expect(
+      factory.getSessionOperationLock(factory.getGraph()!.agentSession!).release,
+    ).toHaveBeenCalledWith(promptCtx.id);
   });
 
   it("graph mutations reject while the agent operation lock is held", async () => {

@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { HostStatusSnapshot, WorkspaceSnapshot } from "@pideck/protocol";
+import type { HostStatusSnapshot } from "@pideck/protocol";
 import {
   captureRequestGeneration,
-  captureWorkspaceAuthorization,
-  isCurrentWorkspaceAuthorization,
   isExpectedPackageMutationCompletion,
   mergeHostIdentity,
 } from "./host-context";
@@ -27,16 +25,6 @@ function host(overrides: Partial<HostStatusSnapshot> = {}): HostStatusSnapshot {
   };
 }
 
-function workspace(): WorkspaceSnapshot {
-  return {
-    id: "w1",
-    revision: 1,
-    cwd: "C:/workspace",
-    canonicalCwd: "C:/workspace",
-    servicesReady: true,
-  };
-}
-
 describe("response generation convergence", () => {
   it("accepts a Package mutation when its events already applied the response generation", () => {
     const captured = captureRequestGeneration(host());
@@ -56,13 +44,5 @@ describe("response generation convergence", () => {
     const merged = mergeHostIdentity(current, host({ sessionRevision: 2, packageRevision: 1 }));
     expect(merged?.sessionRevision).toBe(2);
     expect(merged?.packageRevision).toBe(3);
-  });
-
-  it("invalidates project authorization on generation changes", () => {
-    const authorization = captureWorkspaceAuthorization(host(), workspace());
-    expect(isCurrentWorkspaceAuthorization(host(), workspace(), authorization)).toBe(true);
-    expect(
-      isCurrentWorkspaceAuthorization(host({ packageRevision: 2 }), workspace(), authorization),
-    ).toBe(false);
   });
 });

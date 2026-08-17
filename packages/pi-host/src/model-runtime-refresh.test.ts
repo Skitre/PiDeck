@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { ModelsRefreshOptions, ModelsRefreshResult } from "@earendil-works/pi-ai";
-import { refreshModelsLocal, refreshModelsOverNetwork } from "./model-runtime-refresh.js";
+import { refreshModelsLocal } from "./model-runtime-refresh.js";
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
 
@@ -45,19 +45,6 @@ describe("refresh helpers", () => {
 
     expect(calls[0]!.signal).toBe(controller.signal);
     expect(calls[0]!.allowNetwork).toBe(false);
-  });
-
-  it("requires an explicit opt-in for a network refresh and forwards the signal", async () => {
-    const { runtime, calls } = fakeRuntime();
-    const controller = new AbortController();
-
-    await refreshModelsOverNetwork(runtime, { signal: controller.signal, force: true });
-
-    expect(calls[0]).toMatchObject({
-      allowNetwork: true,
-      force: true,
-      signal: controller.signal,
-    });
   });
 
   it("returns the runtime result so callers can see aborts and per-provider errors", async () => {

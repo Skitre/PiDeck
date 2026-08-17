@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SessionSnapshot } from "@pideck/protocol";
 import {
-  includeActiveSession,
   canArchiveSession,
   canDeleteSession,
   canReloadSession,
@@ -41,39 +40,6 @@ const active = {
     active: [],
   },
 } satisfies SessionSnapshot;
-
-describe("includeActiveSession", () => {
-  it("keeps a blank new conversation out of the list", () => {
-    expect(includeActiveSession([], { ...active, messages: [] })).toEqual([]);
-  });
-
-  it("shows an active conversation before session.list persists it", () => {
-    expect(includeActiveSession([], active)).toMatchObject([
-      {
-        sessionId: "active-session",
-        sessionPath: "C:/sessions/active.jsonl",
-        messageCount: 1,
-      },
-    ]);
-  });
-
-  it("replaces the listed active session instead of duplicating it", () => {
-    const result = includeActiveSession(
-      [
-        {
-          sessionId: "active-session",
-          sessionPath: "C:/sessions/active.jsonl",
-          cwd: "C:/workspace",
-          updatedAt: 123,
-          messageCount: 0,
-        },
-      ],
-      active,
-    );
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ updatedAt: 123, messageCount: 1 });
-  });
-});
 
 describe("sessionDisplayName", () => {
   it("uses the persisted name and falls back to the caller-provided label", () => {

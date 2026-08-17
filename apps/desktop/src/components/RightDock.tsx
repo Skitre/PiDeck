@@ -30,7 +30,6 @@ import { BrowserPanel } from "../features/dock/BrowserPanel";
 import { TreePanel } from "../features/dock/TreePanel";
 import { ChangesPanel } from "../features/dock/ChangesPanel";
 import { subscribeDockBrowser } from "../lib/dock-browser";
-import { subscribeChangesPanel } from "../lib/dock-changes";
 import { subscribeTreePanel } from "../lib/dock-tree";
 import { useT } from "../lib/i18n/use-t";
 import { subscribeDockCommands } from "../lib/commands/events";
@@ -295,21 +294,6 @@ export function RightDock() {
       }),
     // createTree/setDockOpen are stable within a mount; resubscribing per
     // render would drop queued open requests.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
-  useEffect(
-    () =>
-      subscribeChangesPanel(() => {
-        createChanges();
-        if (!useAppStore.getState().dockOpen) {
-          setDockOpen(true);
-          setSidebarPref("pideck.dock.open", true);
-        }
-        return true;
-      }),
-    // The singleton handler has no render-owned mutable state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
