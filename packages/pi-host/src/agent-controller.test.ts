@@ -5,10 +5,7 @@ import { createAgentHandlers, summarizeModel } from "./agent-controller.js";
 import { AgentOperationLock, TryMutex } from "./locks.js";
 import { GraphOperationRegistry } from "./operation-lifecycle.js";
 import type { PiHostServer } from "./server.js";
-import type {
-  BackgroundSessionRuntime,
-  WorkspaceGraphFactory,
-} from "./workspace-graph-factory.js";
+import type { BackgroundSessionRuntime, WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import { getActiveExtensionCommandOrigin } from "./extension-invocation-context.js";
 import {
   beginQueueTransaction,
@@ -68,9 +65,7 @@ describe("summarizeModel", () => {
         }),
       ).thinkingLevels,
     ).toEqual(["high", "max"]);
-    expect(summarizeModel(model({ id: "grok-composer-2.5-fast" })).thinkingLevels).toEqual([
-      "off",
-    ]);
+    expect(summarizeModel(model({ id: "grok-composer-2.5-fast" })).thinkingLevels).toEqual(["off"]);
   });
 });
 
@@ -158,38 +153,50 @@ function stableHandlerFixture(wait: Promise<void>) {
     getGraph: () => graph,
     getServer: () => server,
     getSessionOperationLock: () => sessionOperationLock,
-    isSessionBusy: (target: AgentSession) =>
-      !target.isIdle || sessionOperationLock.isHeld(),
+    isSessionBusy: (target: AgentSession) => !target.isIdle || sessionOperationLock.isHeld(),
     disposeSettledBackgroundRuntime: vi.fn(async () => {}),
     beginQueueTransaction,
     finishQueueTransaction: (target: AgentSession) => {
       const result = finishQueueTransaction(target);
       if (result.changed) {
-        server.emitForIdentity(
-          server.getIdentity(),
-          "agent.queueChanged",
-          result.queue,
-        );
+        server.emitForIdentity(server.getIdentity(), "agent.queueChanged", result.queue);
       }
       return result.queue;
     },
     syncQueueState: (target: AgentSession, force = false) => {
       const observed = observeQueueUpdate(target);
       if (!observed.suppressed && (observed.changed || force)) {
-        server.emitForIdentity(
-          server.getIdentity(),
-          "agent.queueChanged",
-          observed.queue,
-        );
+        server.emitForIdentity(server.getIdentity(), "agent.queueChanged", observed.queue);
       }
       return observed.queue;
     },
     hasBusySessions: () => false,
+    hasBusyRetainedSessions: () => false,
+    hasRunningSessions: () => false,
+    findRuntimeForSession: (target: AgentSession) =>
+      target === session
+        ? {
+            identity: identity.snapshot(),
+            agentSession: session,
+            sessionManager: graph.sessionManager,
+            sessionSnapshot: graph.sessionSnapshot,
+            toolRevision: graph.toolRevision,
+            isActive: true,
+          }
+        : null,
     setSessionRunId: vi.fn(),
     clearSessionRunId: vi.fn(),
     setActiveSessionName: vi.fn(),
+    setSessionRuntimeName: vi.fn(),
     refineActiveSessionName: vi.fn(async () => {}),
-    currentRunId: null,
+    resolveSessionTarget: () => ({
+      identity: identity.snapshot(),
+      agentSession: session,
+      sessionManager: graph.sessionManager,
+      sessionSnapshot: graph.sessionSnapshot,
+      toolRevision: graph.toolRevision,
+      isActive: true,
+    }),
   } as unknown as WorkspaceGraphFactory;
   return { factory, graph, server, serviceGraphLock, sessionOperationLock, session };
 }
@@ -258,7 +265,7 @@ describe("session-bound agent handlers", () => {
 
     expect("error" in outcome).toBe(false);
     expect(fixture.session.followUp).toHaveBeenCalledWith(
-      expect.stringContaining("<pideck-attachments version=\"1\">"),
+      expect.stringContaining('<pideck-attachments version="1">'),
       undefined,
     );
     expect(fixture.session.followUp).toHaveBeenCalledWith(
@@ -280,7 +287,7 @@ describe("agent.prompt startup", () => {
     gate.resolve();
     const fixture = stableHandlerFixture(gate.promise);
     (fixture.session as unknown as { sessionName?: string }).sessionName = undefined;
-    vi.mocked(fixture.factory.setActiveSessionName).mockImplementation(() => {
+    vi.mocked(fixture.factory.setSessionRuntimeName).mockImplementation(() => {
       throw new Error("session title persistence failed");
     });
     const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
@@ -294,12 +301,39 @@ describe("agent.prompt startup", () => {
     ).rejects.toThrow("session title persistence failed");
 
     expect(fixture.sessionOperationLock.isHeld()).toBe(false);
-    expect(fixture.factory.clearSessionRunId).toHaveBeenCalledExactlyOnceWith(
-      fixture.session,
-    );
-    expect(fixture.factory.currentRunId).toBeNull();
+    expect(fixture.factory.clearSessionRunId).toHaveBeenCalledExactlyOnceWith(fixture.session);
     expect(fixture.server.getPhase()).toBe("ready");
     expect(fixture.session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("emits detached prompt errors with the current Session identity", async () => {
+    let rejectPrompt!: (error: Error) => void;
+    const prompt = new Promise<void>((_resolve, reject) => {
+      rejectPrompt = reject;
+    });
+    const fixture = stableHandlerFixture(prompt);
+    const outcome = await createAgentHandlers(fixture.factory)["agent.prompt"]!({
+      id: "prompt-error-identity",
+      context: {},
+      params: { text: "fail after switch" },
+    } as never);
+    expect("error" in outcome ? outcome.error.message : null).toBeNull();
+
+    fixture.server.identity.workspaceRevision = 5;
+    rejectPrompt(new Error("model failed"));
+    await vi.waitFor(() => {
+      expect(fixture.server.emitForIdentity).toHaveBeenCalled();
+    });
+    expect(fixture.server.emitForIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceRevision: 5,
+        sessionId: "33333333-3333-4333-8333-333333333333",
+      }),
+      "agent.event",
+      expect.objectContaining({
+        event: expect.objectContaining({ type: "error", message: "model failed" }),
+      }),
+    );
   });
 });
 
@@ -389,22 +423,14 @@ describe("agent.prompt extension command provenance", () => {
             }
           : undefined,
     };
-    let duringPrompt:
-      | { runId: string; invocation: string }
-      | undefined;
-    let afterAwait:
-      | { runId: string; invocation: string }
-      | undefined;
+    let duringPrompt: { runId: string; invocation: string } | undefined;
+    let afterAwait: { runId: string; invocation: string } | undefined;
     session.prompt = vi.fn(async () => {
       const origin = getActiveExtensionCommandOrigin(fixture.session);
-      duringPrompt = origin
-        ? { runId: origin.runId, invocation: origin.invocation }
-        : undefined;
+      duringPrompt = origin ? { runId: origin.runId, invocation: origin.invocation } : undefined;
       await gate.promise;
       const resumed = getActiveExtensionCommandOrigin(fixture.session);
-      afterAwait = resumed
-        ? { runId: resumed.runId, invocation: resumed.invocation }
-        : undefined;
+      afterAwait = resumed ? { runId: resumed.runId, invocation: resumed.invocation } : undefined;
     });
 
     const handler = createAgentHandlers(fixture.factory)["agent.prompt"]!;
@@ -465,13 +491,7 @@ describe("agent.abort with queued messages", () => {
     expect("error" in outcome).toBe(false);
     // Queue must be cleared BEFORE abort (the SDK auto-runs the next queued
     // follow-up when a run ends) and re-added afterwards in original order.
-    expect(order).toEqual([
-      "clearQueue",
-      "abort",
-      "steer:s1",
-      "followUp:f1",
-      "followUp:f2",
-    ]);
+    expect(order).toEqual(["clearQueue", "abort", "steer:s1", "followUp:f1", "followUp:f2"]);
     expect(fixture.server.emitForIdentity).not.toHaveBeenCalled();
     expect(fixture.serviceGraphLock.isHeld()).toBe(false);
   });
@@ -513,6 +533,93 @@ describe("agent.abort with queued messages", () => {
       settled: true,
     });
     fixture.sessionOperationLock.release("in-flight-prompt");
+  });
+
+  it("aborts a retained background Session without touching the foreground", async () => {
+    const gate = deferred();
+    gate.resolve();
+    const fixture = stableHandlerFixture(gate.promise);
+    const backgroundIdentity = {
+      ...fixture.server.getIdentity(),
+      sessionId: "44444444-4444-4444-8444-444444444444",
+      sessionRevision: 3,
+    };
+    const backgroundSession = {
+      ...fixture.session,
+      sessionId: backgroundIdentity.sessionId,
+      sessionFile: "C:/sessions/background.jsonl",
+      sessionName: "Background",
+      isIdle: false,
+      abort: vi.fn(async () => {}),
+      clearQueue: vi.fn(() => ({ steering: [], followUp: [] })),
+      getSteeringMessages: () => [],
+      getFollowUpMessages: () => [],
+    } as unknown as AgentSession;
+    const background = {
+      sessionId: backgroundIdentity.sessionId,
+      sessionRevision: backgroundIdentity.sessionRevision,
+      agentSession: backgroundSession,
+      sessionManager: {},
+      sessionSnapshot: {
+        sessionId: backgroundIdentity.sessionId,
+        sessionPath: "C:/sessions/background.jsonl",
+        cwd: "C:/workspace",
+        revision: 3,
+        isStreaming: true,
+        isIdle: false,
+        isCompacting: false,
+        isRetrying: false,
+        thinkingLevel: "off",
+        autoCompactionEnabled: true,
+        autoRetryEnabled: true,
+        steeringMode: "all",
+        followUpMode: "all",
+        pending: { revision: 0, steering: [], followUp: [] },
+        messages: [],
+        tools: {
+          revision: 1,
+          workspaceId: backgroundIdentity.workspaceId,
+          sessionId: backgroundIdentity.sessionId,
+          sessionRevision: 3,
+          tools: [],
+          active: [],
+        },
+      },
+      toolRevision: 1,
+    } as unknown as BackgroundSessionRuntime;
+    fixture.graph.backgroundSessions.set(backgroundIdentity.sessionId!, background);
+    fixture.factory.resolveSessionTarget = vi.fn((sessionId, sessionRevision) => {
+      if (
+        sessionId === backgroundIdentity.sessionId &&
+        sessionRevision === backgroundIdentity.sessionRevision
+      ) {
+        return {
+          identity: backgroundIdentity,
+          agentSession: backgroundSession,
+          sessionManager: background.sessionManager,
+          sessionSnapshot: background.sessionSnapshot,
+          toolRevision: background.toolRevision,
+          isActive: false,
+          background,
+        };
+      }
+      return null;
+    }) as never;
+
+    const outcome = await createAgentHandlers(fixture.factory)["agent.abort"]!({
+      id: "abort-background",
+      context: {
+        expectedSessionId: backgroundIdentity.sessionId,
+        expectedSessionRevision: backgroundIdentity.sessionRevision,
+      },
+      params: null,
+    } as never);
+
+    expect("error" in outcome).toBe(false);
+    expect(backgroundSession.abort).toHaveBeenCalledTimes(1);
+    expect(fixture.session.abort).not.toHaveBeenCalled();
+    expect(fixture.graph.sessionSnapshot).toBeNull();
+    expect(background.sessionSnapshot.sessionId).toBe(backgroundIdentity.sessionId);
   });
 });
 
@@ -800,12 +907,10 @@ describe("agent.compact concurrency", () => {
     const gate = deferred();
     const fixture = stableHandlerFixture(gate.promise);
     (fixture.session as unknown as { isIdle: boolean }).isIdle = isIdle;
-    (fixture.session as unknown as { compact: unknown }).compact = vi.fn(
-      async () => {
-        await compactWait;
-        return { tokensBefore: 10, tokensAfter: 5 };
-      },
-    );
+    (fixture.session as unknown as { compact: unknown }).compact = vi.fn(async () => {
+      await compactWait;
+      return { tokensBefore: 10, tokensAfter: 5 };
+    });
     return { ...fixture, gate };
   }
 
@@ -972,15 +1077,15 @@ describe("agent.navigateTree", () => {
     const gate = deferred();
     const fixture = stableHandlerFixture(gate.promise);
     (fixture.session as unknown as { isIdle: boolean }).isIdle = isIdle;
-    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = vi.fn(
-      async () => ({ cancelled: false, editorText: "picked user text" }),
-    );
+    (fixture.session as unknown as { navigateTree: unknown }).navigateTree = vi.fn(async () => ({
+      cancelled: false,
+      editorText: "picked user text",
+    }));
     return { ...fixture, gate };
   }
 
   function navigateMock(fixture: ReturnType<typeof navigateFixture>) {
-    return (fixture.session as unknown as { navigateTree: ReturnType<typeof vi.fn> })
-      .navigateTree;
+    return (fixture.session as unknown as { navigateTree: ReturnType<typeof vi.fn> }).navigateTree;
   }
 
   it("rejects while the session is busy", async () => {

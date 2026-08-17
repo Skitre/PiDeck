@@ -60,11 +60,11 @@ describe("automaticThinkingConfig", () => {
     });
   });
 
-  it("uses only high and max for the GLM-5.2 Auto profile", () => {
+  it("uses off, high, and max for the GLM-5.2 Auto profile", () => {
     expect(automaticThinkingConfig("glm-5.2")).toEqual({
       reasoning: true,
       thinkingLevelMap: {
-        off: null,
+        off: "none",
         minimal: null,
         low: null,
         medium: null,

@@ -25,6 +25,17 @@ import { createLineReader } from "./transport.js";
 
 export const HOST_SHUTDOWN_QUIESCE_TIMEOUT_MS = 8_000;
 
+const PARKED_WORKSPACE_EVENTS = new Set<HostEventName>([
+  "agent.event",
+  "session.runtimeChanged",
+  "session.infoChanged",
+  "agent.queueChanged",
+]);
+
+function isParkedWorkspaceEvent(event: HostEventName): boolean {
+  return PARKED_WORKSPACE_EVENTS.has(event);
+}
+
 async function completesWithin(operation: Promise<void>, timeoutMs: number): Promise<boolean> {
   if (timeoutMs <= 0) return false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -160,12 +171,21 @@ export class PiHostServer {
 
   emitForIdentity(identity: HostIdentity, event: HostEventName, payload: unknown): void {
     const current = this.identity.snapshot();
-    if (
-      identity.hostInstanceId !== current.hostInstanceId ||
-      identity.workspaceId !== current.workspaceId ||
-      identity.workspaceRevision !== current.workspaceRevision
-    ) {
-      throw new Error("Cannot emit an event for a stale Host or Workspace identity");
+    if (identity.hostInstanceId !== current.hostInstanceId) {
+      logger.warn("Dropped event for a stale Host identity", { event });
+      return;
+    }
+    const sameWorkspace = identity.workspaceId === current.workspaceId;
+    if (sameWorkspace && identity.workspaceRevision !== current.workspaceRevision) {
+      logger.warn("Dropped event for a stale Workspace revision", { event });
+      return;
+    }
+    // Parked Workspaces keep streaming under their own identity. Never throw:
+    // the SDK delivers these from Agent.processEvents, and a throw becomes an
+    // unhandled rejection that quiesces the Host mid-switch.
+    if (!sameWorkspace && !isParkedWorkspaceEvent(event)) {
+      logger.warn("Dropped event for a parked Workspace", { event });
+      return;
     }
     const validation = validateEventPayload(event, payload);
     if (!validation.ok) {

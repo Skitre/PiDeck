@@ -38,10 +38,11 @@ export function expectedIdentityForEvent(
     case "extensionUi.customFrame":
     case "extensionUi.customClosed":
       return host;
-    case "session.snapshot":
     case "session.infoChanged":
     case "session.runtimeChanged":
     case "agent.event":
+      return host;
+    case "session.snapshot":
     case "package.diagnostic":
     case "extensionUi.statusChanged":
     case "extensionUi.widgetChanged":

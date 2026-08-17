@@ -18,12 +18,8 @@ import { GlobalSearchHost } from "../features/sessions/GlobalSearchModal";
 import { WorkspaceSwitchTransition } from "../features/workspaces/WorkspaceSwitchTransition";
 import { applyTheme } from "../lib/theme";
 import { applyAppearancePreferences } from "../lib/appearance-preferences";
-import {
-  applyAgentEvent,
-  applyAgentEventBatch,
-  matchesTimedAgentEventIdentity,
-  type TimedAgentEventEnvelope,
-} from "../lib/chat/transcript-reducer";
+import { groupTimedAgentEventsBySession } from "../lib/chat/transcript-drafts";
+import { type TimedAgentEventEnvelope } from "../lib/chat/transcript-reducer";
 import { classifyToolSnapshot } from "../lib/stores/tool-revision";
 import { expectedIdentityForEvent, extensionUiRequestDelivery } from "./event-identity";
 import { publishValidatedHostEvent } from "../lib/bridge/validated-host-events";
@@ -265,6 +261,7 @@ export function handleHostEvent(
         event.payload.state,
         event.payload.error,
         event.payload.updatedAt,
+        event.payload.sessionRevision,
       );
       break;
     case "agent.toolsChanged": {
@@ -460,12 +457,10 @@ export function handleHostEvent(
         agentEventBuffer.enqueue(event);
         break;
       }
-      const cur = useAppStore.getState().session;
-      if (!cur || event.sessionId !== cur.sessionId || event.sessionRevision !== cur.revision) {
-        break;
-      }
-      const next = applyAgentEvent(cur, event.payload);
-      if (next) useAppStore.getState().applySessionSnapshot(next);
+      if (!event.sessionId) break;
+      useAppStore
+        .getState()
+        .applyAgentTranscriptEvent(event.sessionId, event.payload, event.sessionRevision);
       if (event.payload.event.type === "error" && event.sessionId) {
         const rawError = event.payload.event.error;
         const message =
@@ -556,6 +551,7 @@ export function App() {
     let unsubTransportError = () => {};
     let cancelPendingAgentEvents = () => {};
     let cancelled = false;
+    let bootstrapTimer: number | null = null;
 
     (async () => {
       const store = useAppStore.getState();
@@ -617,25 +613,14 @@ export function App() {
           }
           if (pendingAgentEvents.length === 0) return;
           const current = useAppStore.getState();
-          const currentIdentity = current.host
-            ? {
-                ...current.host,
-                workspaceId: current.workspace?.id ?? current.host.workspaceId,
-                workspaceRevision: current.workspace?.revision ?? current.host.workspaceRevision,
-                sessionId: current.session?.sessionId ?? current.host.sessionId,
-                sessionRevision: current.session?.revision ?? current.host.sessionRevision,
-                packageRevision: current.packages?.revision ?? current.host.packageRevision,
-              }
-            : null;
-          const batch = currentIdentity
-            ? pendingAgentEvents.filter((event) =>
-                matchesTimedAgentEventIdentity(event, currentIdentity),
-              )
-            : [];
+          const hostInstanceId = current.host?.hostInstanceId;
+          const batch = pendingAgentEvents.filter(
+            (event) => event.hostInstanceId === hostInstanceId,
+          );
           pendingAgentEvents = [];
-          const currentSession = current.session;
-          const nextSession = applyAgentEventBatch(currentSession, batch);
-          if (nextSession) useAppStore.getState().applySessionSnapshot(nextSession);
+          for (const [sessionId, events] of groupTimedAgentEventsBySession(batch)) {
+            useAppStore.getState().applyAgentTranscriptEventBatch(sessionId, events);
+          }
         };
 
         const cancelAgentEvents = () => {
@@ -748,7 +733,7 @@ export function App() {
                   const hydrated = useAppStore.getState();
                   if (
                     sessionPathToRestore &&
-                    (sessionRestoreEligible || !hydrated.session) &&
+                    sessionRestoreEligible &&
                     hydrated.host &&
                     hydrated.workspace?.servicesReady &&
                     hydrated.session?.sessionPath !== sessionPathToRestore
@@ -910,11 +895,18 @@ export function App() {
         unsubTransportError = hostClient.onTransportError(repairTransport);
         hostClient.attach(transport);
 
-        window.setTimeout(() => {
-          if (!hostClient.getHostInstanceId()) {
-            scheduleRecovery(null, "bootstrap hello");
-          }
-        }, 1500);
+        // Remounts detach the transport but keep hostInstanceId; host.ready
+        // will not fire again, so re-hello immediately instead of waiting.
+        const knownHostId = hostClient.getHostInstanceId();
+        if (knownHostId) {
+          scheduleRecovery(knownHostId, "transport reattached");
+        } else {
+          bootstrapTimer = window.setTimeout(() => {
+            if (!cancelled && !hostClient.getHostInstanceId()) {
+              scheduleRecovery(null, "bootstrap hello");
+            }
+          }, 1500);
+        }
       } catch (err) {
         if (!cancelled) {
           const message = err instanceof Error ? err.message : String(err);
@@ -927,6 +919,7 @@ export function App() {
 
     return () => {
       cancelled = true;
+      if (bootstrapTimer !== null) window.clearTimeout(bootstrapTimer);
       cancelPendingAgentEvents();
       unsub();
       unsubTransportError();

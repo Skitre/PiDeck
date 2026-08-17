@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::{
     webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder},
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Rect, Url, Webview, WebviewUrl,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, Url, Webview, WebviewUrl,
 };
 
 const MAX_BROWSER_SURFACES: usize = 8;
@@ -14,6 +14,8 @@ pub struct BrowserSurfaceBounds {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    #[serde(default)]
+    pub device_pixel_ratio: Option<f64>,
 }
 
 impl BrowserSurfaceBounds {
@@ -31,12 +33,79 @@ impl BrowserSurfaceBounds {
         Ok(self)
     }
 
-    fn rect(self) -> Rect {
+    fn physical_rect(self, scale: f64) -> Rect {
+        let scale = if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        };
         Rect {
-            position: LogicalPosition::new(self.x, self.y).into(),
-            size: LogicalSize::new(self.width, self.height).into(),
+            position: PhysicalPosition::new(self.x * scale, self.y * scale).into(),
+            size: PhysicalSize::new(self.width * scale, self.height * scale).into(),
         }
     }
+}
+
+fn css_pixel_scale(window_scale: f64, device_pixel_ratio: Option<f64>) -> f64 {
+    device_pixel_ratio
+        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+        .unwrap_or_else(|| {
+            if window_scale.is_finite() && window_scale > 0.0 {
+                window_scale
+            } else {
+                1.0
+            }
+        })
+}
+
+fn clamp_bounds_to_window_size(
+    bounds: BrowserSurfaceBounds,
+    logical_width: f64,
+    logical_height: f64,
+) -> BrowserSurfaceBounds {
+    let x = bounds.x.clamp(0.0, (logical_width - 1.0).max(0.0));
+    let y = bounds.y.clamp(0.0, (logical_height - 1.0).max(0.0));
+    BrowserSurfaceBounds {
+        x,
+        y,
+        width: bounds.width.min((logical_width - x).max(1.0)).max(1.0),
+        height: bounds.height.min((logical_height - y).max(1.0)).max(1.0),
+        device_pixel_ratio: bounds.device_pixel_ratio,
+    }
+}
+
+fn logical_inner_size(physical_width: f64, physical_height: f64, scale: f64) -> (f64, f64) {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    (physical_width / scale, physical_height / scale)
+}
+
+fn clamp_to_window<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    bounds: BrowserSurfaceBounds,
+) -> BrowserSurfaceBounds {
+    match (window.inner_size(), window.scale_factor()) {
+        (Ok(size), Ok(window_scale)) => {
+            let scale = css_pixel_scale(window_scale, bounds.device_pixel_ratio);
+            let (logical_width, logical_height) =
+                logical_inner_size(size.width as f64, size.height as f64, scale);
+            let mut next = clamp_bounds_to_window_size(bounds, logical_width, logical_height);
+            next.device_pixel_ratio = bounds.device_pixel_ratio;
+            next
+        }
+        _ => bounds,
+    }
+}
+
+fn bounds_rect_for_window<R: tauri::Runtime>(
+    window: &tauri::Window<R>,
+    bounds: BrowserSurfaceBounds,
+) -> Rect {
+    let window_scale = window.scale_factor().unwrap_or(1.0);
+    bounds.physical_rect(css_pixel_scale(window_scale, bounds.device_pixel_ratio))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -106,11 +175,14 @@ impl BrowserSurfaceManager {
         visible: bool,
     ) -> Result<BrowserSurfaceSnapshot, String> {
         validate_surface_id(surface_id)?;
-        let bounds = bounds.validate()?;
+        let window = app
+            .get_window("main")
+            .ok_or_else(|| "main window is unavailable".to_string())?;
+        let bounds = clamp_to_window(&window, bounds.validate()?);
         let url = parse_browser_url(raw_url)?;
         if let Some(webview) = self.surfaces.get(surface_id) {
             webview
-                .set_bounds(bounds.rect())
+                .set_bounds(bounds_rect_for_window(&window, bounds))
                 .map_err(|error| error.to_string())?;
             if visible {
                 webview.show()
@@ -132,9 +204,6 @@ impl BrowserSurfaceManager {
             ));
         }
 
-        let window = app
-            .get_window("main")
-            .ok_or_else(|| "main window is unavailable".to_string())?;
         let event_app = app.clone();
         let load_surface_id = surface_id.to_string();
         let title_app = app.clone();
@@ -179,11 +248,15 @@ impl BrowserSurfaceManager {
                     },
                 );
             });
+        let scale = css_pixel_scale(
+            window.scale_factor().unwrap_or(1.0),
+            bounds.device_pixel_ratio,
+        );
         let webview = window
             .add_child(
                 builder,
-                LogicalPosition::new(bounds.x, bounds.y),
-                LogicalSize::new(bounds.width, bounds.height),
+                PhysicalPosition::new(bounds.x * scale, bounds.y * scale),
+                PhysicalSize::new(bounds.width * scale, bounds.height * scale),
             )
             .map_err(|error| error.to_string())?;
         if !visible {
@@ -224,8 +297,11 @@ impl BrowserSurfaceManager {
     }
 
     pub fn set_bounds(&self, surface_id: &str, bounds: BrowserSurfaceBounds) -> Result<(), String> {
-        self.get(surface_id)?
-            .set_bounds(bounds.validate()?.rect())
+        let webview = self.get(surface_id)?;
+        let window = webview.window();
+        let bounds = clamp_to_window(&window, bounds.validate()?);
+        webview
+            .set_bounds(bounds_rect_for_window(&window, bounds))
             .map_err(|error| error.to_string())
     }
 
@@ -288,6 +364,7 @@ mod tests {
             y: 1.0,
             width: 500.0,
             height: 400.0,
+            device_pixel_ratio: None,
         }
         .validate()
         .is_ok());
@@ -296,8 +373,60 @@ mod tests {
             y: 0.0,
             width: 0.0,
             height: 100.0,
+            device_pixel_ratio: None,
         }
         .validate()
         .is_err());
+    }
+
+    #[test]
+    fn prefers_the_webview_device_pixel_ratio_over_a_stale_window_scale() {
+        assert_eq!(css_pixel_scale(1.0, Some(1.5)), 1.5);
+        assert_eq!(css_pixel_scale(1.25, None), 1.25);
+    }
+
+    #[test]
+    fn clamps_overflowing_bounds_to_the_window() {
+        let clamped = clamp_bounds_to_window_size(
+            BrowserSurfaceBounds {
+                x: 800.0,
+                y: 80.0,
+                width: 500.0,
+                height: 700.0,
+                device_pixel_ratio: Some(1.5),
+            },
+            1200.0,
+            680.0,
+        );
+        assert_eq!(clamped.x, 800.0);
+        assert_eq!(clamped.y, 80.0);
+        assert_eq!(clamped.width, 400.0);
+        assert_eq!(clamped.height, 600.0);
+        assert_eq!(clamped.device_pixel_ratio, Some(1.5));
+    }
+
+    #[test]
+    fn clamps_with_the_same_scale_used_for_physical_placement() {
+        let window_scale = 1.0;
+        let device_pixel_ratio = Some(1.5);
+        let scale = css_pixel_scale(window_scale, device_pixel_ratio);
+        let (logical_width, logical_height) = logical_inner_size(1920.0, 1080.0, scale);
+        assert_eq!((logical_width, logical_height), (1280.0, 720.0));
+        let clamped = clamp_bounds_to_window_size(
+            BrowserSurfaceBounds {
+                x: 1000.0,
+                y: 80.0,
+                width: 400.0,
+                height: 700.0,
+                device_pixel_ratio,
+            },
+            logical_width,
+            logical_height,
+        );
+        assert_eq!(clamped.width, 280.0);
+        assert_eq!(clamped.height, 640.0);
+        let rect = clamped.physical_rect(scale);
+        assert_eq!(rect.position, PhysicalPosition::new(1500.0, 120.0).into());
+        assert_eq!(rect.size, PhysicalSize::new(420.0, 960.0).into());
     }
 }

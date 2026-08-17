@@ -6,6 +6,7 @@ import {
   createHostError,
   stripAttachmentReferenceBlocks,
   type HostError,
+  type HostIdentity,
   type ModelSummary,
   type QueueSnapshot,
   type SerializableImage,
@@ -63,6 +64,7 @@ function startDetachedPrompt(args: {
   server: PiHostServer;
   session: AgentSession;
   operationLock: AgentOperationLock;
+  runIdentity: HostIdentity;
   text: string;
   images?: ImageContent[];
   streamingBehavior?: "steer" | "followUp";
@@ -73,29 +75,27 @@ function startDetachedPrompt(args: {
     args.operationLock.release(args.requestId);
     if (runStatePublished) {
       args.factory.clearSessionRunId(args.session);
-      if (args.server.getPhase() === "agentBusy" && !args.factory.hasBusySessions()) {
+      if (args.server.getPhase() === "agentBusy" && !args.factory.hasRunningSessions()) {
         args.server.setPhase("ready");
       }
-      args.factory.currentRunId = null;
     }
   };
 
   try {
     const runId = randomUUID();
-    const runIdentity = args.server.getIdentity();
+    const runIdentity = args.runIdentity;
     const visibleText = stripAttachmentReferenceBlocks(args.text);
     const provisionalTitle =
       args.session.sessionName?.trim() || !visibleText.trim()
         ? null
         : createProvisionalSessionTitle(visibleText);
-    const titleSessionId = args.server.identity.sessionId;
+    const titleSessionId = runIdentity.sessionId;
     const extensionCommandInvocation = resolveExtensionCommandInvocation(args.session, args.text);
 
     runStatePublished = true;
-    args.factory.currentRunId = runId;
     args.factory.setSessionRunId(args.session, runId);
     args.server.setPhase("agentBusy");
-    if (provisionalTitle) args.factory.setActiveSessionName(provisionalTitle);
+    if (provisionalTitle) args.factory.setSessionRuntimeName(args.session, provisionalTitle);
 
     void (async () => {
       let completed = false;
@@ -117,20 +117,24 @@ function startDetachedPrompt(args: {
         }
         completed = true;
       } catch (err) {
-        args.server.emitForIdentity(runIdentity, "agent.event", {
+        const identity = args.factory.findRuntimeForSession(args.session)?.identity ?? runIdentity;
+        const message = err instanceof Error ? err.message : String(err);
+        args.server.emitForIdentity(identity, "agent.event", {
           runId,
           event: {
             type: "error",
-            message: err instanceof Error ? err.message : String(err),
+            message,
           },
         });
-        args.server.emitForIdentity(runIdentity, "session.runtimeChanged", {
-          sessionId: runIdentity.sessionId!,
-          sessionRevision: runIdentity.sessionRevision,
-          state: "error",
-          updatedAt: Date.now(),
-          error: err instanceof Error ? err.message : String(err),
-        });
+        if (identity.sessionId) {
+          args.server.emitForIdentity(identity, "session.runtimeChanged", {
+            sessionId: identity.sessionId,
+            sessionRevision: identity.sessionRevision,
+            state: "error",
+            updatedAt: Date.now(),
+            error: message,
+          });
+        }
       } finally {
         cleanup();
       }
@@ -172,6 +176,17 @@ async function buildPromptWithAttachments(args: {
       .join("\n\n"),
     attachmentIds: attachments.map((attachment) => attachment.id),
   };
+}
+
+function targetSessionError(factory: WorkspaceGraphFactory, context: Record<string, unknown>) {
+  const workspace = factory.checkIdentity(context, { requireWorkspace: true });
+  if (workspace) return { error: workspace };
+  if (!factory.resolveSessionTarget(context.expectedSessionId, context.expectedSessionRevision)) {
+    return {
+      error: createHostError("STALE_REVISION", "Session target is no longer available"),
+    };
+  }
+  return null;
 }
 
 function commitPromptAttachments(
@@ -387,6 +402,7 @@ export function createAgentHandlers(
         server,
         session: g.agentSession,
         operationLock,
+        runIdentity: server.getIdentity(),
         text: prompt.text,
         images: promptImages,
         streamingBehavior: params.streamingBehavior,
@@ -503,15 +519,15 @@ export function createAgentHandlers(
         requestId: ctx.id,
         identity: server.identity,
         serviceGraphLock: server.serviceGraphLock,
-        precheck: () =>
-          factory.checkIdentity(ctx.context, {
-            requireWorkspace: true,
-            requireSession: true,
-          }),
+        precheck: () => targetSessionError(factory, ctx.context)?.error ?? null,
         run: async () => {
           const g = factory.getGraph();
-          if (!g?.agentSession || !g.sessionManager) throw new Error("No active session");
-          const session = g.agentSession;
+          const target = factory.resolveSessionTarget(
+            ctx.context.expectedSessionId,
+            ctx.context.expectedSessionRevision,
+          );
+          if (!g || !target) throw new Error("No target session");
+          const session = target.agentSession;
           const originalQueue = factory.syncQueueState(session);
           let aborted = false;
           let settled = true;
@@ -548,17 +564,17 @@ export function createAgentHandlers(
             }
             queue = factory.finishQueueTransaction(session);
           }
-          const identity = server.getIdentity();
           const snap = buildSessionSnapshot({
             session,
-            sessionManager: g.sessionManager,
+            sessionManager: target.sessionManager,
             cwd: g.canonicalCwd,
-            sessionId: identity.sessionId ?? "",
-            revision: identity.sessionRevision,
+            sessionId: target.identity.sessionId ?? "",
+            revision: target.identity.sessionRevision,
             workspaceId: g.workspaceId,
-            toolRevision: g.toolRevision,
+            toolRevision: target.toolRevision,
           });
-          g.sessionSnapshot = snap;
+          if (target.isActive) g.sessionSnapshot = snap;
+          else if (target.background) target.background.sessionSnapshot = snap;
           return {
             aborted,
             settled,
@@ -813,6 +829,7 @@ export function createAgentHandlers(
               server,
               session,
               operationLock,
+              runIdentity: server.getIdentity(),
               text: item,
               images: promptImages,
             });
@@ -1025,15 +1042,15 @@ export function createAgentHandlers(
     },
 
     "agent.abortCompaction": async (ctx) => {
-      const stale = factory.checkIdentity(ctx.context, {
-        requireWorkspace: true,
-        requireSession: true,
-      });
-      if (stale) return { error: stale };
-      const g = factory.getGraph();
-      const abort = (g?.agentSession as unknown as { abortCompaction?: () => void })
+      const stale = targetSessionError(factory, ctx.context);
+      if (stale) return stale;
+      const target = factory.resolveSessionTarget(
+        ctx.context.expectedSessionId,
+        ctx.context.expectedSessionRevision,
+      );
+      const abort = (target?.agentSession as unknown as { abortCompaction?: () => void })
         ?.abortCompaction;
-      abort?.call(g?.agentSession);
+      abort?.call(target?.agentSession);
       return { result: { accepted: true } };
     },
 
@@ -1095,12 +1112,13 @@ export function createAgentHandlers(
     },
 
     "agent.abortRetry": async (ctx) => {
-      const stale = factory.checkIdentity(ctx.context, {
-        requireWorkspace: true,
-        requireSession: true,
-      });
-      if (stale) return { error: stale };
-      factory.getGraph()?.agentSession?.abortRetry();
+      const stale = targetSessionError(factory, ctx.context);
+      if (stale) return stale;
+      const target = factory.resolveSessionTarget(
+        ctx.context.expectedSessionId,
+        ctx.context.expectedSessionRevision,
+      );
+      target?.agentSession.abortRetry();
       return { result: { accepted: true } };
     },
 

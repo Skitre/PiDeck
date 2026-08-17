@@ -461,7 +461,7 @@ export function RightDock() {
       style={{ width: dockWidth, marginRight: dockOpen ? 0 : -dockWidth }}
       data-right-dock
       data-dock-open={dockOpen ? "true" : "false"}
-      className={`relative flex shrink-0 flex-col border-l border-border bg-surface ${
+      className={`relative flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface ${
         resizing ? "transition-none" : "transition-[margin-right] duration-200 ease-out"
       }`}
     >

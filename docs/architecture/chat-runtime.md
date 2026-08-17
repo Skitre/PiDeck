@@ -2,29 +2,37 @@
 
 ## Status
 
-**Implemented:** Session list/create/open, prompt/follow-up/abort (steer host-side only, not wired to the UI), manual/auto compaction controls, model/thinking selectors, transcript rendering, tool cards, Extension UI modal, and AUTH_REQUIRED banner.
+**Implemented:** Session list/create/open, prompt/follow-up/abort, Settings choice of follow-up vs steer while a turn is running (default follow-up), manual/auto compaction controls, model/thinking selectors, transcript rendering, tool cards, Extension UI modal, and AUTH_REQUIRED banner.
 
 ## Session
 
-- Listed only for current workspace cwd (`session.list`).
-- `session.open` rejects paths not in that list (must switch workspace first).
+- Listed only for current workspace cwd (`session.list`). The list includes a
+  Session once it has started (first message or a live run), even if the JSONL
+  file is not on disk yet. A blank unused create stays off the list.
+- `session.open` accepts a live background Runtime in this workspace, or a path
+  from `session.list`. Other paths are rejected (must switch workspace first).
 - React owns a normalized, workspace-scoped Session Catalog. Page navigation does not clear it.
 - Active Pi snapshots project `running`, `queued`, `idle`, `error`, or `inactive` state into the Catalog.
 - Composer drafts are keyed by Session id, so switching pages or Sessions does not discard input.
-- Host exposes one foreground AgentSession plus retained background runtimes. Running Sessions remain live, while idle Sessions are kept in a bounded reuse cache (currently three entries).
-- Background runtimes publish Session status but not Transcript deltas into the foreground projection. Evicted runtimes can be reopened from Pi's Session file.
+- Host exposes one foreground AgentSession plus retained background runtimes. A workspace may keep at most five live AgentSessions (the foreground plus up to four background runtimes). Opening or creating another new runtime returns `SESSION_LIMIT`.
+- Switching away from a busy Session parks it; idle Sessions are disposed. A settled background runtime emits `session.runtimeChanged` (`idle`) and is then released. The Session file remains the durable transcript.
+- Background runtimes also emit `agent.event` with that Session's identity. They still do not emit `session.snapshot`. Desktop keeps a live `transcriptDrafts` entry per Session id (at most five, matching live runtimes). Switching back promotes the Host runtime and applies the Host snapshot only for revision, tools, and idle flags; the live `messages`/`entries`/`leafId` projection and `startedAt` come from the draft so the timer and Transcript tree stay continuous. After settle, the draft is dropped and reopen loads the Session file.
+- Rehydrate after queue shed or Host reconnect restores only the foreground snapshot. Background drafts are discarded; switching back then uses the Host snapshot (timer and Transcript may reset).
+- The sidebar shows a running indicator for live background Sessions, and the same green dot on any Workspace that still has a live Session. Stop, prompt, follow-up, and steer require the Session to be foreground.
 - Final AgentSession disposal must emit `session_shutdown` before `AgentSession.dispose()`. Extensions use that event to release timers, watchers, and other work that captures the current extension context.
 - Opening a still-running background Session promotes the existing Runtime, assigns a new Session revision, rebuilds the foreground snapshot, and migrates Extension UI identity without restarting the turn.
 - `session.list` includes `runtimeState` and `sessionRevision`, allowing a reconnecting UI to rebuild the runtime status of foreground and retained background Sessions.
+- Switching workspace parks the outgoing graph (including live Sessions) and keeps `agent.event` flowing under that graph's identity. `emitForIdentity` allows those parked runtime events (`agent.event`, `session.runtimeChanged`, `session.infoChanged`, `agent.queueChanged`) and drops other mismatched identities without throwing, so a mid-turn switch does not abort the SDK prompt or quiesce the Host. A busy parked graph keeps its model providers registered so the turn is not cut off. Coming back reactivates that graph. Package mutations on the current Workspace still return `AGENT_BUSY` while that Workspace has a live Session. If five other Workspaces are already running, a further switch returns `AGENT_BUSY`. Desktop does not project parked Sessions into the new Workspace's catalog, and it defers `session.list` / `session.open` until the switch lock is released.
 
 ## Agent commands
 
 | UI action | Method |
 |---|---|
 | Send (idle) | `agent.prompt` |
-| Send (busy) | `agent.followUp` (`agent.steer` exists host-side but is not wired to the UI) |
+| Send (busy) | `agent.followUp` or `agent.steer`, from Settings → General (`busySendBehavior`, default follow-up) |
 | Stop | `agent.abort` |
 | Stop (compacting) | `agent.abortCompaction` |
+| Stop (retrying) | `agent.abortRetry` |
 | `/compact [instructions]` or Compact now | `agent.compact` |
 | Auto-compaction switch | `agent.setAutoCompaction` |
 | `/session` stats dialog | `session.getStats` |

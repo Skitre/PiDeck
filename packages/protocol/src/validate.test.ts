@@ -75,9 +75,9 @@ describe("compact Assistant message updates", () => {
   it("accepts replayable text, thinking, and tool-call events", () => {
     expect(update({ type: "text_delta", contentIndex: 0, delta: "hello" })).toBe(true);
     expect(update({ type: "thinking_end", contentIndex: 1, content: "plan" })).toBe(true);
-    expect(
-      update({ type: "toolcall_start", contentIndex: 2, id: "call-1", name: "read" }),
-    ).toBe(true);
+    expect(update({ type: "toolcall_start", contentIndex: 2, id: "call-1", name: "read" })).toBe(
+      true,
+    );
     expect(
       update({
         type: "toolcall_end",
@@ -141,6 +141,12 @@ describe("METHOD_CONTEXT_SCOPE coverage", () => {
     expect(METHOD_CONTEXT_SCOPE["extensionUi.respond"]).toBe("sessionTarget");
     expect(METHOD_CONTEXT_SCOPE["extensionUi.customInput"]).toBe("sessionTarget");
     expect(METHOD_CONTEXT_SCOPE["extensionUi.customResize"]).toBe("sessionTarget");
+  });
+
+  it("classifies agent stop methods as target-Session methods", () => {
+    expect(METHOD_CONTEXT_SCOPE["agent.abort"]).toBe("sessionTarget");
+    expect(METHOD_CONTEXT_SCOPE["agent.abortCompaction"]).toBe("sessionTarget");
+    expect(METHOD_CONTEXT_SCOPE["agent.abortRetry"]).toBe("sessionTarget");
   });
 });
 
@@ -311,23 +317,53 @@ describe("parseHostRequest", () => {
   });
 
   it("validates Git paths, revisions, and exact fields", () => {
-    const request = (method: "git.getDiff" | "git.stage" | "git.unstage" | "git.discard", params: unknown) =>
-      parseHostRequest({ protocolVersion: 1, id: REQUEST_ID, method, context: workspaceContext, params });
+    const request = (
+      method: "git.getDiff" | "git.stage" | "git.unstage" | "git.discard",
+      params: unknown,
+    ) =>
+      parseHostRequest({
+        protocolVersion: 1,
+        id: REQUEST_ID,
+        method,
+        context: workspaceContext,
+        params,
+      });
 
-    expect(request("git.stage", { path: "a".repeat(MAX_GIT_PATH_BYTES), expectedRevision: 1 }).ok).toBe(true);
-    expect(request("git.getDiff", { path: "src/app.ts", area: "unstaged", expectedRevision: 2 }).ok).toBe(true);
-    for (const path of ["/etc/passwd", "C:\\repo\\file.txt", "../file", "src/../../file", "\\\\server\\share\\file", "bad\u0000path"]) {
+    expect(
+      request("git.stage", { path: "a".repeat(MAX_GIT_PATH_BYTES), expectedRevision: 1 }).ok,
+    ).toBe(true);
+    expect(
+      request("git.getDiff", { path: "src/app.ts", area: "unstaged", expectedRevision: 2 }).ok,
+    ).toBe(true);
+    for (const path of [
+      "/etc/passwd",
+      "C:\\repo\\file.txt",
+      "../file",
+      "src/../../file",
+      "\\\\server\\share\\file",
+      "bad\u0000path",
+    ]) {
       expect(request("git.stage", { path, expectedRevision: 1 }).ok).toBe(false);
     }
-    expect(request("git.stage", { path: "a".repeat(MAX_GIT_PATH_BYTES + 1), expectedRevision: 1 }).ok).toBe(false);
+    expect(
+      request("git.stage", { path: "a".repeat(MAX_GIT_PATH_BYTES + 1), expectedRevision: 1 }).ok,
+    ).toBe(false);
     expect(request("git.unstage", { path: "src/app.ts", expectedRevision: -1 }).ok).toBe(false);
     expect(request("git.discard", { path: "src/app.ts", expectedRevision: 3 }).ok).toBe(true);
-    expect(request("git.stage", { path: "src/app.ts", expectedRevision: 1, force: true }).ok).toBe(false);
+    expect(request("git.stage", { path: "src/app.ts", expectedRevision: 1, force: true }).ok).toBe(
+      false,
+    );
   });
 
   it("validates Git batch mutations by revision and exact fields", () => {
     const request = (method: "git.stageAll" | "git.unstageAll", params: unknown) =>
-      parseHostRequest({ protocolVersion: 1, id: REQUEST_ID, method, context: workspaceContext, params });
+      parseHostRequest({
+        protocolVersion: 1,
+        id: REQUEST_ID,
+        method,
+        context: workspaceContext,
+        params,
+      });
 
     expect(request("git.stageAll", { expectedRevision: 1 }).ok).toBe(true);
     expect(request("git.unstageAll", { expectedRevision: 2 }).ok).toBe(true);
@@ -354,8 +390,22 @@ describe("parseHostRequest", () => {
   });
 
   it("validates Git hunk, branch, history, and commit comparison requests", () => {
-    const request = (method: "git.mutateHunk" | "git.createBranch" | "git.switchBranch" | "git.listHistory" | "git.getCommitDiff", params: unknown) =>
-      parseHostRequest({ protocolVersion: 1, id: REQUEST_ID, method, context: workspaceContext, params });
+    const request = (
+      method:
+        | "git.mutateHunk"
+        | "git.createBranch"
+        | "git.switchBranch"
+        | "git.listHistory"
+        | "git.getCommitDiff",
+      params: unknown,
+    ) =>
+      parseHostRequest({
+        protocolVersion: 1,
+        id: REQUEST_ID,
+        method,
+        context: workspaceContext,
+        params,
+      });
     const hunk = {
       path: "src/app.ts",
       area: "unstaged",
@@ -368,7 +418,12 @@ describe("parseHostRequest", () => {
     expect(request("git.mutateHunk", { ...hunk, hunkId: "short" }).ok).toBe(false);
     expect(request("git.createBranch", { name: "feature/git", expectedRevision: 2 }).ok).toBe(true);
     expect(request("git.switchBranch", { name: " bad", expectedRevision: 2 }).ok).toBe(false);
-    expect(request("git.createBranch", { name: "a".repeat(MAX_GIT_BRANCH_NAME_BYTES + 1), expectedRevision: 2 }).ok).toBe(false);
+    expect(
+      request("git.createBranch", {
+        name: "a".repeat(MAX_GIT_BRANCH_NAME_BYTES + 1),
+        expectedRevision: 2,
+      }).ok,
+    ).toBe(false);
     expect(request("git.listHistory", { limit: 50, cursor: "c".repeat(40) }).ok).toBe(true);
     expect(request("git.listHistory", { limit: 101 }).ok).toBe(false);
     expect(request("git.getCommitDiff", { commitSha: "d".repeat(40) }).ok).toBe(true);
@@ -667,9 +722,9 @@ describe("deep result/event validation (C3)", () => {
     ["tokensAfter", { tokensAfter: Number.NaN }],
     ["extension field", { providerData: undefined, nested: () => {} }],
   ])("rejects malformed agent.compact %s", (_label, compactResult) => {
-    expect(
-      validateSuccessResult("agent.compact", { result: compactResult, session }).ok,
-    ).toBe(false);
+    expect(validateSuccessResult("agent.compact", { result: compactResult, session }).ok).toBe(
+      false,
+    );
   });
 
   it("accepts a typed compaction result with JSON extension fields", () => {
@@ -1056,7 +1111,7 @@ describe("deep result/event validation (C3)", () => {
         requestId: EXTENSION_REQUEST_ID,
         kind: "confirm",
         presentation: "inline",
-        command: "subagent_supervisor(...)"
+        command: "subagent_supervisor(...)",
       }).ok,
     ).toBe(false);
     expect(
@@ -1144,23 +1199,37 @@ describe("Git DTO validation", () => {
     ahead: 1,
     behind: 0,
     indexGeneration: "b".repeat(64),
-    files: [{
-      path: "src/app.ts",
-      staged: "modified",
-      unstaged: null,
-      conflict: false,
-      submodule: false,
-      pathSupported: true,
-    }],
+    files: [
+      {
+        path: "src/app.ts",
+        staged: "modified",
+        unstaged: null,
+        conflict: false,
+        submodule: false,
+        pathSupported: true,
+      },
+    ],
     warnings: [],
   } as const;
 
   it("accepts each Git status state and rejects unknown fields", () => {
     expect(validateSuccessResult("git.getStatus", ready).ok).toBe(true);
-    expect(validateSuccessResult("git.getStatus", { state: "not_repository", revision: 1 }).ok).toBe(true);
-    expect(validateSuccessResult("git.getStatus", { state: "unavailable", revision: 1, message: "missing" }).ok).toBe(true);
-    expect(validateSuccessResult("git.getStatus", { ...ready, localPath: "/secret" }).ok).toBe(false);
-    expect(validateSuccessResult("git.getStatus", { ...ready, indexGeneration: "short" }).ok).toBe(false);
+    expect(
+      validateSuccessResult("git.getStatus", { state: "not_repository", revision: 1 }).ok,
+    ).toBe(true);
+    expect(
+      validateSuccessResult("git.getStatus", {
+        state: "unavailable",
+        revision: 1,
+        message: "missing",
+      }).ok,
+    ).toBe(true);
+    expect(validateSuccessResult("git.getStatus", { ...ready, localPath: "/secret" }).ok).toBe(
+      false,
+    );
+    expect(validateSuccessResult("git.getStatus", { ...ready, indexGeneration: "short" }).ok).toBe(
+      false,
+    );
   });
 
   it("validates diff, mutation, commit, and changed event shapes exactly", () => {
@@ -1173,32 +1242,40 @@ describe("Git DTO validation", () => {
       binary: false,
       truncated: false,
       contentGeneration: "c".repeat(64),
-      hunks: [{
-        id: "e".repeat(64),
-        header: "@@ -1 +1 @@",
-        oldStart: 1,
-        oldLines: 1,
-        newStart: 1,
-        newLines: 1,
-        additions: 1,
-        deletions: 1,
-      }],
+      hunks: [
+        {
+          id: "e".repeat(64),
+          header: "@@ -1 +1 @@",
+          oldStart: 1,
+          oldLines: 1,
+          newStart: 1,
+          newLines: 1,
+          additions: 1,
+          deletions: 1,
+        },
+      ],
       hunkOperations: ["unstage"],
     } as const;
     expect(validateSuccessResult("git.getDiff", diff).ok).toBe(true);
     expect(validateSuccessResult("git.getDiff", { ...diff, area: "working" }).ok).toBe(false);
     expect(validateSuccessResult("git.stage", { applied: true, snapshot: ready }).ok).toBe(true);
     expect(validateSuccessResult("git.stageAll", { applied: true, snapshot: ready }).ok).toBe(true);
-    expect(validateSuccessResult("git.unstageAll", { applied: true, snapshot: ready }).ok).toBe(true);
+    expect(validateSuccessResult("git.unstageAll", { applied: true, snapshot: ready }).ok).toBe(
+      true,
+    );
     expect(validateSuccessResult("git.discard", { applied: true, snapshot: ready }).ok).toBe(true);
-    expect(validateSuccessResult("git.mutateHunk", { applied: true, snapshot: ready }).ok).toBe(true);
-    expect(validateSuccessResult("git.listBranches", {
-      statusRevision: 2,
-      current: "main",
-      detached: false,
-      branches: [{ name: "main", current: true, upstream: "origin/main", ahead: 1, behind: 0 }],
-      truncated: false,
-    }).ok).toBe(true);
+    expect(validateSuccessResult("git.mutateHunk", { applied: true, snapshot: ready }).ok).toBe(
+      true,
+    );
+    expect(
+      validateSuccessResult("git.listBranches", {
+        statusRevision: 2,
+        current: "main",
+        detached: false,
+        branches: [{ name: "main", current: true, upstream: "origin/main", ahead: 1, behind: 0 }],
+        truncated: false,
+      }).ok,
+    ).toBe(true);
     const commit = {
       sha: "d".repeat(40),
       shortSha: "dddddddd",
@@ -1208,17 +1285,27 @@ describe("Git DTO validation", () => {
       subject: "Test",
       refs: ["HEAD -> main"],
     };
-    expect(validateSuccessResult("git.listHistory", { commits: [commit], nextCursor: commit.sha }).ok).toBe(true);
-    expect(validateSuccessResult("git.getCommitDiff", {
-      commitSha: commit.sha,
-      parentSha: commit.parents[0],
-      patch: diff.patch,
-      additions: 1,
-      deletions: 1,
-      binary: false,
-      truncated: false,
-    }).ok).toBe(true);
-    expect(validateSuccessResult("git.commit", { applied: true, commitSha: "d".repeat(40), snapshot: ready }).ok).toBe(true);
+    expect(
+      validateSuccessResult("git.listHistory", { commits: [commit], nextCursor: commit.sha }).ok,
+    ).toBe(true);
+    expect(
+      validateSuccessResult("git.getCommitDiff", {
+        commitSha: commit.sha,
+        parentSha: commit.parents[0],
+        patch: diff.patch,
+        additions: 1,
+        deletions: 1,
+        binary: false,
+        truncated: false,
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateSuccessResult("git.commit", {
+        applied: true,
+        commitSha: "d".repeat(40),
+        snapshot: ready,
+      }).ok,
+    ).toBe(true);
     expect(validateSuccessResult("git.commit", { applied: true, snapshot: ready }).ok).toBe(false);
     expect(validateEventPayload("git.changed", { snapshot: ready }).ok).toBe(true);
     expect(validateEventPayload("git.changed", { snapshot: ready, path: "/repo" }).ok).toBe(false);

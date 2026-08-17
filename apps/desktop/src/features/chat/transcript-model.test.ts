@@ -782,6 +782,77 @@ describe("buildTranscriptRows", () => {
       rows[1]?.sections?.final.filter((block) => block.kind === "text").map((block) => block.text),
     ).toEqual(["# Final answer"]);
   });
+
+  it("keeps one assistant row when entries and messages stay aligned", () => {
+    const user = { role: "user" as const, content: "query" };
+    const assistant = {
+      role: "assistant" as const,
+      content: [
+        { type: "text", text: "searching" },
+        { type: "toolCall", id: "t1", name: "search", status: "done" },
+      ],
+    };
+    const result = {
+      role: "toolResult" as const,
+      toolCallId: "t1",
+      toolName: "search",
+      isError: false,
+      content: [{ type: "text", text: "ok" }],
+    };
+    const followUp = {
+      role: "assistant" as const,
+      content: [{ type: "text", text: "found it" }],
+    };
+    const messages = [user, assistant, result, followUp];
+    const rows = buildTranscriptRows(messages, {
+      entries: [
+        { id: "e-user", parentId: null, type: "message", message: user },
+        { id: "e-a1", parentId: "e-user", type: "message", message: assistant },
+        { id: "e-t1", parentId: "e-a1", type: "message", message: result },
+        { id: "e-a2", parentId: "e-t1", type: "message", message: followUp },
+      ] as never,
+    });
+
+    expect(rows.filter((row) => row.role === "assistant")).toHaveLength(1);
+  });
+
+  it("splits a turn when a promote snapshot's entries outrun the event draft", () => {
+    const user = { role: "user" as const, content: "query" };
+    const assistant = {
+      role: "assistant" as const,
+      content: [
+        { type: "text", text: "searching" },
+        { type: "toolCall", id: "t1", name: "search", status: "done" },
+      ],
+    };
+    const result = {
+      role: "toolResult" as const,
+      toolCallId: "t1",
+      toolName: "search",
+      isError: false,
+      content: [{ type: "text", text: "ok" }],
+    };
+    const followUp = {
+      role: "assistant" as const,
+      content: [{ type: "text", text: "found it" }],
+    };
+    const rows = buildTranscriptRows([user, assistant, result, followUp], {
+      entries: [
+        { id: "e-user", parentId: null, type: "message", message: user },
+        { id: "e-a1", parentId: "e-user", type: "message", message: assistant },
+        { id: "e-t1", parentId: "e-a1", type: "message", message: result },
+        { id: "e-a2", parentId: "e-t1", type: "message", message: followUp },
+        {
+          id: "e-t1-again",
+          parentId: "e-a2",
+          type: "message",
+          message: result,
+        },
+      ] as never,
+    });
+
+    expect(rows.filter((row) => row.role === "assistant").length).toBeGreaterThan(1);
+  });
 });
 
 describe("buildTranscriptRows image parts", () => {

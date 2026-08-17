@@ -27,13 +27,17 @@ Frontend **must drop** events/responses with mismatched `hostInstanceId`. Stale 
 
 Session-scoped method contexts distinguish the current foreground Session from a
 specific Session target. `activeSession` methods must address the current Session.
-`sessionTarget` is used by `extensionUi.respond`, `extensionUi.customInput`, and
+`sessionTarget` is used by `agent.abort`, `agent.abortCompaction`,
+`agent.abortRetry`, `extensionUi.respond`, `extensionUi.customInput`, and
 `extensionUi.customResize`; it can address a foreground or retained background
-Session. The Host first validates the current Host/Workspace generation, then
-requires the request context to exactly match the owner captured for that
-Extension UI `requestId`. A mismatch returns `STALE_REVISION` without resolving,
-closing, injecting input into, or resizing the legitimate request. Session
-promotion migrates the request owner to the promoted Session revision.
+Session. For Extension UI, the Host first validates the current Host/Workspace
+generation, then requires the request context to exactly match the owner captured
+for that Extension UI `requestId`. A mismatch returns `STALE_REVISION` without
+resolving, closing, injecting input into, or resizing the legitimate request.
+Session promotion migrates the request owner to the promoted Session revision.
+Agent stop methods resolve the target runtime by `expectedSessionId` /
+`expectedSessionRevision` after the same Host/Workspace check; a missing or
+stale target returns `STALE_REVISION` and does not touch the foreground Session.
 
 `extensionUi.configure` is Host-scoped and idempotently selects
 `legacy-modal`, `auto`, or `inline-first`. Desktop also sends the persisted value as
@@ -70,7 +74,9 @@ See `HOST_EVENT_NAMES` in `packages/protocol/src/events.ts`. Notable:
 
 - `host.ready`, `host.statusChanged`, `host.fatal`
 - `workspace.changed`
-- `session.snapshot`, `agent.event`, `agent.toolsChanged`
+- `session.snapshot`, `agent.event`, `agent.toolsChanged`. Background runtimes
+  emit `agent.event` with that Session's identity; they do not emit
+  `session.snapshot` or `agent.toolsChanged`.
 - `package.progress`, `package.snapshot`
 - `extensionUi.request` / `extensionUi.closed` / `extensionUi.groupClosed` / status /
   widget / notification. A blocking
@@ -102,7 +108,8 @@ update.
 
 Desktop buffers updates for one animation frame, concatenates only adjacent
 deltas with the same Host/Workspace/Session/Package identity, run id, event
-type, and content index, then applies the frame to one immutable Session draft.
+type, and content index, then applies each Session's frame to that Session's
+transcript (the foreground Session or a live `transcriptDrafts` entry).
 Start/end events and identity boundaries are never crossed. Streaming tool
 arguments are parsed from their accumulated JSON text for live display; the
 tool-call end and final message snapshot replace that transient state.

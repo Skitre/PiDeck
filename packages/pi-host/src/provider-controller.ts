@@ -446,8 +446,18 @@ async function refreshRegistry(
   rebindCurrentSessionModel(graph.agentSession, factory.deps.modelRegistry);
 }
 
-async function invalidateRetainedRuntimes(factory: WorkspaceGraphFactory): Promise<void> {
+async function invalidateRetainedRuntimes(
+  factory: WorkspaceGraphFactory,
+): Promise<HostError | null> {
+  if (factory.hasBusyRetainedSessions?.()) {
+    return createHostError(
+      "AGENT_BUSY",
+      "Stop running sessions in other workspaces before changing Providers",
+      { retryable: true },
+    );
+  }
   await factory.invalidateRetainedRuntimeCaches?.();
+  return null;
 }
 
 async function reconcileIdleActiveSessionModel(
@@ -991,7 +1001,8 @@ async function persistDetectedAuthHeader(
       const raw = config.providers[providerId];
       if (!isObject(raw)) throw new Error(`Provider not found: ${providerId}`);
       if (raw.authHeader === authHeader) return { identity };
-      await invalidateRetainedRuntimes(factory);
+      const retainedBusy = await invalidateRetainedRuntimes(factory);
+      if (retainedBusy) return { error: retainedBusy };
       signal.throwIfAborted();
       raw.authHeader = authHeader;
       await commitModelsConfig(modelsPath, config.root, factory);
@@ -1090,7 +1101,8 @@ async function applyProviderEnabledMutation(
         if (!isObject(raw) && !runtimeProviderIds(factory).includes(providerId)) {
           return { error: createHostError("MODEL_NOT_FOUND", `Provider not found: ${providerId}`) };
         }
-        await invalidateRetainedRuntimes(factory);
+        const retainedBusy = await invalidateRetainedRuntimes(factory);
+        if (retainedBusy) return { error: retainedBusy };
         signal.throwIfAborted();
         const nextEnabled = new Set(
           resolveEnabledProviders(
@@ -1467,7 +1479,8 @@ export function createProviderHandlers(
             const existing = isObject(config.providers[originalId])
               ? config.providers[originalId]
               : {};
-            await invalidateRetainedRuntimes(factory);
+            const retainedBusy = await invalidateRetainedRuntimes(factory);
+            if (retainedBusy) return { error: retainedBusy };
             signal.throwIfAborted();
             const merged = mergeProvider(existing, draft);
             if (params.apiKey !== undefined || params.clearApiKey === true) delete merged.apiKey;
@@ -1596,7 +1609,8 @@ export function createProviderHandlers(
                 error: createHostError("MODEL_NOT_FOUND", `Provider not found: ${providerId}`),
               };
             }
-            await invalidateRetainedRuntimes(factory);
+            const retainedBusy = await invalidateRetainedRuntimes(factory);
+            if (retainedBusy) return { error: retainedBusy };
             signal.throwIfAborted();
             const enabledBefore = resolveEnabledProviders(
               config,
@@ -1620,7 +1634,9 @@ export function createProviderHandlers(
               await factory.deps.credentialStore.delete(providerId);
               await journal.markCommitted();
               await refreshRegistry(factory, true);
-              await reconcileIdleActiveSessionModel(factory, enabledAfter);
+              await reconcileIdleActiveSessionModel(factory, enabledAfter, {
+                allowNoModel: enabledAfter.length === 0,
+              });
             } catch (error) {
               await journal.rollback();
               await refreshRegistry(factory, true);
@@ -2029,7 +2045,8 @@ export function createProviderHandlers(
               };
             }
             const config = await readModelsConfig(modelsPath);
-            await invalidateRetainedRuntimes(factory);
+            const retainedBusy = await invalidateRetainedRuntimes(factory);
+            if (retainedBusy) return { error: retainedBusy };
             signal.throwIfAborted();
             const nextEnabled = new Set(
               resolveEnabledProviders(
@@ -2054,7 +2071,9 @@ export function createProviderHandlers(
               await factory.deps.credentialStore.delete(providerId);
               await journal.markCommitted();
               await refreshRegistry(factory, true);
-              await reconcileIdleActiveSessionModel(factory, nextEnabled);
+              await reconcileIdleActiveSessionModel(factory, nextEnabled, {
+                allowNoModel: nextEnabled.size === 0,
+              });
             } catch (error) {
               await journal.rollback();
               await refreshRegistry(factory, true);

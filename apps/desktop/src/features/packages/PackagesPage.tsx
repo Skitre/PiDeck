@@ -107,7 +107,7 @@ const PACKAGE_LIST_BUSY_RETRY_INITIAL_MS = 250;
 const PACKAGE_LIST_BUSY_RETRY_MAX_MS = 2_000;
 
 const inputClass =
-  "h-8 min-w-0 rounded-md border border-border bg-surface px-2 text-xs text-foreground placeholder:text-muted focus:border-focus";
+  "box-border h-8 min-h-8 min-w-0 rounded-md border border-border bg-surface px-2 text-xs text-foreground placeholder:text-muted focus:border-focus";
 
 export function reconcileProjectGateAuthorization(
   host: HostStatusSnapshot | null,
@@ -1635,9 +1635,9 @@ export function PackagesPage() {
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-auto md:grid-cols-[minmax(280px,34%)_minmax(0,1fr)] md:overflow-hidden">
           <aside className="flex min-h-[300px] flex-col border-b border-border md:min-h-0 md:border-b-0 md:border-r">
             <div className="border-b border-border p-3">
-              <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
+              <div className="flex flex-col gap-2">
                 <input
-                  className={`${inputClass} flex-1`}
+                  className={`${inputClass} w-full`}
                   aria-label={t("packagesSourceLabel")}
                   placeholder={t("packagesSourcePlaceholder")}
                   value={installSource}

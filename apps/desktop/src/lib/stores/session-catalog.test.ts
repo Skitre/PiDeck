@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { SessionSnapshot } from "@pideck/protocol";
 import {
   emptySessionCatalog,
+  isStaleForegroundSnapshot,
   replaceSessionCatalog,
   runtimeStateFromSnapshot,
   sessionCatalogItems,
   setSessionRuntimeState,
+  shouldProjectSnapshotIntoCatalog,
   updateSessionCatalogInfo,
   upsertSessionSnapshot,
 } from "./session-catalog";
@@ -50,8 +52,18 @@ describe("session catalog", () => {
     expect(sessionCatalogItems(catalog)).toEqual([]);
 
     catalog = upsertSessionSnapshot(catalog, "w1", snapshot(), 20);
+    expect(sessionCatalogItems(catalog)).toMatchObject([{ sessionId: "s1", messageCount: 1 }]);
+  });
+
+  it("inserts a live Session before its first persisted message", () => {
+    const catalog = upsertSessionSnapshot(
+      emptySessionCatalog(),
+      "w1",
+      snapshot({ messages: [], isIdle: false, isStreaming: true }),
+      10,
+    );
     expect(sessionCatalogItems(catalog)).toMatchObject([
-      { sessionId: "s1", messageCount: 1 },
+      { sessionId: "s1", runtimeState: "running", messageCount: 0 },
     ]);
   });
 
@@ -102,9 +114,7 @@ describe("session catalog", () => {
   it("optimistically keeps a live snapshot missing from session.list", () => {
     let catalog = upsertSessionSnapshot(emptySessionCatalog(), "w1", snapshot(), 10);
     catalog = replaceSessionCatalog(catalog, "w1", []);
-    expect(sessionCatalogItems(catalog)).toMatchObject([
-      { sessionId: "s1", runtimeState: "idle" },
-    ]);
+    expect(sessionCatalogItems(catalog)).toMatchObject([{ sessionId: "s1", runtimeState: "idle" }]);
   });
 
   it("drops stale error entries missing from session.list", () => {
@@ -162,6 +172,51 @@ describe("session catalog", () => {
     expect(catalog.order).toEqual(["s1", "top"]);
   });
 
+  it("treats an older snapshot of another Session as stale", () => {
+    expect(
+      isStaleForegroundSnapshot(
+        snapshot({ sessionId: "b", revision: 6 }),
+        snapshot({ sessionId: "a", revision: 5 }),
+      ),
+    ).toBe(true);
+    expect(
+      isStaleForegroundSnapshot(
+        snapshot({ sessionId: "a", revision: 5 }),
+        snapshot({ sessionId: "b", revision: 6 }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not reorder a live Session on later transcript upserts", () => {
+    let catalog = upsertSessionSnapshot(
+      emptySessionCatalog(),
+      "w1",
+      snapshot({ sessionId: "a", isIdle: false, isStreaming: true }),
+      10,
+    );
+    catalog = upsertSessionSnapshot(
+      catalog,
+      "w1",
+      snapshot({ sessionId: "b", isIdle: false, isStreaming: true }),
+      20,
+    );
+    expect(catalog.order).toEqual(["b", "a"]);
+
+    catalog = upsertSessionSnapshot(
+      catalog,
+      "w1",
+      snapshot({
+        sessionId: "a",
+        isIdle: false,
+        isStreaming: true,
+        messages: [{ role: "assistant", content: "more" }],
+      }),
+      30,
+    );
+    expect(catalog.entries.a?.updatedAt).toBe(10);
+    expect(catalog.order).toEqual(["b", "a"]);
+  });
+
   it("reorders on runtime state changes only for genuine activity", () => {
     let catalog = replaceSessionCatalog(emptySessionCatalog(), "w1", [
       { sessionId: "top", sessionPath: "C:/sessions/top.jsonl", cwd: "C:/w", updatedAt: 30 },
@@ -177,5 +232,39 @@ describe("session catalog", () => {
     catalog = setSessionRuntimeState(catalog, "s1", "running", undefined, 100);
     expect(catalog.entries.s1?.updatedAt).toBe(100);
     expect(catalog.order).toEqual(["s1", "top"]);
+
+    catalog = setSessionRuntimeState(catalog, "s1", "running", undefined, 110, 9);
+    expect(catalog.entries.s1?.sessionRevision).toBe(9);
+    expect(catalog.entries.s1?.updatedAt).toBe(100);
+  });
+
+  it("projects a snapshot only when it belongs to the catalog Workspace", () => {
+    const workspace = { id: "w1", cwd: "C:/w1", canonicalCwd: "C:/w1" };
+    const catalog = upsertSessionSnapshot(emptySessionCatalog(), "w1", snapshot(), 10);
+
+    expect(shouldProjectSnapshotIntoCatalog(catalog, workspace, snapshot())).toBe(true);
+    expect(shouldProjectSnapshotIntoCatalog(emptySessionCatalog(), workspace, snapshot())).toBe(
+      true,
+    );
+    expect(
+      shouldProjectSnapshotIntoCatalog(
+        emptySessionCatalog(),
+        workspace,
+        snapshot({
+          cwd: "C:/w2",
+          tools: { ...snapshot().tools, workspaceId: "w2" },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      shouldProjectSnapshotIntoCatalog(
+        catalog,
+        workspace,
+        snapshot({
+          cwd: "C:/w2",
+          tools: { ...snapshot().tools, workspaceId: "w2" },
+        }),
+      ),
+    ).toBe(true);
   });
 });

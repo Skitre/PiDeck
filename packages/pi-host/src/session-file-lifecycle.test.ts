@@ -37,6 +37,8 @@ function createFixture() {
   const graph = {
     canonicalCwd: resolvedCwd,
     servicesReady: true,
+    settingsManager: {},
+    resourceLoader: {},
     agentSession: null,
     sessionSnapshot: null,
     backgroundSessions: new Map(),
@@ -250,6 +252,136 @@ describe("Session file lifecycle", () => {
     );
     expect("error" in backgroundDelete && backgroundDelete.error.code).toBe("AGENT_BUSY");
     expect(existsSync(backgroundPath)).toBe(true);
+  });
+
+  it("lists a started live Session before the JSONL file exists", async () => {
+    const fixture = createFixture();
+    const sessionPath = join(fixture.activeDir, `${SESSION_ID}.jsonl`);
+    fixture.graph.sessionSnapshot = {
+      sessionId: SESSION_ID,
+      sessionPath,
+      cwd: fixture.cwd,
+      name: "Hello",
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "user", content: "hello" }],
+    } as never;
+
+    expect(existsSync(sessionPath)).toBe(false);
+    expect(await fixture.factory.listSessions()).toEqual([
+      expect.objectContaining({
+        id: SESSION_ID,
+        path: sessionPath,
+        name: "Hello",
+        messageCount: 1,
+        archived: false,
+      }),
+    ]);
+  });
+
+  it("lists a started background Session before the JSONL file exists", async () => {
+    const fixture = createFixture();
+    const sessionPath = join(fixture.activeDir, `${SESSION_ID}.jsonl`);
+    fixture.graph.backgroundSessions.set(SESSION_ID, {
+      sessionId: SESSION_ID,
+      sessionSnapshot: {
+        sessionId: SESSION_ID,
+        sessionPath,
+        cwd: fixture.cwd,
+        isIdle: false,
+        isStreaming: true,
+        messages: [{ role: "user", content: "hello" }],
+      },
+    } as never);
+
+    expect(await fixture.factory.listSessions()).toEqual([
+      expect.objectContaining({
+        id: SESSION_ID,
+        path: sessionPath,
+        messageCount: 1,
+      }),
+    ]);
+  });
+
+  it("does not list a blank idle Session that has no file", async () => {
+    const fixture = createFixture();
+    fixture.graph.sessionSnapshot = {
+      sessionId: SESSION_ID,
+      sessionPath: join(fixture.activeDir, `${SESSION_ID}.jsonl`),
+      cwd: fixture.cwd,
+      isIdle: true,
+      isStreaming: false,
+      messages: [],
+    } as never;
+
+    expect(await fixture.factory.listSessions()).toEqual([]);
+  });
+
+  it("promotes a live background Session by file id when the snapshot path is missing", async () => {
+    const fixture = createFixture();
+    const sessionPath = join(fixture.activeDir, `${SESSION_ID}.jsonl`);
+    const runtime = {
+      sessionId: SESSION_ID,
+      sessionRevision: 3,
+      sessionSnapshot: { sessionId: SESSION_ID, revision: 3 },
+    };
+    fixture.graph.backgroundSessions.set(SESSION_ID, runtime as never);
+    const promoted = { sessionId: SESSION_ID, revision: 4, sessionPath };
+    const promote = vi
+      .spyOn(fixture.factory, "promoteBackgroundRuntime")
+      .mockResolvedValue(promoted as never);
+
+    const result = await fixture.factory.openSession("open-by-id", sessionPath);
+
+    expect(promote).toHaveBeenCalledWith(fixture.graph, runtime);
+    expect(result).toEqual(promoted);
+  });
+
+  it("promotes a live background Session before the JSONL file exists", async () => {
+    const fixture = createFixture();
+    const sessionPath = join(fixture.activeDir, `${SESSION_ID}.jsonl`);
+    const runtime = {
+      sessionId: SESSION_ID,
+      sessionRevision: 3,
+      sessionSnapshot: { sessionId: SESSION_ID, sessionPath, revision: 3 },
+    };
+    fixture.graph.backgroundSessions.set(SESSION_ID, runtime as never);
+    const promoted = { sessionId: SESSION_ID, revision: 4, sessionPath };
+    const promote = vi
+      .spyOn(fixture.factory, "promoteBackgroundRuntime")
+      .mockResolvedValue(promoted as never);
+
+    const result = await fixture.factory.openSession("open-unpersisted", sessionPath);
+
+    expect(existsSync(sessionPath)).toBe(false);
+    expect(promote).toHaveBeenCalledWith(fixture.graph, runtime);
+    expect(result).toEqual(promoted);
+  });
+
+  it("returns the active Session when the file id matches a different path", async () => {
+    const fixture = createFixture();
+    const sessionPath = join(fixture.activeDir, `${SESSION_ID}.jsonl`);
+    const snapshot = {
+      sessionId: SESSION_ID,
+      sessionPath: join(fixture.activeDir, "legacy-name.jsonl"),
+      revision: 2,
+    };
+    fixture.graph.sessionSnapshot = snapshot as never;
+
+    const result = await fixture.factory.openSession("open-current-id", sessionPath);
+
+    expect(result).toEqual(snapshot);
+  });
+
+  it("still rejects a path that is neither listed nor a live Runtime", async () => {
+    const fixture = createFixture();
+    const sessionPath = join(fixture.activeDir, `${SESSION_ID}.jsonl`);
+
+    const result = await fixture.factory.openSession("open-missing", sessionPath);
+
+    expect(result).toMatchObject({
+      error: { code: "SESSION_NOT_FOUND" },
+    });
   });
 
   it("rejects forged paths and Sessions owned by a Runtime", async () => {

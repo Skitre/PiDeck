@@ -22,7 +22,11 @@ import { type GraphOperationKind } from "./locks.js";
 import { extractLatestAssistantText, generateRefinedSessionTitle } from "./session-title.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import type { ManagedSessionInfo, WorkspaceGraph } from "./workspace-graph-types.js";
-import { captureActiveSessionState, commitActiveSessionState } from "./session-runtime-cache.js";
+import {
+  captureActiveSessionState,
+  commitActiveSessionState,
+  MAX_LIVE_SESSIONS,
+} from "./session-runtime-cache.js";
 import { sessionStorageDirs as resolveSessionStorageDirs } from "./session-storage.js";
 import { withoutImplicitPackageInstall } from "./offline-package-resolution.js";
 import { createReadAttachmentTool } from "./attachment-tool.js";
@@ -30,6 +34,48 @@ import { createHostAgentSession } from "./agent-session-factory.js";
 
 function sessionStorageDirs(factory: WorkspaceGraphFactory, g: WorkspaceGraph) {
   return resolveSessionStorageDirs(factory.deps.agentDir, g.canonicalCwd);
+}
+
+const SESSION_FILE_ID = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
+
+function sessionIdFromSessionPath(sessionPath: string): string | undefined {
+  const match = basename(sessionPath).match(SESSION_FILE_ID);
+  return match?.[1];
+}
+
+function findRetainedRuntime(
+  factory: WorkspaceGraphFactory,
+  graph: WorkspaceGraph,
+  sessionPath: string,
+) {
+  const byPath = [...graph.backgroundSessions.values()].find((runtime) =>
+    factory.sessionPathsEqual(runtime.sessionSnapshot.sessionPath, sessionPath),
+  );
+  if (byPath) return byPath;
+  const sessionId = sessionIdFromSessionPath(sessionPath);
+  return sessionId ? graph.backgroundSessions.get(sessionId) : undefined;
+}
+
+function isCurrentSessionPath(
+  factory: WorkspaceGraphFactory,
+  graph: WorkspaceGraph,
+  sessionPath: string,
+): boolean {
+  const snapshot = graph.sessionSnapshot;
+  if (!snapshot) return false;
+  if (factory.sessionPathsEqual(snapshot.sessionPath, sessionPath)) return true;
+  const sessionId = sessionIdFromSessionPath(sessionPath);
+  return Boolean(sessionId && snapshot.sessionId === sessionId);
+}
+
+function sessionLimitError(): { error: HostError } {
+  return {
+    error: createHostError(
+      "SESSION_LIMIT",
+      `This workspace already has ${MAX_LIVE_SESSIONS} live sessions; stop one before opening another`,
+      { retryable: false, details: { maxLiveSessions: MAX_LIVE_SESSIONS } },
+    ),
+  };
 }
 
 async function listSessionFiles(
@@ -43,6 +89,66 @@ async function listSessionFiles(
   return sessions.map((session) => ({ ...session, archived }));
 }
 
+function sessionHasStarted(snapshot: SessionSnapshot): boolean {
+  return (
+    snapshot.messages.length > 0 ||
+    !snapshot.isIdle ||
+    snapshot.isStreaming ||
+    snapshot.isCompacting ||
+    snapshot.isRetrying
+  );
+}
+
+function listEntryFromSnapshot(snapshot: SessionSnapshot): ManagedSessionInfo | null {
+  if (!snapshot.sessionPath || !sessionHasStarted(snapshot)) return null;
+  return {
+    id: snapshot.sessionId,
+    path: snapshot.sessionPath,
+    cwd: snapshot.cwd,
+    modified: new Date(),
+    messageCount: snapshot.messages.length,
+    archived: false,
+    ...(snapshot.name ? { name: snapshot.name } : {}),
+  } as ManagedSessionInfo;
+}
+
+function collectStartedLiveSessions(graph: WorkspaceGraph): ManagedSessionInfo[] {
+  const entries: ManagedSessionInfo[] = [];
+  if (graph.sessionSnapshot) {
+    const entry = listEntryFromSnapshot(graph.sessionSnapshot);
+    if (entry) entries.push(entry);
+  }
+  for (const runtime of graph.backgroundSessions.values()) {
+    const entry = listEntryFromSnapshot(runtime.sessionSnapshot);
+    if (entry) entries.push(entry);
+  }
+  return entries;
+}
+
+function mergeStartedLiveSessions(
+  factory: WorkspaceGraphFactory,
+  disk: ManagedSessionInfo[],
+  live: ManagedSessionInfo[],
+): ManagedSessionInfo[] {
+  const merged = [...disk];
+  for (const entry of live) {
+    const index = merged.findIndex(
+      (item) => item.id === entry.id || factory.sessionPathsEqual(item.path, entry.path),
+    );
+    if (index === -1) {
+      merged.push(entry);
+      continue;
+    }
+    const existing = merged[index]!;
+    merged[index] = {
+      ...existing,
+      ...(entry.name ? { name: entry.name } : {}),
+      messageCount: Math.max(existing.messageCount ?? 0, entry.messageCount ?? 0),
+    };
+  }
+  return merged.sort((left, right) => right.modified.getTime() - left.modified.getTime());
+}
+
 export async function listSessions(factory: WorkspaceGraphFactory): Promise<ManagedSessionInfo[]> {
   const g = factory.graph;
   if (!g || !g.servicesReady) return [];
@@ -50,9 +156,7 @@ export async function listSessions(factory: WorkspaceGraphFactory): Promise<Mana
     listSessionFiles(factory, g, false),
     listSessionFiles(factory, g, true),
   ]);
-  return [...active, ...archived].sort(
-    (left, right) => right.modified.getTime() - left.modified.getTime(),
-  );
+  return mergeStartedLiveSessions(factory, [...active, ...archived], collectStartedLiveSessions(g));
 }
 
 async function withSessionFileMutation<T>(
@@ -313,29 +417,50 @@ export function setActiveSessionName(
   factory: WorkspaceGraphFactory,
   name: string,
 ): SessionSnapshot | null {
+  const g = factory.graph;
+  if (!g?.agentSession) return null;
+  return setSessionRuntimeName(factory, g.agentSession, name);
+}
+
+/** Write a Session name onto the foreground or a retained background runtime. */
+export function setSessionRuntimeName(
+  factory: WorkspaceGraphFactory,
+  session: AgentSession,
+  name: string,
+): SessionSnapshot | null {
   const server = factory.server;
   const g = factory.graph;
-  if (!server || !g?.agentSession || !g.sessionManager) return null;
+  const runtime = factory.findRuntimeForSession(session);
+  if (!server || !g || !runtime) return null;
 
-  g.agentSession.setSessionName(name);
-  if (g.sessionSnapshot?.name === g.agentSession.sessionName) {
-    return g.sessionSnapshot;
-  }
-  g.sessionSnapshot = buildSessionSnapshot({
-    session: g.agentSession,
-    sessionManager: g.sessionManager,
+  session.setSessionName(name);
+  const snapshot = buildSessionSnapshot({
+    session,
+    sessionManager: runtime.sessionManager,
     cwd: g.canonicalCwd,
-    sessionId: server.identity.sessionId ?? "",
-    revision: server.identity.sessionRevision,
+    sessionId: runtime.identity.sessionId ?? "",
+    revision: runtime.identity.sessionRevision,
     workspaceId: g.workspaceId,
-    toolRevision: g.toolRevision,
+    toolRevision: runtime.toolRevision,
   });
-  server.emit("session.infoChanged", {
-    sessionId: g.sessionSnapshot.sessionId,
+  if (runtime.isActive) {
+    if (g.sessionSnapshot?.name === session.sessionName) {
+      return g.sessionSnapshot;
+    }
+    g.sessionSnapshot = snapshot;
+    server.emit("session.infoChanged", {
+      sessionId: snapshot.sessionId,
+      name,
+    });
+    server.emit("session.snapshot", snapshot);
+    return snapshot;
+  }
+  if (runtime.background) runtime.background.sessionSnapshot = snapshot;
+  server.emitForIdentity(runtime.identity, "session.infoChanged", {
+    sessionId: snapshot.sessionId,
     name,
   });
-  server.emit("session.snapshot", g.sessionSnapshot);
-  return g.sessionSnapshot;
+  return snapshot;
 }
 
 export async function refineActiveSessionName(
@@ -348,16 +473,19 @@ export async function refineActiveSessionName(
   },
 ): Promise<void> {
   const initialGraph = factory.graph;
+  const initialRuntime = factory.findRuntimeForSession(args.session);
   if (
     !initialGraph ||
-    initialGraph.agentSession !== args.session ||
+    !initialRuntime ||
+    initialRuntime.identity.sessionId !== args.sessionId ||
     args.session.sessionName !== args.provisionalTitle ||
     !args.session.model
   ) {
     return;
   }
 
-  let refinedTitle: string;
+  factory.markTitleRefine(args.session, true);
+  let refinedTitle: string | undefined;
   try {
     refinedTitle = await generateRefinedSessionTitle({
       model: args.session.model,
@@ -369,25 +497,30 @@ export async function refineActiveSessionName(
     logger.warn("session title refinement failed", {
       error: err instanceof Error ? err.message : String(err),
     });
-    return;
+  } finally {
+    factory.markTitleRefine(args.session, false);
   }
 
   const server = factory.server;
   const currentGraph = factory.graph;
-  if (
-    !server ||
-    currentGraph !== initialGraph ||
-    currentGraph.agentSession !== args.session ||
-    server.identity.sessionId !== args.sessionId ||
-    args.session.sessionName !== args.provisionalTitle ||
-    refinedTitle === args.provisionalTitle ||
-    !args.session.isIdle ||
-    factory.getSessionOperationLock(args.session).isHeld() ||
-    server.serviceGraphLock.isHeld()
-  ) {
-    return;
+  const currentRuntime = factory.findRuntimeForSession(args.session);
+  const canApplyRefinedTitle =
+    Boolean(refinedTitle) &&
+    Boolean(server) &&
+    currentGraph === initialGraph &&
+    Boolean(currentRuntime) &&
+    currentRuntime!.identity.sessionId === args.sessionId &&
+    args.session.sessionName === args.provisionalTitle &&
+    refinedTitle !== args.provisionalTitle &&
+    args.session.isIdle &&
+    !factory.getSessionOperationLock(args.session).isHeld() &&
+    !server!.serviceGraphLock.isHeld();
+  if (canApplyRefinedTitle && refinedTitle) {
+    setSessionRuntimeName(factory, args.session, refinedTitle);
   }
-  setActiveSessionName(factory, refinedTitle);
+  if (currentGraph && currentRuntime?.background && args.session.isIdle) {
+    void factory.disposeSettledBackgroundRuntime(currentGraph, currentRuntime.background);
+  }
 }
 
 async function createSessionResourceLoader(
@@ -497,6 +630,10 @@ export async function createSession(
         });
         return sessionSnapshot;
       }
+    }
+
+    if (factory.wouldExceedLiveSessionLimit()) {
+      return sessionLimitError();
     }
 
     const startedAt = Date.now();
@@ -776,9 +913,7 @@ export async function openSession(
 
   try {
     operation.signal.throwIfAborted();
-    const isCurrentSession = Boolean(
-      g.sessionSnapshot && factory.sessionPathsEqual(g.sessionSnapshot.sessionPath, sessionPath),
-    );
+    const isCurrentSession = isCurrentSessionPath(factory, g, sessionPath);
     if (options.forceReload && !isCurrentSession) {
       return {
         error: createHostError("SESSION_NOT_FOUND", "Only the active Session can be reloaded"),
@@ -802,9 +937,17 @@ export async function openSession(
       return g.sessionSnapshot!;
     }
 
-    // Ensure session belongs to current cwd
+    // Live background runtimes belong to this workspace even before the JSONL
+    // file exists. SessionManager.list only sees persisted files, so promote
+    // first or a still-running new conversation cannot be switched back to.
+    const retained = findRetainedRuntime(factory, g, sessionPath);
+    if (retained) {
+      operation.signal.throwIfAborted();
+      return await factory.promoteBackgroundRuntime(g, retained);
+    }
+
     const listed = await SessionManager.list(g.canonicalCwd);
-    const match = listed.find((s) => s.path === sessionPath);
+    const match = listed.find((s) => factory.sessionPathsEqual(s.path, sessionPath));
     if (!match) {
       return {
         error: createHostError(
@@ -813,13 +956,8 @@ export async function openSession(
         ),
       };
     }
-
-    const retained = [...g.backgroundSessions.values()].find((runtime) =>
-      factory.sessionPathsEqual(runtime.sessionSnapshot.sessionPath, sessionPath),
-    );
-    if (retained) {
-      operation.signal.throwIfAborted();
-      return await factory.promoteBackgroundRuntime(g, retained);
+    if (factory.wouldExceedLiveSessionLimit()) {
+      return sessionLimitError();
     }
     const startedAt = Date.now();
     const stepTimings: Record<string, number> = {};

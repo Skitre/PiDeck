@@ -31,10 +31,23 @@ import {
   replaceSessionCatalog as replaceCatalog,
   setSessionRuntimeState as setCatalogRuntimeState,
   updateSessionCatalogInfo as updateCatalogInfo,
+  isLiveCatalogRuntime,
+  isStaleForegroundSnapshot,
+  shouldProjectSnapshotIntoCatalog,
   upsertSessionSnapshot as upsertCatalogSnapshot,
   type SessionCatalogState,
   type SessionRuntimeState,
 } from "./session-catalog";
+import {
+  adoptLiveTranscriptDraft,
+  applyAgentEventBatchToTranscript,
+  applyAgentEventToTranscript,
+  dropTranscriptDraft,
+  isLiveTranscriptSession,
+  overlayLiveTranscriptMessages,
+  parkTranscriptDraft,
+} from "../chat/transcript-drafts";
+import type { AgentEventEnvelope, TimedAgentEventEnvelope } from "../chat/transcript-reducer";
 import { sidebarPref } from "../sidebar-prefs";
 import type { AppUpdate } from "../updater";
 import {
@@ -179,6 +192,7 @@ export type AppState = EpochState & {
   thinkingLevels: string[];
   providerConfigRevision: number;
   sessionCatalog: SessionCatalogState;
+  transcriptDrafts: Record<string, SessionSnapshot>;
   draftTexts: Record<DraftKey, string>;
   draftTargets: Record<DraftKey, DraftTarget>;
   draftEditVersions: Record<DraftKey, number>;
@@ -205,6 +219,13 @@ export type AppState = EpochState & {
   clearWorkspaceEpoch: () => void;
   setWorkspace: (ws: WorkspaceSnapshot | null) => void;
   applySessionSnapshot: (s: SessionSnapshot | null) => void;
+  applyAgentTranscriptEvent: (
+    sessionId: string,
+    payload: AgentEventEnvelope,
+    sessionRevision?: number,
+    eventTime?: number,
+  ) => void;
+  applyAgentTranscriptEventBatch: (sessionId: string, events: TimedAgentEventEnvelope[]) => void;
   setSession: (s: SessionSnapshot | null) => void;
   applyPackageSnapshot: (p: PackageSnapshot | null) => void;
   applyPackageMutationResult: (result: PackageMutationResult) => void;
@@ -240,6 +261,7 @@ export type AppState = EpochState & {
     state: SessionRuntimeState,
     error?: string,
     updatedAt?: number,
+    sessionRevision?: number,
   ) => void;
   setDraftTextLocal: (target: DraftTarget, text: string) => number;
   mergeHydratedDrafts: (
@@ -317,6 +339,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   thinkingLevels: [],
   providerConfigRevision: 0,
   sessionCatalog: emptySessionCatalog(),
+  transcriptDrafts: {},
   draftTexts: {},
   draftTargets: {},
   draftEditVersions: {},
@@ -437,6 +460,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       thinkingLevels: [],
       providerConfigRevision: 0,
       sessionCatalog: emptySessionCatalog(),
+      transcriptDrafts: {},
       hostFatal: null,
       desynchronized: false,
       desyncReason: undefined,
@@ -459,16 +483,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   applyWorkspaceSnapshot: (workspace) => {
-    const next = epochApplyWorkspace(epochSlice(get()), workspace);
-    const previousWorkspace = get().workspace;
-    const clearedSession = Boolean(
+    const current = get();
+    const next = epochApplyWorkspace(epochSlice(current), workspace);
+    const previousWorkspace = current.workspace;
+    const workspaceChanged = Boolean(previousWorkspace && previousWorkspace.id !== workspace.id);
+    const generationChanged = Boolean(
       previousWorkspace &&
       (previousWorkspace.id !== workspace.id || previousWorkspace.revision !== workspace.revision),
     );
+    const transcriptDrafts = generationChanged
+      ? parkTranscriptDraft(current.transcriptDrafts, current.session)
+      : current.transcriptDrafts;
     set({
       ...next,
-      ...(clearedSession ? { sessionCatalog: emptySessionCatalog() } : {}),
-      ...(clearedSession
+      transcriptDrafts,
+      ...(generationChanged ? { sessionCatalog: emptySessionCatalog() } : {}),
+      ...(workspaceChanged
         ? {
             extensionUiRequest: null,
             extensionUiQueue: [],
@@ -479,7 +509,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             collapsedExtensionWidgetKeys: {},
             extensionWidgetsOpen: false,
             lastExtensionWidgetAttentionRunId: null,
-            ...resetExtensionTerminal(get()),
+            ...resetExtensionTerminal(current),
             packageProgress: null,
             packageRetry: null,
             thinkingLevels: [],
@@ -493,6 +523,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       ...next,
       sessionCatalog: emptySessionCatalog(),
+      transcriptDrafts: {},
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionDecisionGroups: {},
@@ -520,30 +551,57 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   applySessionSnapshot: (session) => {
     const current = get();
+    if (isStaleForegroundSnapshot(current.session, session)) return;
     const previousSession = current.session;
-    const next = epochApplySession(epochSlice(current), session);
-    const baseCatalog =
-      previousSession && previousSession.sessionId !== session?.sessionId
-        ? setCatalogRuntimeState(current.sessionCatalog, previousSession.sessionId, "inactive")
-        : current.sessionCatalog;
+    let transcriptDrafts = current.transcriptDrafts;
+    let adopted = session;
+    if (previousSession && previousSession.sessionId !== session?.sessionId) {
+      transcriptDrafts = parkTranscriptDraft(transcriptDrafts, previousSession);
+    }
+    if (session && previousSession?.sessionId !== session.sessionId) {
+      const parked = adoptLiveTranscriptDraft(transcriptDrafts, session);
+      adopted = parked.session;
+      transcriptDrafts = parked.drafts;
+    } else if (session && previousSession) {
+      adopted = overlayLiveTranscriptMessages(session, previousSession);
+      if (!isLiveTranscriptSession(session)) {
+        transcriptDrafts = dropTranscriptDraft(transcriptDrafts, session.sessionId);
+      }
+    }
+    const next = epochApplySession(epochSlice(current), adopted);
+    let baseCatalog = current.sessionCatalog;
+    if (previousSession && previousSession.sessionId !== session?.sessionId) {
+      if (
+        current.workspace &&
+        shouldProjectSnapshotIntoCatalog(baseCatalog, current.workspace, previousSession)
+      ) {
+        baseCatalog = upsertCatalogSnapshot(baseCatalog, current.workspace.id, previousSession);
+      }
+      const previousRuntime = baseCatalog.entries[previousSession.sessionId]?.runtimeState;
+      const previousStillLive = isLiveCatalogRuntime(previousRuntime) || !previousSession.isIdle;
+      if (!previousStillLive) {
+        baseCatalog = setCatalogRuntimeState(baseCatalog, previousSession.sessionId, "inactive");
+      }
+    }
     const sessionCatalog =
-      session && current.workspace
-        ? upsertCatalogSnapshot(baseCatalog, current.workspace.id, session)
+      adopted && current.workspace
+        ? upsertCatalogSnapshot(baseCatalog, current.workspace.id, adopted)
         : baseCatalog;
     const generationChanged = Boolean(
       previousSession &&
-      (!session ||
-        previousSession.sessionId !== session.sessionId ||
-        previousSession.revision !== session.revision),
+      (!adopted ||
+        previousSession.sessionId !== adopted.sessionId ||
+        previousSession.revision !== adopted.revision),
     );
     const extensionUi = alignExtensionUiToSession(
       current.extensionUiRequest,
       current.extensionUiQueue,
-      session?.sessionId ?? null,
+      adopted?.sessionId ?? null,
     );
     set({
       ...next,
       sessionCatalog,
+      transcriptDrafts,
       ...extensionUi,
       ...(generationChanged
         ? {
@@ -559,6 +617,90 @@ export const useAppStore = create<AppState>((set, get) => ({
             thinkingLevels: [],
           }
         : {}),
+    });
+  },
+
+  applyAgentTranscriptEvent: (sessionId, payload, sessionRevision, eventTime) => {
+    const current = get();
+    const foreground = current.session;
+    if (foreground?.sessionId === sessionId) {
+      const next = applyAgentEventToTranscript(foreground, payload, eventTime, sessionRevision);
+      if (!next) return;
+      const transcriptDrafts = isLiveTranscriptSession(next)
+        ? current.transcriptDrafts
+        : dropTranscriptDraft(current.transcriptDrafts, sessionId);
+      const sessionCatalog = current.workspace
+        ? upsertCatalogSnapshot(current.sessionCatalog, current.workspace.id, next)
+        : current.sessionCatalog;
+      if (sessionRevision !== undefined && sessionRevision > foreground.revision) {
+        const epoch = epochApplySession(epochSlice(current), next);
+        set({ ...epoch, transcriptDrafts, sessionCatalog });
+        return;
+      }
+      set({ session: next, tools: next.tools ?? current.tools, transcriptDrafts, sessionCatalog });
+      return;
+    }
+    const draft = current.transcriptDrafts[sessionId];
+    if (!draft) return;
+    const next = applyAgentEventToTranscript(draft, payload, eventTime, sessionRevision);
+    if (!next) return;
+    set({
+      transcriptDrafts: isLiveTranscriptSession(next)
+        ? { ...current.transcriptDrafts, [sessionId]: next }
+        : dropTranscriptDraft(current.transcriptDrafts, sessionId),
+      sessionCatalog:
+        current.workspace &&
+        shouldProjectSnapshotIntoCatalog(current.sessionCatalog, current.workspace, next)
+          ? upsertCatalogSnapshot(current.sessionCatalog, current.workspace.id, next)
+          : current.sessionCatalog,
+    });
+  },
+
+  applyAgentTranscriptEventBatch: (sessionId, events) => {
+    if (events.length === 0) return;
+    const current = get();
+    const sessionRevision = events.reduce(
+      (highest, event) =>
+        typeof event.sessionRevision === "number"
+          ? Math.max(highest, event.sessionRevision)
+          : highest,
+      0,
+    );
+    const foreground = current.session;
+    if (foreground?.sessionId === sessionId) {
+      const next = applyAgentEventBatchToTranscript(
+        foreground,
+        events,
+        sessionRevision || undefined,
+      );
+      if (!next) return;
+      const transcriptDrafts = isLiveTranscriptSession(next)
+        ? current.transcriptDrafts
+        : dropTranscriptDraft(current.transcriptDrafts, sessionId);
+      const sessionCatalog = current.workspace
+        ? upsertCatalogSnapshot(current.sessionCatalog, current.workspace.id, next)
+        : current.sessionCatalog;
+      if (sessionRevision > foreground.revision) {
+        const epoch = epochApplySession(epochSlice(current), next);
+        set({ ...epoch, transcriptDrafts, sessionCatalog });
+        return;
+      }
+      set({ session: next, tools: next.tools ?? current.tools, transcriptDrafts, sessionCatalog });
+      return;
+    }
+    const draft = current.transcriptDrafts[sessionId];
+    if (!draft) return;
+    const next = applyAgentEventBatchToTranscript(draft, events, sessionRevision || undefined);
+    if (!next) return;
+    set({
+      transcriptDrafts: isLiveTranscriptSession(next)
+        ? { ...current.transcriptDrafts, [sessionId]: next }
+        : dropTranscriptDraft(current.transcriptDrafts, sessionId),
+      sessionCatalog:
+        current.workspace &&
+        shouldProjectSnapshotIntoCatalog(current.sessionCatalog, current.workspace, next)
+          ? upsertCatalogSnapshot(current.sessionCatalog, current.workspace.id, next)
+          : current.sessionCatalog,
     });
   },
 
@@ -886,7 +1028,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       sessionCatalog: updateCatalogInfo(state.sessionCatalog, sessionId, name),
     })),
-  setSessionRuntimeState: (sessionId, runtimeState, error, updatedAt) =>
+  setSessionRuntimeState: (sessionId, runtimeState, error, updatedAt, sessionRevision) =>
     set((state) => ({
       sessionCatalog: setCatalogRuntimeState(
         state.sessionCatalog,
@@ -894,6 +1036,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         runtimeState,
         error,
         updatedAt,
+        sessionRevision,
       ),
     })),
   setDraftTextLocal: (target, text) => {
@@ -1012,6 +1155,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           : snap.session !== undefined
             ? (snap.session?.tools ?? null)
             : current.tools,
+      transcriptDrafts: {},
       sessionCatalog:
         workspace && session
           ? upsertCatalogSnapshot(current.sessionCatalog, workspace.id, session)
@@ -1055,6 +1199,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       thinkingLevels: [],
       providerConfigRevision: 0,
       sessionCatalog: emptySessionCatalog(),
+      transcriptDrafts: {},
       hostFatal: reason,
       rehydrating: false,
     });

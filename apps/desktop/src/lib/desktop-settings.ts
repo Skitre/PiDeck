@@ -1,4 +1,5 @@
 import {
+  BUSY_SEND_BEHAVIORS,
   DESKTOP_INTERFACE_DENSITIES,
   DESKTOP_LANGUAGES,
   DESKTOP_THEME_FAMILIES,
@@ -42,6 +43,7 @@ const DESKTOP_SETTINGS_KEYS = new Set([
   "lastSessionPath",
   "agentDir",
   "autoRestartHostOnce",
+  "busySendBehavior",
   "extensionDecisionPresentation",
   "terminalProfile",
   "language",
@@ -76,6 +78,12 @@ function assertDesktopSettingsUpdate(patch: DesktopSettingsUpdate): void {
   }
   if (values.themeFamily !== undefined && !isOneOf(values.themeFamily, DESKTOP_THEME_FAMILIES)) {
     throw new Error("Invalid desktop theme family");
+  }
+  if (
+    values.busySendBehavior !== undefined &&
+    !isOneOf(values.busySendBehavior, BUSY_SEND_BEHAVIORS)
+  ) {
+    throw new Error("Invalid busy send behavior");
   }
   if (
     values.extensionDecisionPresentation !== undefined &&

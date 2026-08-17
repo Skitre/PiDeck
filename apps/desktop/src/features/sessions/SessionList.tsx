@@ -85,6 +85,7 @@ export function SessionList({
   const rehydrating = useAppStore((s) => s.rehydrating);
   const desynchronized = useAppStore((s) => s.desynchronized);
   const hostFatal = useAppStore((s) => s.hostFatal);
+  const workspaceSwitchTarget = useAppStore((s) => s.workspaceSwitchTarget);
   const sessionCatalog = useAppStore((s) => s.sessionCatalog);
   const extensionUiRequest = useAppStore((s) => s.extensionUiRequest);
   const extensionUiQueue = useAppStore((s) => s.extensionUiQueue);
@@ -107,7 +108,12 @@ export function SessionList({
   const [pinnedSessionIds, setPinnedSessionIds] = useState<string[]>(() =>
     readPinnedSessionIds(useAppStore.getState().workspace?.id),
   );
-  const sessionOpenBlocked = connecting || rehydrating || desynchronized || Boolean(hostFatal);
+  const sessionOpenBlocked =
+    connecting ||
+    rehydrating ||
+    desynchronized ||
+    Boolean(hostFatal) ||
+    workspaceSwitchTarget !== null;
   const sessionMutationBlocked = sessionMutationPending || sessionOpenPending || sessionOpenBlocked;
   const refreshRequest = useRef(0);
   const mutationRequest = useRef(0);
@@ -139,7 +145,12 @@ export function SessionList({
       clearSessionCatalog();
       return;
     }
-    if (currentAtStart.connecting || currentAtStart.rehydrating || currentAtStart.desynchronized) {
+    if (
+      currentAtStart.connecting ||
+      currentAtStart.rehydrating ||
+      currentAtStart.desynchronized ||
+      currentAtStart.workspaceSwitchTarget
+    ) {
       refreshRequest.current += 1;
       return;
     }
@@ -183,6 +194,7 @@ export function SessionList({
     workspace?.id,
     workspace?.revision,
     workspace?.servicesReady,
+    workspaceSwitchTarget,
   ]);
 
   useEffect(() => {
@@ -273,7 +285,12 @@ export function SessionList({
       return false;
     }
     if (!res.ok) {
-      pushNotification(res.error?.message ?? t("notifCreateSessionFailed"), "error");
+      pushNotification(
+        res.error?.code === "SESSION_LIMIT"
+          ? t("sessionsLimitReached")
+          : (res.error?.message ?? t("notifCreateSessionFailed")),
+        "error",
+      );
       return false;
     }
     // Reused-pristine creates return the already-active snapshot, and normal
@@ -358,11 +375,12 @@ export function SessionList({
         },
       );
       if (!res) return;
+      // The Host session.snapshot advances session generation before this RPC
+      // resolves. Requiring the captured session identity would drop the only
+      // apply when that event is late, so the click appears to do nothing.
       if (
         request !== mutationRequest.current ||
-        !isCurrentRequestGeneration(useAppStore.getState().host, generation, {
-          session: true,
-        })
+        !isCurrentRequestGeneration(useAppStore.getState().host, generation)
       ) {
         return;
       }
@@ -376,7 +394,9 @@ export function SessionList({
           );
         }
         pushNotification(
-          res.error?.message ?? t("notifOpenSessionFailed"),
+          res.error?.code === "SESSION_LIMIT"
+            ? t("sessionsLimitReached")
+            : (res.error?.message ?? t("notifOpenSessionFailed")),
           res.error?.retryable === true ? "warning" : "error",
         );
         return;
@@ -1007,7 +1027,10 @@ export function SessionList({
                         title={
                           item.runtimeState === "error" && item.lastError
                             ? `${sessionDisplayName(item, t("sessionsUntitled"))} — ${item.lastError}`
-                            : sessionDisplayName(item, t("sessionsUntitled"))
+                            : !active &&
+                                (item.runtimeState === "running" || item.runtimeState === "queued")
+                              ? `${sessionDisplayName(item, t("sessionsUntitled"))} — ${t("sessionsRunningInBackground")}`
+                              : sessionDisplayName(item, t("sessionsUntitled"))
                         }
                       >
                         <div className="flex min-w-0 items-center gap-1.5">
@@ -1198,54 +1221,57 @@ export function SessionList({
           {workspace?.servicesReady && allItems.length > 0 && visibleItems.length === 0 && (
             <p className="px-2 py-3 text-center text-xs text-muted">{t("sessionsNoMatch")}</p>
           )}
-          {confirmAction && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-              <div
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="session-delete-title"
-                className="theme-floating-surface w-full max-w-sm rounded-lg border border-border bg-surface-raised p-5 shadow-xl"
-              >
-                <h2 id="session-delete-title" className="text-base font-semibold">
-                  {confirmAction.kind === "delete"
-                    ? t("sessionsDeleteConfirmTitle")
-                    : t("sessionsCleanupConfirmTitle")}
-                </h2>
-                <p className="mt-2 text-sm text-muted">
-                  {confirmAction.kind === "delete"
-                    ? t("sessionsDeleteConfirmBody", {
-                        name: sessionDisplayName(confirmAction.item, t("sessionsUntitled")),
-                      })
-                    : t("sessionsCleanupConfirmBody", { count: confirmAction.count })}
-                </p>
-                <div className="mt-4 flex justify-end gap-2">
-                  <button
-                    autoFocus
-                    type="button"
-                    className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-overlay"
-                    onClick={() => setConfirmAction(null)}
-                    disabled={sessionMutationBlocked}
-                  >
-                    {t("commonCancel")}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md bg-danger px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
-                    onClick={() => {
-                      if (confirmAction.kind === "delete") {
-                        void deleteSessionPermanently(confirmAction.item);
-                      } else {
-                        void cleanupArchivedSessions();
-                      }
-                    }}
-                    disabled={sessionMutationBlocked}
-                  >
-                    {t("sessionsDeletePermanently")}
-                  </button>
+          {confirmAction &&
+            createPortal(
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="session-delete-title"
+                  data-session-confirm
+                  className="theme-floating-surface w-full max-w-sm rounded-lg border border-border bg-surface-raised p-5 shadow-xl"
+                >
+                  <h2 id="session-delete-title" className="text-base font-semibold">
+                    {confirmAction.kind === "delete"
+                      ? t("sessionsDeleteConfirmTitle")
+                      : t("sessionsCleanupConfirmTitle")}
+                  </h2>
+                  <p className="mt-2 text-sm text-muted">
+                    {confirmAction.kind === "delete"
+                      ? t("sessionsDeleteConfirmBody", {
+                          name: sessionDisplayName(confirmAction.item, t("sessionsUntitled")),
+                        })
+                      : t("sessionsCleanupConfirmBody", { count: confirmAction.count })}
+                  </p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      autoFocus
+                      type="button"
+                      className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-overlay"
+                      onClick={() => setConfirmAction(null)}
+                      disabled={sessionMutationBlocked}
+                    >
+                      {t("commonCancel")}
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-md bg-danger px-3 py-1.5 text-sm text-white hover:opacity-90 disabled:opacity-50"
+                      onClick={() => {
+                        if (confirmAction.kind === "delete") {
+                          void deleteSessionPermanently(confirmAction.item);
+                        } else {
+                          void cleanupArchivedSessions();
+                        }
+                      }}
+                      disabled={sessionMutationBlocked}
+                    >
+                      {t("sessionsDeletePermanently")}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </div>
-          )}
+              </div>,
+              document.body,
+            )}
         </>
       </CollapsibleRegion>
     </div>

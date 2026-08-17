@@ -11,7 +11,11 @@ import {
   ServerCog,
   Settings2,
 } from "lucide-react";
-import type { ExtensionDecisionPresentation, TerminalProfileId } from "@pideck/protocol";
+import type {
+  BusySendBehavior,
+  ExtensionDecisionPresentation,
+  TerminalProfileId,
+} from "@pideck/protocol";
 import { Dialog, secondaryButton } from "../../components/Dialog";
 import { SectionHeader } from "../../components/SectionHeader";
 import { Switch } from "../../components/Switch";
@@ -183,6 +187,39 @@ function GeneralSettings() {
                   label={t("generalAutoRestart")}
                   onChange={(next) => void patchDesktop({ autoRestartHostOnce: next })}
                 />
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-2 text-sm font-medium text-muted">{t("generalBusySendGroup")}</h2>
+            <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor="busy-send-behavior" className="min-w-0 text-sm">
+                  <span className="block">{t("generalBusySend")}</span>
+                  <span id="busy-send-behavior-help" className="block text-xs text-muted">
+                    {t("generalBusySendDesc")}
+                  </span>
+                </label>
+                <select
+                  id="busy-send-behavior"
+                  className="h-8 min-w-44 max-w-72 rounded-md border border-border bg-surface px-2 text-xs"
+                  aria-label={t("generalBusySend")}
+                  aria-describedby="busy-send-behavior-help"
+                  value={desktopSettings?.busySendBehavior ?? "followUp"}
+                  onChange={(event) =>
+                    void patchDesktop({
+                      busySendBehavior: event.target.value as BusySendBehavior,
+                    })
+                  }
+                >
+                  <option value="followUp">
+                    {t("generalBusySendFollowUp")} — {t("generalBusySendFollowUpDesc")}
+                  </option>
+                  <option value="steer">
+                    {t("generalBusySendSteer")} — {t("generalBusySendSteerDesc")}
+                  </option>
+                </select>
               </div>
             </div>
           </section>

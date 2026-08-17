@@ -308,6 +308,20 @@ describe("SettingsPage navigation guard", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("defaults busy send to follow-up and persists steer", async () => {
+    const user = userEvent.setup();
+    render(<SettingsPage initialSection="general" />);
+
+    const select = screen.getByLabelText("Send while running");
+    expect(select).toHaveValue("followUp");
+
+    await user.selectOptions(select, "steer");
+    await waitFor(() =>
+      expect(useAppStore.getState().desktopSettings?.busySendBehavior).toBe("steer"),
+    );
+    expect(select).toHaveValue("steer");
+  });
+
   it("synchronizes automatic presentation and offers one-click legacy rollback", async () => {
     const user = userEvent.setup();
     useAppStore.getState().setHost(CONNECTED_HOST);

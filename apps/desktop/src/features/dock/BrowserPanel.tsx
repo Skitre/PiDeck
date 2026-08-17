@@ -15,7 +15,56 @@ import { useT } from "../../lib/i18n/use-t";
 import { openSystemUrl } from "../../lib/open-system-url";
 import { useAppStore } from "../../lib/stores/app-store";
 
-type BrowserBounds = { x: number; y: number; width: number; height: number };
+type BrowserBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+};
+
+const FLOATING_FRAME_INSET_FALLBACK = 12;
+
+export function clipBrowserBounds(
+  bounds: BrowserBounds,
+  dock: { left: number; top: number; right: number; bottom: number } | null,
+  cornerInset: number,
+): BrowserBounds {
+  const box = dock ?? {
+    left: bounds.x,
+    top: bounds.y,
+    right: bounds.x + bounds.width,
+    bottom: bounds.y + bounds.height,
+  };
+  const inset = Math.max(0, cornerInset);
+  const left = Math.max(bounds.x, box.left);
+  const top = Math.max(bounds.y, box.top);
+  const right = Math.min(bounds.x + bounds.width, box.right - inset);
+  const bottom = Math.min(bounds.y + bounds.height, box.bottom - inset);
+  return {
+    x: left,
+    y: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+    devicePixelRatio: bounds.devicePixelRatio,
+  };
+}
+
+function dockBox(
+  element: HTMLElement,
+): { left: number; top: number; right: number; bottom: number } | null {
+  const dock = element.closest<HTMLElement>("[data-right-dock]");
+  if (!dock) return null;
+  const rect = dock.getBoundingClientRect();
+  return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+}
+
+function floatingCornerInset(): number {
+  const app = document.querySelector<HTMLElement>("[data-pideck-app]");
+  if (!app || app.getAttribute("data-window-frame") !== "floating") return 0;
+  const parsed = Number.parseFloat(getComputedStyle(app).getPropertyValue("--window-frame-radius"));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : FLOATING_FRAME_INSET_FALLBACK;
+}
 type BrowserSurfaceSnapshot = { surfaceId: string; url: string };
 type BrowserSurfaceEvent = {
   surfaceId: string;
@@ -40,9 +89,20 @@ export function normalizeBrowserInput(input: string): string {
 }
 
 function elementBounds(element: HTMLElement | null): BrowserBounds | null {
-  const rect = element?.getBoundingClientRect();
-  if (!rect || rect.width < 1 || rect.height < 1) return null;
-  return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  if (!element) return null;
+  const rect = element.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return null;
+  return clipBrowserBounds(
+    {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    },
+    dockBox(element),
+    floatingCornerInset(),
+  );
 }
 
 function isTauriRuntime(): boolean {
@@ -64,6 +124,7 @@ export function BrowserPanel({
 }) {
   const t = useT();
   const surfaceId = `dock-browser-${id}`;
+  const page = useAppStore((state) => state.page);
   const pushNotification = useAppStore((state) => state.pushNotification);
   const bodyRef = useRef<HTMLDivElement>(null);
   const createdRef = useRef(false);
@@ -77,7 +138,7 @@ export function BrowserPanel({
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nativeVisible = visible && !blocked;
+  const nativeVisible = visible && !blocked && page === "chat";
   onTitleRef.current = onTitle;
 
   useEffect(() => {
@@ -161,7 +222,7 @@ export function BrowserPanel({
       void ensureSurface();
       return;
     }
-    const key = [bounds.x, bounds.y, bounds.width, bounds.height]
+    const key = [bounds.x, bounds.y, bounds.width, bounds.height, bounds.devicePixelRatio]
       .map((value) => Math.round(value * 10) / 10)
       .join(":");
     if (key === lastBoundsRef.current) return;

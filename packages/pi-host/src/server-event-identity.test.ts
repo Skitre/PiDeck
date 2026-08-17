@@ -67,8 +67,29 @@ describe("PiHostServer.emitForIdentity", () => {
     expect(second.sequence).toBe(2);
   });
 
-  it("rejects identities from another Workspace epoch", () => {
+  it("drops a stale Host identity without throwing", () => {
     const host = server();
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((() => true) as typeof process.stdout.write);
+    expect(() =>
+      host.emitForIdentity(
+        { ...host.getIdentity(), hostInstanceId: "00000000-0000-4000-8000-000000000000" },
+        "agent.event",
+        {
+          runId: "55555555-5555-4555-8555-555555555555",
+          event: { type: "agent_start" },
+        },
+      ),
+    ).not.toThrow();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("drops identities from another Workspace epoch without throwing", () => {
+    const host = server();
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((() => true) as typeof process.stdout.write);
     expect(() =>
       host.emitForIdentity(
         { ...host.getIdentity(), workspaceRevision: 2 },
@@ -80,7 +101,74 @@ describe("PiHostServer.emitForIdentity", () => {
           updatedAt: 1,
         },
       ),
-    ).toThrow("stale Host or Workspace identity");
+    ).not.toThrow();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("emits parked Workspace agent events without matching the current Workspace", async () => {
+    const host = server();
+    const lines: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    const parked: HostIdentity = {
+      ...host.getIdentity(),
+      workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      workspaceRevision: 4,
+      sessionId: BACKGROUND_SESSION_ID,
+      sessionRevision: 3,
+    };
+
+    host.emitForIdentity(parked, "agent.event", {
+      runId: "55555555-5555-4555-8555-555555555555",
+      event: { type: "agent_start" },
+    });
+    host.emitForIdentity(parked, "session.runtimeChanged", {
+      sessionId: BACKGROUND_SESSION_ID,
+      sessionRevision: 3,
+      state: "running",
+      updatedAt: 1,
+    });
+    expect(() =>
+      host.emitForIdentity(parked, "session.snapshot", {
+        sessionId: BACKGROUND_SESSION_ID,
+        cwd: "C:/parked",
+        revision: 3,
+        isStreaming: true,
+        isIdle: false,
+        isCompacting: false,
+        isRetrying: false,
+        thinkingLevel: "off",
+        autoCompactionEnabled: true,
+        autoRetryEnabled: true,
+        steeringMode: "all",
+        followUpMode: "all",
+        pending: { revision: 0, steering: [], followUp: [] },
+        messages: [],
+        tools: {
+          revision: 1,
+          workspaceId: parked.workspaceId,
+          sessionId: BACKGROUND_SESSION_ID,
+          sessionRevision: 3,
+          tools: [],
+          active: [],
+        },
+      }),
+    ).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const parsed = lines.map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]).toMatchObject({
+      event: "agent.event",
+      workspaceId: parked.workspaceId,
+      sessionId: BACKGROUND_SESSION_ID,
+    });
+    expect(parsed[1]).toMatchObject({
+      event: "session.runtimeChanged",
+      workspaceId: parked.workspaceId,
+    });
   });
 });
 

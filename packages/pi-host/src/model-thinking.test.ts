@@ -60,7 +60,7 @@ describe("applyKnownThinkingProfiles", () => {
       minimal: "tiny",
     });
     expect(registry.find("test-profile", "glm-5.2")?.thinkingLevelMap).toEqual({
-      off: null,
+      off: "none",
       minimal: null,
       low: null,
       medium: null,

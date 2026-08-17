@@ -167,6 +167,94 @@ describe("atomic rehydrate replay", () => {
     expect(replayedEvents).toEqual([11]);
   });
 
+  it("replays Host entries and leaf even when messages already match the live draft", async () => {
+    let resolveResponse!: (response: unknown) => void;
+    const response = new Promise((resolve) => {
+      resolveResponse = resolve;
+    });
+    vi.spyOn(hostClient, "request").mockReturnValue(response as never);
+
+    const recoveryEvents = new RecoveryEventBuffer();
+    const requestRecovery = vi.fn();
+    const agentEventBuffer = { enqueue: vi.fn(), flush: vi.fn() };
+    const running = runFullRehydrate(HOST_ID, recoveryEvents, requestRecovery, agentEventBuffer);
+
+    const latestSession = session("streaming transcript");
+    latestSession.entries = [
+      {
+        id: "e-live",
+        parentId: null,
+        type: "message",
+        message: { role: "assistant", content: "streaming transcript" },
+      },
+      {
+        id: "e-tool",
+        parentId: "e-live",
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolCallId: "t1",
+          toolName: "search",
+          content: [{ type: "text", text: "ok" }],
+        },
+      },
+    ];
+    latestSession.leafId = "e-tool";
+    latestSession.extensionMessageRenders = {
+      "e-host": { version: 1, collapsed: ["new"], expanded: ["new"] },
+    };
+    const inFlightEvent = {
+      protocolVersion: 1,
+      hostInstanceId: HOST_ID,
+      workspaceId: WORKSPACE_ID,
+      workspaceRevision: 4,
+      sessionId: SESSION_ID,
+      sessionRevision: 6,
+      packageRevision: 3,
+      sequence: 11,
+      timestamp: 11,
+      event: "session.snapshot",
+      payload: latestSession,
+    } satisfies HostEventEnvelope<"session.snapshot">;
+    expect(recoveryEvents.capture(inFlightEvent)).toBe(true);
+
+    const staleSession = session("streaming transcript");
+    staleSession.entries = [
+      {
+        id: "e-live",
+        parentId: null,
+        type: "message",
+        message: { role: "assistant", content: "streaming transcript" },
+      },
+    ];
+    staleSession.leafId = "e-live";
+    const snapshot: RehydrateSnapshot = {
+      watermark: 10,
+      host: host(),
+      workspace: workspace(),
+      session: staleSession,
+      tools: staleSession.tools,
+      packages: {
+        revision: 3,
+        workspaceId: WORKSPACE_ID,
+        scope: "all",
+        configured: [],
+        resources: [],
+        updateCheck: { supported: false },
+        diagnostics: [],
+      },
+    };
+    resolveResponse({ ok: true, result: snapshot });
+    await expect(running).resolves.toBe(true);
+
+    expect(requestRecovery).not.toHaveBeenCalled();
+    expect(useAppStore.getState().session?.entries).toEqual(latestSession.entries);
+    expect(useAppStore.getState().session?.leafId).toBe("e-tool");
+    expect(useAppStore.getState().session?.extensionMessageRenders).toEqual(
+      latestSession.extensionMessageRenders,
+    );
+  });
+
   it("reports overflow as superseded so startup does not continue", async () => {
     const recoveryEvents = new RecoveryEventBuffer(0);
     const requestRecovery = vi.fn((reason: string) => {

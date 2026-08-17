@@ -144,6 +144,13 @@ export const en = {
   generalAutoRestart: "Auto-restart Pi Host",
   generalAutoRestartDesc:
     "If the host process crashes, restart it once automatically before showing an error.",
+  generalBusySendGroup: "While the agent is running",
+  generalBusySend: "Send while running",
+  generalBusySendDesc: "What happens when you send another message during a turn.",
+  generalBusySendFollowUp: "Follow-up",
+  generalBusySendFollowUpDesc: "Wait until this turn finishes, then send.",
+  generalBusySendSteer: "Steer",
+  generalBusySendSteerDesc: "Inject into the current turn immediately.",
   generalExtensionDecisionGroup: "Extension prompts",
   generalExtensionDecision: "Extension prompt presentation",
   generalExtensionDecisionDesc:
@@ -592,6 +599,9 @@ export const en = {
   sessionsShowArchivedTitle: "Show archived sessions ({count})",
   sessionsShowActiveTitle: "Back to active sessions",
   sessionsUntitled: "New session",
+  sessionsRunningInBackground: "Still running in the background",
+  sessionsLimitReached:
+    "This workspace already has 5 live sessions. Stop one before opening another.",
   sessionsNameAria: "Session name",
   sessionsSaveName: "Save name",
   sessionsCancelRename: "Cancel rename",
@@ -841,6 +851,7 @@ export const en = {
   queueRunNowFailed: "Run Now failed",
   queueTitle: "Waiting queue ({count})",
   queueSteering: "steer",
+  queueFollowUp: "follow-up",
   queueRemove: "Remove",
   queueSave: "Save",
   queueCancel: "Cancel",

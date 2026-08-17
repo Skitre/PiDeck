@@ -17,7 +17,12 @@ Workspace canonicalization follows symlinks and rejects existing non-directory
 paths with `WORKSPACE_NOT_DIRECTORY`. The canonical path is also the retained
 graph identity: Linux and macOS preserve case, while Windows normalizes path
 separators and compares without case. A retained graph is rechecked against the
-requested canonical identity before reactivation.
+requested canonical identity before reactivation. Switching away from a
+Workspace that still has a live Session parks that graph, keeps its agent
+subscriptions, and leaves its model providers registered so the turn can
+finish; coming back reactivates it instead of rebuilding. Idle retained
+graphs still suspend their providers and are discarded when their disk
+fingerprint changes.
 
 The desktop persists the Host-returned `canonicalCwd` and uses exact string
 identity for recent Workspace entries. It does not infer platform path

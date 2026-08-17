@@ -413,7 +413,7 @@ async function mutatePackageUnderLock(
     return { error: createHostError("AGENT_NOT_READY", "Workspace services not ready") };
   }
 
-  if (factory.hasBusySessions()) {
+  if (factory.hasBusySessions() || factory.hasBusyRetainedSessions?.()) {
     return {
       error: createHostError("AGENT_BUSY", "Stop the agent before modifying packages", {
         retryable: true,
@@ -474,7 +474,7 @@ async function mutatePackageUnderLock(
       requirePackage: true,
     });
     if (stale2) return { error: stale2 };
-    if (factory.hasBusySessions()) {
+    if (factory.hasBusySessions() || factory.hasBusyRetainedSessions?.()) {
       return {
         error: createHostError("AGENT_BUSY", "Stop the agent before modifying packages", {
           retryable: true,

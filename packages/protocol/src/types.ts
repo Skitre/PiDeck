@@ -903,6 +903,9 @@ export type DesktopLanguage = (typeof DESKTOP_LANGUAGES)[number];
 export const DESKTOP_INTERFACE_DENSITIES = ["compact", "standard", "comfortable"] as const;
 export type DesktopInterfaceDensity = (typeof DESKTOP_INTERFACE_DENSITIES)[number];
 
+export const BUSY_SEND_BEHAVIORS = ["followUp", "steer"] as const;
+export type BusySendBehavior = (typeof BUSY_SEND_BEHAVIORS)[number];
+
 export const TERMINAL_PROFILE_IDS = [
   "auto",
   "pwsh",
@@ -927,6 +930,8 @@ export type DesktopSettings = {
   lastSessionPath?: string;
   agentDir?: string;
   autoRestartHostOnce: boolean;
+  /** How Composer send behaves while the Session is already running. Absent values use follow-up. */
+  busySendBehavior?: BusySendBehavior;
   extensionDecisionPresentation: ExtensionDecisionPresentation;
   terminalProfile: TerminalProfileId;
   /** UI language; "system" (or absent) follows the OS locale. */

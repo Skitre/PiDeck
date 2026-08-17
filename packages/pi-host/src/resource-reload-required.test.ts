@@ -161,6 +161,8 @@ function mockFactory(opts: {
     getServer: () => server,
     getSessionOperationLock: () => server.agentOperationLock,
     hasBusySessions: () => opts.agentBusy === true || !g.agentSession.isIdle,
+    hasBusyRetainedSessions: () => false,
+    hasRunningSessions: () => opts.agentBusy === true || !g.agentSession.isIdle,
     setSessionRunId: () => {},
     clearSessionRunId: () => {},
     invalidateRetainedRuntimeCaches: vi.fn(async () => {}),
@@ -170,8 +172,15 @@ function mockFactory(opts: {
       g.sessionSnapshot = snapshot;
       return snapshot;
     }),
+    setSessionRuntimeName: vi.fn(
+      (session: { setSessionName: (name: string) => void }, name: string) => {
+        session.setSessionName(name);
+        const snapshot = { sessionId: "s1", name };
+        g.sessionSnapshot = snapshot;
+        return snapshot;
+      },
+    ),
     refineActiveSessionName: vi.fn(async () => {}),
-    currentRunId: null as string | null,
     deps: {
       agentDir: "C:\\nonexistent\\pi-agent",
       packageUpdateCheck: false,
@@ -253,7 +262,10 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
     } as never);
 
     expect("error" in out).toBe(false);
-    expect(factory.setActiveSessionName).toHaveBeenCalledWith("修复 session 恢复问题");
+    expect(factory.setSessionRuntimeName).toHaveBeenCalledWith(
+      graph.agentSession,
+      "修复 session 恢复问题",
+    );
     await vi.waitFor(() => {
       expect(factory.refineActiveSessionName).toHaveBeenCalledWith(
         expect.objectContaining({

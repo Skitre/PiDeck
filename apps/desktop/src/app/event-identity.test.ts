@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  HostEventEnvelope,
-  HostStatusSnapshot,
-  SessionSnapshot,
-} from "@pideck/protocol";
+import type { HostEventEnvelope, HostStatusSnapshot, SessionSnapshot } from "@pideck/protocol";
 import { HostClient } from "../lib/bridge/host-client";
 import { applySessionSnapshot, emptyEpoch } from "../lib/stores/epoch-store";
 import { expectedIdentityForEvent, extensionUiRequestDelivery } from "./event-identity";
@@ -47,13 +43,21 @@ describe("expectedIdentityForEvent", () => {
       sessionRevision: 8,
     });
 
-    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(true);
+    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+      true,
+    );
   });
 
   it("allows session and package snapshots to advance the session generation", () => {
-    for (const name of ["session.snapshot", "package.snapshot", "package.resourcesChanged"] as const) {
+    for (const name of [
+      "session.snapshot",
+      "package.snapshot",
+      "package.resourcesChanged",
+    ] as const) {
       const incoming = event(name, { sessionRevision: state.sessionRevision + 1 });
-      expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(true);
+      expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+        true,
+      );
     }
   });
 
@@ -65,7 +69,9 @@ describe("expectedIdentityForEvent", () => {
       sessionRevision: state.sessionRevision + 1,
     });
 
-    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(true);
+    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+      true,
+    );
   });
 
   it("allows a candidate Extension UI close before snapshots", () => {
@@ -80,7 +86,9 @@ describe("expectedIdentityForEvent", () => {
       },
     });
 
-    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(true);
+    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+      true,
+    );
   });
 
   it("allows a candidate Extension UI group close before snapshots", () => {
@@ -95,7 +103,9 @@ describe("expectedIdentityForEvent", () => {
       },
     });
 
-    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(true);
+    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+      true,
+    );
   });
 
   it("still rejects non-authoritative events from a different session generation", () => {
@@ -103,7 +113,9 @@ describe("expectedIdentityForEvent", () => {
       sessionRevision: state.sessionRevision + 1,
     });
 
-    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(false);
+    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+      false,
+    );
   });
 
   it("accepts tools immediately after an authoritative Session transition", () => {
@@ -149,10 +161,7 @@ describe("expectedIdentityForEvent", () => {
     };
 
     expect(
-      client.shouldAcceptEvent(
-        incoming,
-        expectedIdentityForEvent(incoming, currentIdentity),
-      ),
+      client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, currentIdentity)),
     ).toBe(true);
   });
 
@@ -193,12 +202,28 @@ describe("expectedIdentityForEvent", () => {
     }
   });
 
+  it("accepts live events from a parked Workspace", () => {
+    for (const name of ["agent.event", "session.runtimeChanged", "session.infoChanged"] as const) {
+      const incoming = event(name, {
+        workspaceId: "44444444-4444-4444-8444-444444444444",
+        workspaceRevision: 9,
+        sessionId: "55555555-5555-4555-8555-555555555555",
+        sessionRevision: 3,
+      });
+      expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+        true,
+      );
+    }
+  });
+
   it("still rejects snapshots from a different workspace generation", () => {
     const incoming = event("package.snapshot", {
       workspaceRevision: state.workspaceRevision + 1,
     });
 
-    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(false);
+    expect(client.shouldAcceptEvent(incoming, expectedIdentityForEvent(incoming, state))).toBe(
+      false,
+    );
   });
 });
 

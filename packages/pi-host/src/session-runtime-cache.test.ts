@@ -47,15 +47,16 @@ function disposalCache(): SessionRuntimeCache {
   return new SessionRuntimeCache({
     getGraph: () => null,
     getServer: () => null,
-    getCurrentRunId: () => null,
     sessionPathsEqual: () => false,
   });
 }
 
-function disposalSession(options: {
-  emit?: () => Promise<void>;
-  abort?: () => Promise<void>;
-} = {}) {
+function disposalSession(
+  options: {
+    emit?: () => Promise<void>;
+    abort?: () => Promise<void>;
+  } = {},
+) {
   const emit = vi.fn(options.emit ?? (async () => undefined));
   const abort = vi.fn(options.abort ?? (async () => undefined));
   const dispose = vi.fn();

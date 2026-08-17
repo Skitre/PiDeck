@@ -95,6 +95,7 @@ export function TreePanel({ visible }: { visible: boolean }) {
   const hostInstanceId = useAppStore((state) => state.host?.hostInstanceId);
   const workspaceId = useAppStore((state) => state.workspace?.id);
   const workspaceRevision = useAppStore((state) => state.workspace?.revision);
+  const workspaceSwitchTarget = useAppStore((state) => state.workspaceSwitchTarget);
   const sessionId = session?.sessionId;
   const sessionRevision = session?.revision;
   const busy = session ? !session.isIdle : true;
@@ -106,7 +107,7 @@ export function TreePanel({ visible }: { visible: boolean }) {
   useEffect(() => {
     if (!visible) return;
     const current = useAppStore.getState();
-    if (!current.host || !current.workspace || !current.session) {
+    if (!current.host || !current.workspace || !current.session || current.workspaceSwitchTarget) {
       setNodes(null);
       setLeafId(null);
       setError(null);
@@ -153,6 +154,7 @@ export function TreePanel({ visible }: { visible: boolean }) {
     hostInstanceId,
     workspaceId,
     workspaceRevision,
+    workspaceSwitchTarget,
     sessionId,
     sessionRevision,
     busy,

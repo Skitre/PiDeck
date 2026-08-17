@@ -27,10 +27,8 @@ function QueueText({ raw }: { raw: string }) {
   const visible = stripAttachmentReferenceBlocks(raw).trim();
   const attachments = parseAttachmentReferences(raw);
   return (
-    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs" title={visible}>
-      <span className="min-w-0 flex-1 truncate">
-        {visible || t("queueAttachmentOnly")}
-      </span>
+    <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs leading-4" title={visible}>
+      <span className="min-w-0 flex-1 truncate">{visible || t("queueAttachmentOnly")}</span>
       {attachments.length > 0 && (
         <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-muted">
           <Paperclip size={10} />
@@ -79,14 +77,11 @@ export function QueuePanel() {
     if (!host || !workspace || !session || busyOp) return;
     setBusyOp(true);
     try {
-      const res = await setQueueWithRetry(
-        activeSessionContext(host, workspace, session),
-        {
-          expectedRevision: session.pending.revision,
-          steering: nextSteering,
-          followUp: nextFollowUp,
-        },
-      );
+      const res = await setQueueWithRetry(activeSessionContext(host, workspace, session), {
+        expectedRevision: session.pending.revision,
+        steering: nextSteering,
+        followUp: nextFollowUp,
+      });
       if (!res.ok) {
         pushNotification(res.error?.message ?? t("queueUpdateFailed"), "error");
       }
@@ -103,14 +98,10 @@ export function QueuePanel() {
     setBusyOp(true);
     try {
       const context = activeSessionContext(host, workspace, session);
-      const response = await hostClient.request(
-        "agent.runNow",
-        context,
-        {
-          expectedRevision: session.pending.revision,
-          followUpIndex: index,
-        },
-      );
+      const response = await hostClient.request("agent.runNow", context, {
+        expectedRevision: session.pending.revision,
+        followUpIndex: index,
+      });
       if (!response.ok) {
         pushNotification(response.error?.message ?? t("queueRunNowFailed"), "error");
         return;
@@ -136,6 +127,9 @@ export function QueuePanel() {
 
   const itemButton =
     "flex size-6 items-center justify-center rounded text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-30";
+  const rowClass = "group flex h-8 items-center gap-2 rounded-md px-3";
+  const badgeClass =
+    "inline-flex h-4 shrink-0 items-center rounded px-1.5 text-[10px] font-medium leading-none";
 
   return (
     <div className="conversation-content-width mx-auto mb-1.5 w-full rounded-lg border border-border bg-surface-raised/80">
@@ -152,14 +146,14 @@ export function QueuePanel() {
         />
       </button>
       {!collapsed && (
-        <ul className="border-t border-border px-1.5 py-1">
+        <ul className="border-t border-border py-1">
           {steering.map((text, index) => (
-            <li key={`steer:${index}`} className="group flex items-start gap-2 rounded px-1.5 py-1">
-              <span className="mt-0.5 shrink-0 rounded bg-warning/15 px-1 text-[10px] text-warning">
+            <li key={`steer:${index}`} className={`${rowClass} hover:bg-surface-overlay/50`}>
+              <span className={`${badgeClass} bg-warning/15 text-warning`}>
                 {t("queueSteering")}
               </span>
               <QueueText raw={text} />
-              <span className="shrink-0 opacity-0 group-hover:opacity-100">
+              <span className="ml-auto flex shrink-0 items-center">
                 <button
                   type="button"
                   title={t("queueRemove")}
@@ -167,7 +161,10 @@ export function QueuePanel() {
                   className={itemButton}
                   disabled={busyOp}
                   onClick={() =>
-                    void applyQueue(steering.filter((_, i) => i !== index), [...followUp])
+                    void applyQueue(
+                      steering.filter((_, i) => i !== index),
+                      [...followUp],
+                    )
                   }
                 >
                   <Trash2 size={12} />
@@ -177,7 +174,7 @@ export function QueuePanel() {
           ))}
           {followUp.map((text, index) =>
             editing?.index === index ? (
-              <li key={`edit:${index}`} className="flex items-start gap-1.5 rounded px-1.5 py-1">
+              <li key={`edit:${index}`} className="flex items-start gap-1.5 px-3 py-1.5">
                 <textarea
                   autoFocus
                   aria-label={t("queueEditMessage")}
@@ -233,10 +230,10 @@ export function QueuePanel() {
                 </button>
               </li>
             ) : (
-              <li key={`fu:${index}`} className="group flex items-start gap-2 rounded px-1.5 py-1 hover:bg-surface-overlay/50">
-                <span className="mt-1 size-1 shrink-0 rounded-full bg-muted" />
+              <li key={`fu:${index}`} className={`${rowClass} hover:bg-surface-overlay/50`}>
+                <span className={`${badgeClass} bg-muted/50 text-muted`}>{t("queueFollowUp")}</span>
                 <QueueText raw={text} />
-                <span className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+                <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
                   <button
                     type="button"
                     title={t("queueMoveUp")}
@@ -284,7 +281,10 @@ export function QueuePanel() {
                     className={itemButton}
                     disabled={busyOp}
                     onClick={() =>
-                      void applyQueue([...steering], followUp.filter((_, i) => i !== index))
+                      void applyQueue(
+                        [...steering],
+                        followUp.filter((_, i) => i !== index),
+                      )
                     }
                   >
                     <Trash2 size={12} />

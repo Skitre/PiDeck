@@ -474,7 +474,7 @@ describe("Provider controller", () => {
     expect(active.state.model).toMatchObject({ provider: "other", id: "fallback" });
   });
 
-  it("rolls back Provider removal when an idle session has no fallback model", async () => {
+  it("allows removing the final enabled Provider and clears the idle Session model", async () => {
     const { credentialStore, factory, handlers, layout, modelRegistry } = await setup({
       pideckEnabledProviders: ["custom"],
       providers: {
@@ -497,15 +497,52 @@ describe("Provider controller", () => {
       params: { providerId: "custom" },
     } as never);
 
-    expect("error" in outcome && outcome.error.code).toBe("SETTINGS_WRITE_FAILED");
+    expect("error" in outcome ? outcome.error.message : null).toBeNull();
+    expect(active.clearModel).toHaveBeenCalledOnce();
+    expect(active.state.model).toMatchObject({ provider: "unknown", id: "unknown" });
     const persisted = JSON.parse(readFileSync(join(layout.agentDir, "models.json"), "utf8"));
-    expect(persisted.providers.custom).toBeDefined();
-    expect(persisted.pideckEnabledProviders).toEqual(["custom"]);
-    expect(await credentialStore.readRaw("custom")).toEqual({
-      type: "api_key",
-      key: "sk-custom",
+    expect(persisted.providers.custom).toBeUndefined();
+    expect(persisted.pideckEnabledProviders).toEqual([]);
+    expect(await credentialStore.readRaw("custom")).toBeUndefined();
+  });
+
+  it("allows removing a Provider when every Provider is already disabled", async () => {
+    const { credentialStore, factory, handlers, layout, modelRegistry } = await setup({
+      pideckEnabledProviders: [],
+      providers: {
+        custom: {
+          name: "Custom",
+          baseUrl: "https://custom.example/v1",
+          api: "openai-responses",
+          models: [{ id: "primary" }],
+        },
+        other: {
+          name: "Other",
+          baseUrl: "https://other.example/v1",
+          api: "openai-responses",
+          models: [{ id: "fallback" }],
+        },
+      },
     });
-    expect(active.state.model).toMatchObject({ provider: "custom", id: "primary" });
+    await putApiKey(credentialStore, "custom", "sk-custom");
+    const current = modelRegistry.find("custom", "primary");
+    if (!current) throw new Error("Missing current model fixture");
+    const active = runtimeSession(current, true);
+    attachRuntimeGraph(factory, active.session);
+
+    const outcome = await handlers["provider.remove"]!({
+      id: "remove-disabled-provider",
+      params: { providerId: "custom" },
+    } as never);
+
+    expect("error" in outcome ? outcome.error.message : null).toBeNull();
+    expect(active.clearModel).toHaveBeenCalledOnce();
+    expect(active.state.model).toMatchObject({ provider: "unknown", id: "unknown" });
+    const persisted = JSON.parse(readFileSync(join(layout.agentDir, "models.json"), "utf8"));
+    expect(persisted.providers.custom).toBeUndefined();
+    expect(persisted.providers.other).toBeDefined();
+    expect(persisted.pideckEnabledProviders).toEqual([]);
+    expect(await credentialStore.readRaw("custom")).toBeUndefined();
   });
 
   it("moves an idle session when its current Provider is disabled", async () => {
@@ -838,7 +875,7 @@ describe("Provider controller", () => {
           thinkingLevelMap: {
             off: "none",
             minimal: null,
-            low: null,
+            low: "low",
             medium: null,
             high: "high",
             xhigh: null,
@@ -865,7 +902,7 @@ describe("Provider controller", () => {
           enabled: false,
           thinkingSource: "profile",
           thinkingLevelMap: {
-            off: null,
+            off: "none",
             minimal: null,
             low: null,
             medium: null,

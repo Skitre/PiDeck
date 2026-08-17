@@ -1,11 +1,4 @@
-import {
-  mkdirSync,
-  mkdtempSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -13,17 +6,24 @@ import { WorkspaceLifecycle, workspaceIdentityKey } from "./workspace-lifecycle.
 import type { SessionRuntimeCache } from "./session-runtime-cache.js";
 import type { GraphFactoryDeps, WorkspaceGraph } from "./workspace-graph-types.js";
 
-function lifecycle(platform?: NodeJS.Platform) {
+function lifecycle(
+  platform?: NodeJS.Platform,
+  cache: Partial<SessionRuntimeCache> = {},
+  deps: Partial<GraphFactoryDeps> = {},
+) {
   return new WorkspaceLifecycle(
     {
-      deps: { agentDir: "C:/agent" } as GraphFactoryDeps,
+      deps: { agentDir: "C:/agent", ...deps } as GraphFactoryDeps,
       getGraph: () => null,
       setGraph: vi.fn(),
       getServer: () => null,
       onModelHealthChanged: vi.fn(),
       platform,
     },
-    {} as unknown as SessionRuntimeCache,
+    {
+      graphHasBusySessions: () => false,
+      ...cache,
+    } as unknown as SessionRuntimeCache,
   );
 }
 
@@ -80,10 +80,7 @@ describe("Workspace lifecycle", () => {
       retainedGraphs: Map<string, WorkspaceGraph>;
     };
     internal.retainedGraphs.set(workspaceIdentityKey(target.canonicalCwd, "linux"), target);
-    internal.retainedGraphs.set(
-      workspaceIdentityKey(unrelated.canonicalCwd, "linux"),
-      unrelated,
-    );
+    internal.retainedGraphs.set(workspaceIdentityKey(unrelated.canonicalCwd, "linux"), unrelated);
     const dispose = vi.spyOn(subject, "disposeGraph").mockResolvedValue();
 
     await subject.invalidateRetainedWorkspaceGraph(target.canonicalCwd);
@@ -163,5 +160,41 @@ describe("Workspace lifecycle", () => {
       revision: 4,
       servicesReady: true,
     });
+  });
+
+  it("reports busy retained Workspaces without inspecting the current graph", () => {
+    const busy = { canonicalCwd: "/repo/busy" } as WorkspaceGraph;
+    const idle = { canonicalCwd: "/repo/idle" } as WorkspaceGraph;
+    const subject = lifecycle("linux", {
+      graphHasBusySessions: (graph) => graph === busy,
+    });
+    const internal = subject as unknown as {
+      retainedGraphs: Map<string, WorkspaceGraph>;
+    };
+    internal.retainedGraphs.set(workspaceIdentityKey(idle.canonicalCwd, "linux"), idle);
+    expect(subject.hasBusyRetainedSessions()).toBe(false);
+    internal.retainedGraphs.set(workspaceIdentityKey(busy.canonicalCwd, "linux"), busy);
+    expect(subject.hasBusyRetainedSessions()).toBe(true);
+  });
+
+  it("suspends a parked Workspace Provider after its last busy Session settles", () => {
+    const suspendOwner = vi.fn(() => ({ snapshot: true }));
+    const subject = lifecycle("linux", { graphHasBusySessions: () => false }, {
+      providerOwnership: { suspendOwner },
+    } as unknown as Partial<GraphFactoryDeps>);
+    const graph = {
+      canonicalCwd: "/repo/parked",
+      providerOwner: { id: "owner-a" },
+      suspendedProviders: undefined,
+    } as unknown as WorkspaceGraph;
+    const internal = subject as unknown as {
+      retainedGraphs: Map<string, WorkspaceGraph>;
+    };
+    internal.retainedGraphs.set(workspaceIdentityKey(graph.canonicalCwd, "linux"), graph);
+
+    subject.suspendIdleRetainedProviders(graph);
+
+    expect(suspendOwner).toHaveBeenCalledWith(graph.providerOwner);
+    expect(graph.suspendedProviders).toEqual({ snapshot: true });
   });
 });

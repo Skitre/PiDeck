@@ -1,7 +1,14 @@
 import { ChevronDown, Folder, FolderPlus, LoaderCircle, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import type { SessionSnapshot } from "@pideck/protocol";
 import { CollapsibleRegion } from "../../components/CollapsibleRegion";
+import { sessionStatusDotClass } from "../sessions/session-list-policy";
 import { useAppStore } from "../../lib/stores/app-store";
+import {
+  runtimeStateFromSnapshot,
+  type SessionCatalogState,
+  type SessionRuntimeState,
+} from "../../lib/stores/session-catalog";
 import { hostClient } from "../../lib/bridge/host-client";
 import {
   notifyDesktopSettingsSaveFailure,
@@ -42,6 +49,62 @@ export function replaceKnownWorkspace(
   return next.filter((entry, index) => next.indexOf(entry) === index);
 }
 
+function isCurrentWorkspacePath(
+  path: string,
+  workspace: { cwd: string; canonicalCwd: string } | null,
+): boolean {
+  return Boolean(
+    workspace && (samePath(path, workspace.canonicalCwd) || samePath(path, workspace.cwd)),
+  );
+}
+
+function snapshotBelongsToWorkspace(
+  snapshotCwd: string,
+  path: string,
+  workspace: { cwd: string; canonicalCwd: string } | null,
+): boolean {
+  if (samePath(snapshotCwd, path)) return true;
+  return (
+    isCurrentWorkspacePath(path, workspace) &&
+    (samePath(snapshotCwd, workspace!.canonicalCwd) || samePath(snapshotCwd, workspace!.cwd))
+  );
+}
+
+function preferVisibleRuntime(
+  current: SessionRuntimeState | null,
+  next: SessionRuntimeState,
+): SessionRuntimeState | null {
+  if (next === "running") return "running";
+  if (next === "queued" && current !== "running") return "queued";
+  if (next === "error" && current !== "running" && current !== "queued") return "error";
+  return current;
+}
+
+/** Live Session indicator for a sidebar Workspace row. Parked drafts keep other Workspaces visible. */
+export function workspaceLiveRuntimeState(args: {
+  path: string;
+  workspace: { cwd: string; canonicalCwd: string } | null;
+  session: SessionSnapshot | null;
+  catalog: SessionCatalogState;
+  drafts: Record<string, SessionSnapshot>;
+}): SessionRuntimeState | null {
+  let visible: SessionRuntimeState | null = null;
+  const current = isCurrentWorkspacePath(args.path, args.workspace);
+  if (current) {
+    if (args.session) {
+      visible = preferVisibleRuntime(visible, runtimeStateFromSnapshot(args.session));
+    }
+    for (const entry of Object.values(args.catalog.entries)) {
+      visible = preferVisibleRuntime(visible, entry.runtimeState);
+    }
+  }
+  for (const draft of Object.values(args.drafts)) {
+    if (!snapshotBelongsToWorkspace(draft.cwd, args.path, args.workspace)) continue;
+    visible = preferVisibleRuntime(visible, runtimeStateFromSnapshot(draft));
+  }
+  return visible;
+}
+
 // Stable fallback: a fresh [] per render makes the zustand selector loop.
 const NO_WORKSPACES: string[] = [];
 
@@ -49,6 +112,9 @@ export function WorkspacePicker() {
   const t = useT();
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
+  const session = useAppStore((s) => s.session);
+  const sessionCatalog = useAppStore((s) => s.sessionCatalog);
+  const transcriptDrafts = useAppStore((s) => s.transcriptDrafts);
   const knownWorkspaces = useAppStore((s) => s.desktopSettings?.knownWorkspaces ?? NO_WORKSPACES);
   const switchTarget = useAppStore((s) => s.workspaceSwitchTarget);
   const setWorkspace = useAppStore((s) => s.setWorkspace);
@@ -220,6 +286,14 @@ export function WorkspacePicker() {
           <ul className="flex flex-col gap-0.5">
             {listed.map((path) => {
               const active = Boolean(currentCwd && samePath(currentCwd, path));
+              const liveRuntime = workspaceLiveRuntimeState({
+                path,
+                workspace,
+                session,
+                catalog: sessionCatalog,
+                drafts: transcriptDrafts,
+              });
+              const liveDot = liveRuntime ? sessionStatusDotClass(liveRuntime) : null;
               return (
                 <li
                   key={path}
@@ -244,12 +318,22 @@ export function WorkspacePicker() {
                       />
                     )}
                     <span className="min-w-0 flex-1 truncate">{workspaceDisplayName(path)}</span>
-                    {active && (
+                    {liveDot ? (
                       <span
-                        className={`size-1.5 shrink-0 rounded-full ${
-                          workspace?.servicesReady ? "bg-success" : "bg-warning"
+                        className={`size-1.5 shrink-0 rounded-full ${liveDot} ${
+                          active ? "" : "group-hover:opacity-0"
                         }`}
+                        title={t("sessionsRunningInBackground")}
+                        aria-label={t("sessionsRunningInBackground")}
                       />
+                    ) : (
+                      active && (
+                        <span
+                          className={`size-1.5 shrink-0 rounded-full ${
+                            workspace?.servicesReady ? "bg-success" : "bg-warning"
+                          }`}
+                        />
+                      )
                     )}
                   </button>
                   {!active && (

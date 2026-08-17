@@ -55,6 +55,21 @@ export function activeSessionContext(
   };
 }
 
+export function sessionTargetContext(
+  host: HostStatusSnapshot,
+  workspace: WorkspaceSnapshot,
+  sessionId: string,
+  sessionRevision: number,
+): SessionTargetContext {
+  return {
+    expectedHostInstanceId: host.hostInstanceId,
+    expectedWorkspaceId: workspace.id,
+    expectedWorkspaceRevision: workspace.revision,
+    expectedSessionId: sessionId,
+    expectedSessionRevision: sessionRevision,
+  };
+}
+
 /** Follow Host-side identity migration when a captured Extension UI target is promoted. */
 export function latestSessionTargetContext(
   captured: SessionTargetContext,

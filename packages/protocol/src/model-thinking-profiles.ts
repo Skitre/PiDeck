@@ -29,6 +29,9 @@ const OPENAI_MODEL_DOCS = "https://developers.openai.com/api/docs/models";
 const OPENAI_LATEST_MODEL_DOCS = "https://developers.openai.com/api/docs/guides/latest-model";
 const ANTHROPIC_THINKING_DOCS =
   "https://platform.claude.com/docs/en/build-with-claude/extended-thinking";
+const ANTHROPIC_ADAPTIVE_DOCS =
+  "https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking";
+const ANTHROPIC_EFFORT_DOCS = "https://platform.claude.com/docs/en/build-with-claude/effort";
 const GEMINI_THINKING_DOCS = "https://ai.google.dev/gemini-api/docs/thinking";
 const XAI_REASONING_DOCS = "https://docs.x.ai/developers/model-capabilities/text/reasoning";
 const ZAI_CHAT_DOCS = "https://docs.z.ai/api-reference/llm/chat-completion";
@@ -102,6 +105,17 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
     documentationUrl: `${OPENAI_MODEL_DOCS}/gpt-5.4`,
   },
   {
+    family: "GPT-5.3 Codex",
+    modelIdPattern: /(?:^|[/.:])gpt[-_.]?5[.-]3[-_.]codex(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    }),
+    documentationUrl: `${OPENAI_MODEL_DOCS}/gpt-5.3-codex`,
+  },
+  {
     family: "GPT-5.2 Pro",
     modelIdPattern: /(?:^|[/.:])gpt[-_.]?5[.-]2[-_.]pro(?:$|[-_.:])/,
     thinkingLevelMap: exactThinkingLevelMap({
@@ -162,6 +176,31 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
     documentationUrl: `${OPENAI_MODEL_DOCS}/gpt-oss-120b`,
   },
   {
+    family: "Claude adaptive thinking",
+    modelIdPattern:
+      /(?:^|[/.:])claude[-_.]?(?:(?:fable|mythos|opus|sonnet)[-_.]?5|opus[-_.]4[-_.](?:7|8))(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+      max: "max",
+    }),
+    documentationUrl: ANTHROPIC_EFFORT_DOCS,
+  },
+  {
+    family: "Claude adaptive thinking (no xhigh)",
+    modelIdPattern:
+      /(?:^|[/.:])claude[-_.]?(?:mythos[-_.]?preview|(?:opus|sonnet)[-_.]4[-_.]6)(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({
+      low: "low",
+      medium: "medium",
+      high: "high",
+      max: "max",
+    }),
+    documentationUrl: ANTHROPIC_ADAPTIVE_DOCS,
+  },
+  {
     family: "Claude manual thinking",
     modelIdPattern:
       /(?:^|[/.:])claude[-_.]?(?:3[-_.]7[-_.]sonnet|(?:opus|sonnet)[-_.]4(?:(?:[-_.](?:1|5))|(?![-_.]\d))|haiku[-_.]4[-_.]5)(?:$|[-_.:])/,
@@ -175,8 +214,27 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
     documentationUrl: ANTHROPIC_THINKING_DOCS,
   },
   {
+    family: "Gemini 3.7 Flash",
+    modelIdPattern: /(?:^|[/.:])gemini[-_.]?3[.-]7[-_.]flash(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({
+      low: "low",
+      medium: "medium",
+      high: "high",
+    }),
+    documentationUrl: GEMINI_THINKING_DOCS,
+  },
+  {
     family: "Gemini 3.1 Flash-Lite Image",
     modelIdPattern: /(?:^|[/.:])gemini[-_.]?3[.-]1[-_.]flash[-_.]lite[-_.]image(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({
+      minimal: "minimal",
+      high: "high",
+    }),
+    documentationUrl: GEMINI_THINKING_DOCS,
+  },
+  {
+    family: "Gemini 3.1 Flash Image",
+    modelIdPattern: /(?:^|[/.:])gemini[-_.]?3[.-]1[-_.]flash[-_.]image(?:$|[-_.:])/,
     thinkingLevelMap: exactThinkingLevelMap({
       minimal: "minimal",
       high: "high",
@@ -191,6 +249,12 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
       medium: "medium",
       high: "high",
     }),
+    documentationUrl: GEMINI_THINKING_DOCS,
+  },
+  {
+    family: "Gemini 3 Pro Image",
+    modelIdPattern: /(?:^|[/.:])gemini[-_.]?3[-_.]pro[-_.]image(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({ high: "high" }),
     documentationUrl: GEMINI_THINKING_DOCS,
   },
   {
@@ -236,6 +300,17 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
     documentationUrl: GEMINI_THINKING_DOCS,
   },
   {
+    family: "Grok 4.6",
+    modelIdPattern: /(?:^|[/.:])grok[-_.]?4[.-]6(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+    }),
+    documentationUrl: XAI_REASONING_DOCS,
+  },
+  {
     family: "Grok 4.5",
     modelIdPattern: /(?:^|[/.:])grok[-_.]?4[.-]5(?:$|[-_.:])/,
     thinkingLevelMap: exactThinkingLevelMap({
@@ -257,9 +332,20 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
     documentationUrl: XAI_REASONING_DOCS,
   },
   {
+    family: "GLM-5.3",
+    modelIdPattern: /(?:^|[/.:])glm[-_.]?5[.-]3(?:$|[-_.:])/,
+    thinkingLevelMap: exactThinkingLevelMap({
+      low: "low",
+      high: "high",
+      max: "max",
+    }),
+    documentationUrl: ZAI_CHAT_DOCS,
+  },
+  {
     family: "GLM-5.2",
     modelIdPattern: /(?:^|[/.:])glm[-_.]?5[.-]2(?:$|[-_.:])/,
     thinkingLevelMap: exactThinkingLevelMap({
+      off: "none",
       high: "high",
       max: "max",
     }),
@@ -268,7 +354,7 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
   {
     family: "GLM hybrid thinking",
     modelIdPattern:
-      /(?:^|[/.:])glm[-_.]?(?:4[.-](?:5|6|7)|5(?![.-]2(?:$|[-_.:]))(?:[.-]1|[-_.]?turbo|v[-_.]?turbo)?)(?:$|[-_.:])/,
+      /(?:^|[/.:])glm[-_.]?(?:4[.-](?:5|6|7)|5(?![.-](?:2|3)(?:$|[-_.:]))(?:[.-]1|[-_.]?turbo|v[-_.]?turbo)?)(?:$|[-_.:])/,
     thinkingLevelMap: exactThinkingLevelMap({
       off: "none",
       high: "high",
@@ -280,6 +366,7 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
     modelIdPattern: /(?:^|[/.:])deepseek[-_.]?v4[-_.](?:flash|pro)(?:$|[-_.:])/,
     thinkingLevelMap: exactThinkingLevelMap({
       off: "none",
+      low: "low",
       high: "high",
       max: "max",
     }),
@@ -306,7 +393,7 @@ export const MODEL_THINKING_PROFILES: readonly ModelThinkingProfile[] = [
   {
     family: "Qwen hybrid thinking",
     modelIdPattern:
-      /(?:^|[/.:])qwen[-_.]?(?:3[.-](?:5|6|7)[-_.](?:plus|flash|max)|3[-_.]max(?![-_.]thinking(?:$|[-_.:]))|3[-_.](?:235b[-_.]a22b|32b|30b[-_.]a3b|14b|8b)(?=$|:)|plus|max|flash|turbo)(?:$|[-_.:])/,
+      /(?:^|[/.:])qwen[-_.]?(?:3[.-](?:5|6|7|8)[-_.](?:plus|flash|max)|3[.-]8|3[-_.]max(?![-_.]thinking(?:$|[-_.:]))|3[-_.](?:235b[-_.]a22b|32b|30b[-_.]a3b|14b|8b)(?=$|:)|plus|max|flash|turbo)(?:$|[-_.:])/,
     thinkingLevelMap: exactThinkingLevelMap({
       off: "none",
       high: "high",

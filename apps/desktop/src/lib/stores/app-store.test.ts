@@ -91,6 +91,7 @@ describe("app-store epoch wiring", () => {
       thinkingLevels: [],
       providerConfigRevision: 0,
       sessionCatalog: emptySessionCatalog(),
+      transcriptDrafts: {},
       draftTexts: {},
       draftTargets: {},
       draftEditVersions: {},
@@ -850,11 +851,271 @@ describe("app-store epoch wiring", () => {
     expect(useAppStore.getState().sessionCatalog.entries.s1?.runtimeState).toBe("running");
 
     useAppStore.getState().applySessionSnapshot(session("s2"));
-    expect(useAppStore.getState().sessionCatalog.entries.s1?.runtimeState).toBe("inactive");
+    expect(useAppStore.getState().sessionCatalog.entries.s1?.runtimeState).toBe("running");
     expect(useAppStore.getState().sessionCatalog.entries.s2?.runtimeState).toBe("idle");
+
+    useAppStore.getState().applySessionSnapshot(session("s1"));
+    useAppStore.getState().applySessionSnapshot(session("s3"));
+    expect(useAppStore.getState().sessionCatalog.entries.s1?.runtimeState).toBe("inactive");
+    expect(useAppStore.getState().sessionCatalog.entries.s3?.runtimeState).toBe("idle");
 
     useAppStore.getState().setSessionRuntimeState("s1", "running", undefined, 20);
     expect(useAppStore.getState().sessionCatalog.entries.s1?.runtimeState).toBe("running");
+  });
+
+  it("keeps a new running Session in the catalog after switching away", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 1));
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 1),
+      messages: [],
+    });
+    expect(useAppStore.getState().sessionCatalog.entries.s1).toBeUndefined();
+
+    useAppStore.getState().applyAgentTranscriptEvent("s1", {
+      runId: "r1",
+      event: {
+        type: "message_start",
+        message: { role: "user", content: "hello" },
+      },
+    });
+    expect(useAppStore.getState().sessionCatalog.entries.s1).toMatchObject({
+      sessionId: "s1",
+      runtimeState: "running",
+    });
+
+    useAppStore.getState().applySessionSnapshot(session("s2", 2));
+    expect(useAppStore.getState().session?.sessionId).toBe("s2");
+    expect(useAppStore.getState().sessionCatalog.entries.s1).toMatchObject({
+      sessionId: "s1",
+      runtimeState: "running",
+    });
+
+    useAppStore.getState().replaceSessionCatalog("w1", []);
+    expect(useAppStore.getState().sessionCatalog.entries.s1).toMatchObject({
+      sessionId: "s1",
+      runtimeState: "running",
+    });
+  });
+
+  it("parks a live transcript and restores it on promote without resetting startedAt", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 1));
+    const runningA = {
+      ...session("s1", 1),
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "assistant", content: "Hello", startedAt: 100 }],
+      entries: [
+        {
+          id: "e-live",
+          parentId: null,
+          type: "message",
+          message: { role: "assistant", content: "Hello", startedAt: 100 },
+        },
+      ],
+      leafId: "e-live",
+    };
+    useAppStore.getState().applySessionSnapshot(runningA);
+    useAppStore.getState().applySessionSnapshot(session("s2", 2));
+    expect(useAppStore.getState().session?.sessionId).toBe("s2");
+    expect(useAppStore.getState().transcriptDrafts.s1?.messages[0]).toMatchObject({
+      startedAt: 100,
+    });
+
+    useAppStore.getState().applyAgentTranscriptEvent(
+      "s1",
+      {
+        runId: "r1",
+        event: {
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: " world" },
+        },
+      },
+      1,
+      5_000,
+    );
+    expect(useAppStore.getState().transcriptDrafts.s1?.messages[0]).toMatchObject({
+      startedAt: 100,
+    });
+    expect(useAppStore.getState().session?.sessionId).toBe("s2");
+
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 3),
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "assistant", content: "Hello world" }],
+      entries: [
+        {
+          id: "e-file",
+          parentId: null,
+          type: "message",
+          message: { role: "assistant", content: "Hello world" },
+        },
+      ],
+      leafId: "e-file",
+    });
+    expect(useAppStore.getState().session?.revision).toBe(3);
+    expect(useAppStore.getState().session?.messages[0]).toMatchObject({
+      startedAt: 100,
+    });
+    expect(useAppStore.getState().session?.entries?.[0]).toMatchObject({ id: "e-live" });
+    expect(useAppStore.getState().session?.leafId).toBe("e-live");
+    expect(useAppStore.getState().transcriptDrafts.s1).toBeUndefined();
+
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 3),
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "assistant", content: "Hello world" }],
+    });
+    expect(useAppStore.getState().session?.messages[0]).toMatchObject({
+      startedAt: 100,
+    });
+  });
+
+  it("does not revert a promote when a stale previous snapshot arrives late", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 1));
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 5),
+      isIdle: false,
+      isStreaming: true,
+    });
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s2", 6),
+      isIdle: false,
+      isStreaming: true,
+    });
+    expect(useAppStore.getState().session?.sessionId).toBe("s2");
+
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 5),
+      isIdle: false,
+      isStreaming: true,
+    });
+    expect(useAppStore.getState().session?.sessionId).toBe("s2");
+    expect(useAppStore.getState().session?.revision).toBe(6);
+  });
+
+  it("keeps transcript drafts across workspace switches and clears them on host epoch", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 1));
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 1),
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "assistant", content: "live", startedAt: 100 }],
+    });
+    useAppStore.getState().applySessionSnapshot(session("s2", 2));
+    expect(useAppStore.getState().transcriptDrafts.s1).toBeDefined();
+
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w2", 2));
+    expect(useAppStore.getState().transcriptDrafts.s1?.messages[0]).toMatchObject({
+      startedAt: 100,
+    });
+
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s3", 1),
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "assistant", content: "other", startedAt: 50 }],
+    });
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 3));
+    expect(useAppStore.getState().transcriptDrafts.s1).toBeDefined();
+    expect(useAppStore.getState().transcriptDrafts.s3?.messages[0]).toMatchObject({
+      startedAt: 50,
+    });
+
+    useAppStore.getState().beginHostEpoch(host("h2"));
+    expect(useAppStore.getState().transcriptDrafts).toEqual({});
+  });
+
+  it("parks the live foreground Session when switching workspace", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 1));
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 1),
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "assistant", content: "live", startedAt: 100 }],
+    });
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w2", 2));
+    expect(useAppStore.getState().session).toBeNull();
+    expect(useAppStore.getState().transcriptDrafts.s1?.messages[0]).toMatchObject({
+      startedAt: 100,
+    });
+
+    useAppStore.getState().applyAgentTranscriptEvent(
+      "s1",
+      {
+        runId: "r1",
+        event: {
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: " on" },
+        },
+      },
+      1,
+      5_000,
+    );
+    expect(useAppStore.getState().transcriptDrafts.s1?.messages[0]).toMatchObject({
+      startedAt: 100,
+    });
+    expect(useAppStore.getState().sessionCatalog.entries.s1).toBeUndefined();
+  });
+
+  it("does not list a parked Session from another Workspace", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 1));
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 1),
+      cwd: "/p/w1",
+      isIdle: false,
+      isStreaming: true,
+      tools: { ...session("s1", 1).tools, workspaceId: "w1" },
+      messages: [{ role: "assistant", content: "live", startedAt: 100 }],
+    });
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w2", 2));
+    useAppStore.getState().applyAgentTranscriptEvent(
+      "s1",
+      {
+        runId: "r1",
+        event: {
+          type: "message_update",
+          assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: " on" },
+        },
+      },
+      1,
+      5_000,
+    );
+
+    expect(useAppStore.getState().sessionCatalog.entries.s1).toBeUndefined();
+    expect(useAppStore.getState().transcriptDrafts.s1).toBeDefined();
+  });
+
+  it("drops a settled draft when opening the Session from disk", () => {
+    useAppStore.getState().beginHostEpoch(host("h1"));
+    useAppStore.getState().applyWorkspaceSnapshot(workspace("w1", 1));
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 1),
+      isIdle: false,
+      isStreaming: true,
+      messages: [{ role: "assistant", content: "live", startedAt: 100 }],
+    });
+    useAppStore.getState().applySessionSnapshot(session("s2", 2));
+    useAppStore.getState().applyAgentTranscriptEvent("s1", {
+      runId: "r1",
+      event: { type: "agent_settled" },
+    });
+    expect(useAppStore.getState().transcriptDrafts.s1).toBeUndefined();
+
+    useAppStore.getState().applySessionSnapshot({
+      ...session("s1", 4),
+      messages: [{ role: "assistant", content: "from file" }],
+    });
+    expect(useAppStore.getState().session?.messages).toEqual([
+      { role: "assistant", content: "from file" },
+    ]);
   });
 
   it("clears the Session Catalog only when the workspace epoch changes", () => {

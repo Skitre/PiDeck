@@ -11,7 +11,11 @@ import {
 import type { PiHostServer } from "./server.js";
 import { activateOnce } from "./extension-ui-lifecycle.js";
 import { createExtensionCommandContextActions } from "./extension-command-actions.js";
-import { SessionRuntimeCache, type ActiveSessionState } from "./session-runtime-cache.js";
+import {
+  SessionRuntimeCache,
+  type ActiveSessionState,
+  type ResolvedSessionTarget,
+} from "./session-runtime-cache.js";
 import type { AgentOperationLock } from "./locks.js";
 import { WorkspaceLifecycle } from "./workspace-lifecycle.js";
 export * from "./workspace-graph-types.js";
@@ -32,6 +36,7 @@ import {
   renameSession,
   restoreSession,
   setActiveSessionName,
+  setSessionRuntimeName,
 } from "./session-lifecycle.js";
 
 export class WorkspaceGraphFactory {
@@ -41,8 +46,6 @@ export class WorkspaceGraphFactory {
   server: PiHostServer | null = null;
   readonly deps: GraphFactoryDeps;
   onModelHealthChanged?: () => void;
-  /** Active run id for agent events */
-  currentRunId: string | null = null;
   private readonly sessionRuntimeCache: SessionRuntimeCache;
   private readonly workspaceLifecycle: WorkspaceLifecycle;
 
@@ -51,8 +54,9 @@ export class WorkspaceGraphFactory {
     this.sessionRuntimeCache = new SessionRuntimeCache({
       getGraph: () => this.graph,
       getServer: () => this.server,
-      getCurrentRunId: () => this.currentRunId,
       sessionPathsEqual: (left, right) => this.sessionPathsEqual(left, right),
+      onRetainedGraphBecameIdle: (graph) =>
+        this.workspaceLifecycle.suspendIdleRetainedProviders(graph),
     });
     this.workspaceLifecycle = new WorkspaceLifecycle(
       {
@@ -116,6 +120,34 @@ export class WorkspaceGraphFactory {
 
   hasBusySessions(): boolean {
     return this.sessionRuntimeCache.hasBusySessions();
+  }
+
+  hasBusyRetainedSessions(): boolean {
+    return this.workspaceLifecycle.hasBusyRetainedSessions();
+  }
+
+  hasRunningSessions(): boolean {
+    return this.sessionRuntimeCache.hasRunningSessions();
+  }
+
+  liveSessionCount(): number {
+    return this.sessionRuntimeCache.liveSessionCount();
+  }
+
+  wouldExceedLiveSessionLimit(): boolean {
+    return this.sessionRuntimeCache.wouldExceedLiveSessionLimit();
+  }
+
+  markTitleRefine(session: AgentSession, pending: boolean): void {
+    this.sessionRuntimeCache.markTitleRefine(session, pending);
+  }
+
+  resolveSessionTarget(sessionId: unknown, sessionRevision: unknown): ResolvedSessionTarget | null {
+    return this.sessionRuntimeCache.resolveSessionTarget(sessionId, sessionRevision);
+  }
+
+  findRuntimeForSession(session: AgentSession): ResolvedSessionTarget | null {
+    return this.sessionRuntimeCache.findRuntimeForSession(session);
   }
 
   getSessionRuntimeInfo(
@@ -262,6 +294,10 @@ export class WorkspaceGraphFactory {
 
   setActiveSessionName(name: string) {
     return setActiveSessionName(this, name);
+  }
+
+  setSessionRuntimeName(session: AgentSession, name: string) {
+    return setSessionRuntimeName(this, session, name);
   }
 
   async refineActiveSessionName(args: {

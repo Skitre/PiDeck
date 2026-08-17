@@ -645,6 +645,10 @@ describe("Host error codes", () => {
   it("exposes a typed non-directory Workspace error", () => {
     expect(HOST_ERROR_CODES).toContain("WORKSPACE_NOT_DIRECTORY");
   });
+
+  it("exposes a typed live-Session limit error", () => {
+    expect(HOST_ERROR_CODES).toContain("SESSION_LIMIT");
+  });
 });
 
 describe("protocol coverage — events", () => {

@@ -14,6 +14,7 @@ import {
   Undo2,
   X,
 } from "lucide-react";
+import { busySendMethod } from "../../lib/busy-send";
 import { useAppStore } from "../../lib/stores/app-store";
 import { isExtensionDecisionBlockingSession } from "../../lib/stores/extension-ui-state";
 import { hostClient } from "../../lib/bridge/host-client";
@@ -283,6 +284,7 @@ export function Composer({
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
   const session = useAppStore((s) => s.session);
+  const busySendBehavior = useAppStore((s) => s.desktopSettings?.busySendBehavior);
   const extensionUiRequest = useAppStore((s) => s.extensionUiRequest);
   const extensionDecisionGroups = useAppStore((s) => s.extensionDecisionGroups);
   const draftTarget = draftTargetFor(workspace, session);
@@ -1216,8 +1218,7 @@ export function Composer({
 
     try {
       if (busy) {
-        // Busy sends append to the waiting queue (follow-up), never run concurrently.
-        const res = await hostClient.request("agent.followUp", context, {
+        const res = await hostClient.request(busySendMethod(busySendBehavior), context, {
           text: outgoingText,
           ...imageParams,
           ...attachmentParams,

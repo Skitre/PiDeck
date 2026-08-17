@@ -88,6 +88,9 @@ describe("persistDesktopSettings", () => {
 
     await persistDesktopSettings({ themeFamily: "apple" });
     expect(useAppStore.getState().desktopSettings?.themeFamily).toBe("apple");
+
+    await persistDesktopSettings({ busySendBehavior: "steer" });
+    expect(useAppStore.getState().desktopSettings?.busySendBehavior).toBe("steer");
   });
 
   it("applies shortcut override maps through the browser settings path", async () => {
@@ -118,6 +121,9 @@ describe("persistDesktopSettings", () => {
     await expect(persistDesktopSettings({ futureSetting: true } as never)).rejects.toThrow(
       "Unknown desktop settings field",
     );
+    await expect(
+      persistDesktopSettings({ busySendBehavior: "interrupt" } as never),
+    ).rejects.toThrow("Invalid busy send behavior");
     await expect(persistDesktopSettings({ interfaceDensity: "dense" } as never)).rejects.toThrow(
       "Invalid interface density",
     );

@@ -464,6 +464,11 @@ html[data-theme-family="apple"] {
   --theme-floating-material: color-mix(in srgb, var(--color-surface-raised) 90%, transparent);
 }
 
+/* Windows acrylic shows more wallpaper than macOS vibrancy at the same tint. */
+html[data-theme-family="apple"] [data-pideck-app][data-window-platform="windows"] {
+  --theme-sidebar-material: color-mix(in srgb, var(--color-sidebar) 40%, transparent);
+}
+
 html[data-theme-family="apple"].light {
   --color-surface: #f5f5f7;
   --color-surface-raised: #ffffff;

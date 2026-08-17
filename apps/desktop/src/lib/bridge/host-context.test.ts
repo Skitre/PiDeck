@@ -10,6 +10,7 @@ import {
   isCurrentRequestGeneration,
   latestSessionTargetContext,
   mergeHostIdentity,
+  sessionTargetContext,
   workspaceContext,
 } from "./host-context";
 
@@ -44,6 +45,28 @@ function identity(overrides: Partial<HostIdentity> = {}): HostIdentity {
     ...overrides,
   };
 }
+
+describe("sessionTargetContext", () => {
+  it("addresses a concrete Session generation without using the foreground snapshot", () => {
+    expect(
+      sessionTargetContext(
+        current,
+        {
+          id: current.workspaceId!,
+          revision: current.workspaceRevision,
+        } as WorkspaceSnapshot,
+        "44444444-4444-4444-8444-444444444444",
+        3,
+      ),
+    ).toEqual({
+      expectedHostInstanceId: current.hostInstanceId,
+      expectedWorkspaceId: current.workspaceId,
+      expectedWorkspaceRevision: current.workspaceRevision,
+      expectedSessionId: "44444444-4444-4444-8444-444444444444",
+      expectedSessionRevision: 3,
+    });
+  });
+});
 
 describe("workspaceContext", () => {
   it("uses the Host generation before a Workspace snapshot is available", () => {

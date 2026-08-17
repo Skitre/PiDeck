@@ -126,9 +126,25 @@ export class WorkspaceLifecycle {
 
   private suspendGraphProviders(graph: WorkspaceGraph): void {
     if (!graph.providerOwner || graph.suspendedProviders !== undefined) return;
+    // A live turn still holds the registered client. Unregistering mid-stream
+    // aborts model output on the parked Workspace.
+    if (this.graphHasBusySessions(graph)) return;
     graph.suspendedProviders = this.context.deps.providerOwnership.suspendOwner(
       graph.providerOwner,
     );
+  }
+
+  hasBusyRetainedSessions(): boolean {
+    for (const graph of this.retainedGraphs.values()) {
+      if (this.graphHasBusySessions(graph)) return true;
+    }
+    return false;
+  }
+
+  suspendIdleRetainedProviders(graph: WorkspaceGraph): void {
+    if (this.context.getGraph() === graph) return;
+    if (![...this.retainedGraphs.values()].includes(graph)) return;
+    this.suspendGraphProviders(graph);
   }
 
   private resumeGraphProviders(graph: WorkspaceGraph): void {
@@ -209,17 +225,9 @@ export class WorkspaceLifecycle {
     }
 
     let previousGraph: WorkspaceGraph | null = null;
+    let pendingPublish: (() => void) | null = null;
     try {
       operation.signal.throwIfAborted();
-      if (this.sessionRuntimeCache.hasBusySessions()) {
-        return {
-          error: createHostError(
-            "AGENT_BUSY",
-            "Agent is busy; stop it before switching workspace",
-            { retryable: true },
-          ),
-        };
-      }
 
       let canonical: string;
       try {
@@ -235,6 +243,15 @@ export class WorkspaceLifecycle {
       }
 
       previousGraph = this.context.getGraph();
+      if (!this.canAcceptOutgoingRetention(previousGraph, canonical)) {
+        return {
+          error: createHostError(
+            "AGENT_BUSY",
+            "Too many workspaces are still running. Stop one before switching.",
+            { retryable: true },
+          ),
+        };
+      }
       const workspaceId = randomUUID();
       const revision = server.identity.workspaceRevision + 1;
       const invalidatedSessionRevision =
@@ -250,7 +267,13 @@ export class WorkspaceLifecycle {
         packageRevision: candidatePackageRevision,
         signal: operation.signal,
       });
-      if (reactivated) return reactivated;
+      if (reactivated) {
+        pendingPublish = reactivated.publish;
+        return {
+          workspace: reactivated.workspace,
+          ...(reactivated.session ? { session: reactivated.session } : {}),
+        };
+      }
 
       if (previousGraph) this.suspendGraphProviders(previousGraph);
       const built = await this.buildServices({
@@ -281,12 +304,12 @@ export class WorkspaceLifecycle {
       }
 
       const previousIdentity = server.getIdentity();
-      this.context.setGraph(built.graph);
       server.identity.workspaceId = workspaceId;
       server.identity.workspaceRevision = revision;
       server.identity.sessionId = built.graph.sessionSnapshot?.sessionId ?? null;
       server.identity.sessionRevision = candidateSessionRevision;
       server.identity.packageRevision = candidatePackageRevision;
+      this.context.setGraph(built.graph);
 
       let publishExtensionUi = () => {};
       try {
@@ -325,13 +348,16 @@ export class WorkspaceLifecycle {
       server.setPhase("ready");
       server.setLastError(undefined);
       const workspace = this.buildWorkspaceSnapshot(built.graph);
-      this.publishWorkspaceSnapshots(server, built.graph, workspace);
-      publishExtensionUi();
+      pendingPublish = () => {
+        this.publishWorkspaceSnapshots(server, built.graph, workspace);
+        publishExtensionUi();
+      };
       return {
         workspace,
         ...(built.graph.sessionSnapshot ? { session: built.graph.sessionSnapshot } : {}),
       };
     } catch (err) {
+      pendingPublish = null;
       if (previousGraph && this.context.getGraph() === previousGraph) {
         this.resumeGraphProviders(previousGraph);
       }
@@ -345,6 +371,16 @@ export class WorkspaceLifecycle {
     } finally {
       server.serviceGraphLock.release(requestId);
       operation.finish();
+      // Desktop refreshes session.list / session.open as soon as
+      // workspace.changed lands. Publish only after the lock is free so those
+      // reads are not rejected as SERVICE_GRAPH_BUSY.
+      try {
+        pendingPublish?.();
+      } catch (err) {
+        logger.warn("Failed to publish Workspace snapshots after switch", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 
@@ -383,18 +419,34 @@ export class WorkspaceLifecycle {
     return captureFilesystemFingerprint({ roots, markers, signal });
   }
 
-  private async retainGraph(graph: WorkspaceGraph, signal?: AbortSignal): Promise<void> {
-    if (
-      !graph.servicesReady ||
-      !graph.agentSession ||
-      !graph.agentSession.isIdle ||
-      graph.backgroundSessions.size > 0
-    ) {
-      await this.disposeGraph(graph);
-      return;
+  private graphHasBusySessions(graph: WorkspaceGraph): boolean {
+    return this.sessionRuntimeCache.graphHasBusySessions(graph);
+  }
+
+  private willRetainGraph(graph: WorkspaceGraph): boolean {
+    if (!graph.servicesReady || !graph.agentSession) return false;
+    if (this.graphHasBusySessions(graph)) return true;
+    return graph.backgroundSessions.size === 0;
+  }
+
+  private oldestIdleRetainedKey(): string | undefined {
+    for (const [key, graph] of this.retainedGraphs) {
+      if (!this.graphHasBusySessions(graph)) return key;
     }
-    graph.unsubscribeAgent?.();
-    graph.unsubscribeAgent = null;
+    return undefined;
+  }
+
+  private canAcceptOutgoingRetention(
+    previousGraph: WorkspaceGraph | null,
+    targetCanonical: string,
+  ): boolean {
+    if (!previousGraph || !this.willRetainGraph(previousGraph)) return true;
+    if (this.retainedGraphs.has(this.retainedGraphKey(targetCanonical))) return true;
+    if (this.retainedGraphs.size < WorkspaceLifecycle.MAX_RETAINED_GRAPHS) return true;
+    return this.oldestIdleRetainedKey() !== undefined;
+  }
+
+  private detachExtensionUi(graph: WorkspaceGraph): void {
     graph.extensionUiActivate = null;
     try {
       graph.extensionUiCleanup?.();
@@ -404,6 +456,19 @@ export class WorkspaceLifecycle {
     graph.extensionUiCleanup = null;
     graph.extensionUiUpdateIdentity = null;
     graph.extensionUiReplayState = null;
+  }
+
+  private async retainGraph(graph: WorkspaceGraph, signal?: AbortSignal): Promise<void> {
+    if (!this.willRetainGraph(graph)) {
+      await this.disposeGraph(graph);
+      return;
+    }
+    const busy = this.graphHasBusySessions(graph);
+    if (!busy) {
+      graph.unsubscribeAgent?.();
+      graph.unsubscribeAgent = null;
+    }
+    this.detachExtensionUi(graph);
     // The switch path may already have parked this owner before building the
     // incoming graph. Preserve that pre-merge snapshot when retention finishes.
     this.suspendGraphProviders(graph);
@@ -421,7 +486,7 @@ export class WorkspaceLifecycle {
     if (existing && existing !== graph) await this.disposeGraph(existing);
     this.retainedGraphs.set(key, graph);
     while (this.retainedGraphs.size > WorkspaceLifecycle.MAX_RETAINED_GRAPHS) {
-      const oldestKey = this.retainedGraphs.keys().next().value;
+      const oldestKey = this.oldestIdleRetainedKey();
       if (oldestKey === undefined) break;
       const evicted = this.retainedGraphs.get(oldestKey);
       this.retainedGraphs.delete(oldestKey);
@@ -453,7 +518,11 @@ export class WorkspaceLifecycle {
     sessionRevision: number;
     packageRevision: number;
     signal?: AbortSignal;
-  }): Promise<{ workspace: WorkspaceSnapshot; session?: SessionSnapshot } | null> {
+  }): Promise<{
+    workspace: WorkspaceSnapshot;
+    session?: SessionSnapshot;
+    publish: () => void;
+  } | null> {
     const server = this.context.getServer();
     if (!server) return null;
     const graph = this.takeRetainedGraph(args.canonical);
@@ -477,11 +546,17 @@ export class WorkspaceLifecycle {
       throw err;
     }
     if (retainedFingerprint !== currentFingerprint) {
-      logger.info("Retained workspace changed on disk; rebuilding", {
-        cwd: args.canonical,
-      });
-      await this.disposeGraph(graph);
-      return null;
+      if (this.graphHasBusySessions(graph)) {
+        logger.warn("Retained workspace changed on disk; keeping live runtimes", {
+          cwd: args.canonical,
+        });
+      } else {
+        logger.info("Retained workspace changed on disk; rebuilding", {
+          cwd: args.canonical,
+        });
+        await this.disposeGraph(graph);
+        return null;
+      }
     }
     if (!graph.servicesReady || !graph.agentSession || !graph.sessionManager) {
       await this.disposeGraph(graph);
@@ -557,9 +632,11 @@ export class WorkspaceLifecycle {
         workspaceId: graph.workspaceId,
         toolRevision: graph.toolRevision,
       });
-      graph.unsubscribeAgent = session.subscribe((event) => {
-        this.sessionRuntimeCache.handleAgentEvent(graph, session, event);
-      });
+      if (!graph.unsubscribeAgent) {
+        graph.unsubscribeAgent = session.subscribe((event) => {
+          this.sessionRuntimeCache.handleAgentEvent(graph, session, event);
+        });
+      }
     } catch (err) {
       logger.warn("retained graph preparation failed; rebuilding workspace", {
         cwd: args.canonical,
@@ -577,12 +654,12 @@ export class WorkspaceLifecycle {
 
     const previousIdentity = server.getIdentity();
     graph.revision = args.revision;
-    this.context.setGraph(graph);
     server.identity.workspaceId = graph.workspaceId;
     server.identity.workspaceRevision = args.revision;
     server.identity.sessionId = sessionId;
     server.identity.sessionRevision = args.sessionRevision;
     server.identity.packageRevision = args.packageRevision;
+    this.context.setGraph(graph);
 
     let publishExtensionUi = () => {};
     try {
@@ -605,11 +682,13 @@ export class WorkspaceLifecycle {
     server.setPhase("ready");
     server.setLastError(undefined);
     const workspace = this.buildWorkspaceSnapshot(graph);
-    this.publishWorkspaceSnapshots(server, graph, workspace);
-    publishExtensionUi();
     return {
       workspace,
       ...(graph.sessionSnapshot ? { session: graph.sessionSnapshot } : {}),
+      publish: () => {
+        this.publishWorkspaceSnapshots(server, graph, workspace);
+        publishExtensionUi();
+      },
     };
   }
 

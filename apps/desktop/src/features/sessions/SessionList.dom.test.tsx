@@ -92,4 +92,30 @@ describe("SessionList menu", () => {
     expect(menu?.closest(".collapsible-region__content")).toBeNull();
     expect(menu).toHaveStyle({ left: "64px", top: "144px" });
   });
+
+  it("portals the delete confirm out of the clipped collapsible region", () => {
+    render(<SessionList />);
+    fireEvent.click(screen.getByRole("button", { name: "Session actions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Permanently delete Session?" });
+    expect(dialog).toHaveAttribute("data-session-confirm");
+    expect(dialog.closest(".collapsible-region__content")).toBeNull();
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
+  });
+
+  it("shows a running status without a stop control", () => {
+    useAppStore.getState().replaceSessionCatalog(workspace.id, [
+      {
+        ...summary,
+        runtimeState: "running",
+        sessionRevision: 4,
+      },
+    ]);
+
+    render(<SessionList />);
+
+    expect(screen.getByLabelText("running")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
 });

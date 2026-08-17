@@ -24,6 +24,7 @@ import { toolResultNeedsToolsRefresh } from "./tools-refresh.js";
 import type { BackgroundSessionRuntime, WorkspaceGraph } from "./workspace-graph-types.js";
 
 export const SESSION_DISPOSAL_STEP_TIMEOUT_MS = 15_000;
+export const MAX_LIVE_SESSIONS = 5;
 
 type DisposalStepResult =
   { status: "completed" } | { status: "failed"; error: unknown } | { status: "timed_out" };
@@ -134,15 +135,35 @@ export function commitActiveSessionState(
 export type SessionRuntimeCacheContext = {
   getGraph: () => WorkspaceGraph | null;
   getServer: () => PiHostServer | null;
-  getCurrentRunId: () => string | null;
   sessionPathsEqual: (left: string | undefined, right: string) => boolean;
+  onRetainedGraphBecameIdle?: (graph: WorkspaceGraph) => void;
 };
+
+export type ResolvedSessionTarget = {
+  identity: HostIdentity;
+  agentSession: AgentSession;
+  sessionManager: BackgroundSessionRuntime["sessionManager"];
+  sessionSnapshot: SessionSnapshot;
+  toolRevision: number;
+  isActive: boolean;
+  background?: BackgroundSessionRuntime;
+};
+
+function liveSessionCount(graph: WorkspaceGraph): number {
+  return (graph.agentSession ? 1 : 0) + graph.backgroundSessions.size;
+}
+
+function wouldExceedLiveSessionLimit(graph: WorkspaceGraph, currentIsBusy: boolean): boolean {
+  const disposingCurrent = Boolean(graph.agentSession) && !currentIsBusy;
+  return liveSessionCount(graph) - (disposingCurrent ? 1 : 0) + 1 > MAX_LIVE_SESSIONS;
+}
 
 export class SessionRuntimeCache {
   private readonly runtimeStates = new WeakMap<AgentSession, SessionRuntimeState>();
   private readonly sessionOperationLocks = new WeakMap<AgentSession, AgentOperationLock>();
   private readonly runIds = new WeakMap<AgentSession, string>();
   private readonly disposedSessions = new WeakSet<AgentSession>();
+  private readonly titleRefineSessions = new WeakSet<AgentSession>();
 
   constructor(private readonly context: SessionRuntimeCacheContext) {}
 
@@ -187,11 +208,105 @@ export class SessionRuntimeCache {
     return observed.queue;
   }
 
+  graphHasBusySessions(graph: WorkspaceGraph): boolean {
+    if (graph.agentSession && this.isSessionBusy(graph.agentSession)) return true;
+    for (const runtime of graph.backgroundSessions.values()) {
+      if (this.isSessionBusy(runtime.agentSession)) return true;
+    }
+    return false;
+  }
+
   hasBusySessions(): boolean {
     const graph = this.context.getGraph();
+    return graph ? this.graphHasBusySessions(graph) : false;
+  }
+
+  hasRunningSessions(): boolean {
+    return this.hasBusySessions();
+  }
+
+  liveSessionCount(): number {
+    const graph = this.context.getGraph();
+    return graph ? liveSessionCount(graph) : 0;
+  }
+
+  wouldExceedLiveSessionLimit(): boolean {
+    const graph = this.context.getGraph();
     if (!graph) return false;
-    if (graph.agentSession && this.isSessionBusy(graph.agentSession)) return true;
-    return graph.backgroundSessions.size > 0;
+    const currentIsBusy = graph.agentSession ? this.isSessionBusy(graph.agentSession) : false;
+    return wouldExceedLiveSessionLimit(graph, currentIsBusy);
+  }
+
+  markTitleRefine(session: AgentSession, pending: boolean): void {
+    if (pending) this.titleRefineSessions.add(session);
+    else this.titleRefineSessions.delete(session);
+  }
+
+  resolveSessionTarget(sessionId: unknown, sessionRevision: unknown): ResolvedSessionTarget | null {
+    const identity = this.resolveSessionIdentity(sessionId, sessionRevision);
+    const graph = this.context.getGraph();
+    const server = this.context.getServer();
+    if (!identity || !graph || !server || typeof sessionId !== "string") return null;
+    if (
+      graph.agentSession &&
+      graph.sessionManager &&
+      graph.sessionSnapshot &&
+      server.identity.sessionId === sessionId &&
+      server.identity.sessionRevision === sessionRevision
+    ) {
+      return {
+        identity,
+        agentSession: graph.agentSession,
+        sessionManager: graph.sessionManager,
+        sessionSnapshot: graph.sessionSnapshot,
+        toolRevision: graph.toolRevision,
+        isActive: true,
+      };
+    }
+    const background = graph.backgroundSessions.get(sessionId);
+    if (!background || background.sessionRevision !== sessionRevision) return null;
+    return {
+      identity,
+      agentSession: background.agentSession,
+      sessionManager: background.sessionManager,
+      sessionSnapshot: background.sessionSnapshot,
+      toolRevision: background.toolRevision,
+      isActive: false,
+      background,
+    };
+  }
+
+  findRuntimeForSession(session: AgentSession): ResolvedSessionTarget | null {
+    const graph = this.context.getGraph();
+    const server = this.context.getServer();
+    if (!graph || !server) return null;
+    if (graph.agentSession === session && graph.sessionManager && graph.sessionSnapshot) {
+      return {
+        identity: server.getIdentity(),
+        agentSession: session,
+        sessionManager: graph.sessionManager,
+        sessionSnapshot: graph.sessionSnapshot,
+        toolRevision: graph.toolRevision,
+        isActive: true,
+      };
+    }
+    const background = [...graph.backgroundSessions.values()].find(
+      (runtime) => runtime.agentSession === session,
+    );
+    if (!background) return null;
+    return {
+      identity: {
+        ...server.getIdentity(),
+        sessionId: background.sessionId,
+        sessionRevision: background.sessionRevision,
+      },
+      agentSession: session,
+      sessionManager: background.sessionManager,
+      sessionSnapshot: background.sessionSnapshot,
+      toolRevision: background.toolRevision,
+      isActive: false,
+      background,
+    };
   }
 
   getSessionRuntimeInfo(
@@ -443,8 +558,23 @@ export class SessionRuntimeCache {
   }
 
   handleAgentEvent(graph: WorkspaceGraph, sourceSession: AgentSession, event: unknown): void {
+    try {
+      this.publishAgentEvent(graph, sourceSession, event);
+    } catch (error) {
+      logger.warn("Failed to publish agent event", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private publishAgentEvent(
+    graph: WorkspaceGraph,
+    sourceSession: AgentSession,
+    event: unknown,
+  ): void {
     const server = this.context.getServer();
-    if (!server || this.context.getGraph() !== graph) return;
+    if (!server) return;
+    const graphIsCurrent = this.context.getGraph() === graph;
 
     const active = graph.agentSession === sourceSession;
     const background = active
@@ -455,11 +585,11 @@ export class SessionRuntimeCache {
     const sessionManager = active ? graph.sessionManager : background?.sessionManager;
     const currentSnapshot = active ? graph.sessionSnapshot : background?.sessionSnapshot;
     if (!sessionManager || !currentSnapshot) return;
-    const eventIdentity: HostIdentity = {
-      ...server.getIdentity(),
-      sessionId: currentSnapshot.sessionId,
-      sessionRevision: currentSnapshot.revision,
-    };
+    const eventIdentity = this.identityForGraphSession(
+      graph,
+      currentSnapshot.sessionId,
+      currentSnapshot.revision,
+    );
 
     const eventType =
       typeof event === "object" && event !== null && "type" in event
@@ -500,15 +630,15 @@ export class SessionRuntimeCache {
         sessionId: nextSnapshot.sessionId,
         ...(nextSnapshot.name ? { name: nextSnapshot.name } : {}),
       });
-      if (active) server.emitForIdentity(eventIdentity, "session.snapshot", nextSnapshot);
+      if (active && graphIsCurrent) {
+        server.emitForIdentity(eventIdentity, "session.snapshot", nextSnapshot);
+      }
       return;
     }
 
-    const runId = this.runIds.get(sourceSession) ?? this.context.getCurrentRunId() ?? randomUUID();
+    const runId = this.runIds.get(sourceSession) ?? randomUUID();
     const serialized = normalizeAgentEvent(event);
-    if (active) {
-      server.emitForIdentity(eventIdentity, "agent.event", { runId, event: serialized });
-    }
+    server.emitForIdentity(eventIdentity, "agent.event", { runId, event: serialized });
     this.publishRuntimeState(sourceSession, eventIdentity, eventType, serialized);
 
     if (toolResultNeedsToolsRefresh(event)) {
@@ -522,7 +652,9 @@ export class SessionRuntimeCache {
       });
       if (active && graph.sessionSnapshot) graph.sessionSnapshot.tools = tools;
       if (!active && background) background.sessionSnapshot.tools = tools;
-      if (active) server.emitForIdentity(eventIdentity, "agent.toolsChanged", tools);
+      if (active && graphIsCurrent) {
+        server.emitForIdentity(eventIdentity, "agent.toolsChanged", tools);
+      }
     }
 
     const snapshot = active ? graph.sessionSnapshot : background?.sessionSnapshot;
@@ -532,6 +664,9 @@ export class SessionRuntimeCache {
     if (eventType !== "agent_end" && eventType !== "agent_settled") return;
 
     if (!this.hasBusySessions()) server.setPhase("ready");
+    if (!graphIsCurrent && !this.graphHasBusySessions(graph)) {
+      this.context.onRetainedGraphBecameIdle?.(graph);
+    }
     const lifecycleSnapshot = buildSessionSnapshot({
       session: sourceSession,
       sessionManager,
@@ -543,7 +678,9 @@ export class SessionRuntimeCache {
     });
     if (active) {
       graph.sessionSnapshot = lifecycleSnapshot;
-      server.emitForIdentity(eventIdentity, "session.snapshot", lifecycleSnapshot);
+      if (graphIsCurrent) {
+        server.emitForIdentity(eventIdentity, "session.snapshot", lifecycleSnapshot);
+      }
     } else if (background) {
       background.sessionSnapshot = lifecycleSnapshot;
       if (eventType === "agent_settled") {
@@ -618,16 +755,42 @@ export class SessionRuntimeCache {
   ): Promise<void> {
     const server = this.context.getServer();
     if (!server) return;
+    if (this.titleRefineSessions.has(runtime.agentSession)) return;
+    if (this.isSessionBusy(runtime.agentSession)) return;
+    this.publishRuntimeState(
+      runtime.agentSession,
+      this.identityForGraphSession(graph, runtime.sessionId, runtime.sessionRevision),
+      "agent_settled",
+    );
     const requestId = `background-settle:${runtime.sessionId}`;
     await server.serviceGraphLock.acquireUnbounded({
       operationKind: "session.cleanup",
       requestId,
     });
     try {
+      if (this.titleRefineSessions.has(runtime.agentSession)) return;
+      if (this.isSessionBusy(runtime.agentSession)) return;
       await this.disposeBackgroundRuntime(graph, runtime);
     } finally {
       server.serviceGraphLock.release(requestId);
     }
+  }
+
+  private identityForGraphSession(
+    graph: WorkspaceGraph,
+    sessionId: string,
+    sessionRevision: number,
+  ): HostIdentity {
+    const server = this.context.getServer()!;
+    const identity = server.getIdentity();
+    const current = this.context.getGraph() === graph;
+    return {
+      ...identity,
+      workspaceId: graph.workspaceId,
+      workspaceRevision: current ? identity.workspaceRevision : graph.revision,
+      sessionId,
+      sessionRevision,
+    };
   }
 
   private publishRuntimeState(
