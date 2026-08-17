@@ -43,11 +43,7 @@ describe("includeCurrentModel", () => {
         thinkingLevels: ["off"],
       },
     ];
-    expect(thinkingLevelsForModel(models, current, ["off"])).toEqual([
-      "low",
-      "medium",
-      "high",
-    ]);
+    expect(thinkingLevelsForModel(models, current, ["off"])).toEqual(["low", "medium", "high"]);
     expect(thinkingLevelsForModel(models, models[1], ["low"])).toEqual(["off"]);
   });
 });
@@ -73,14 +69,7 @@ describe("model menu resize geometry", () => {
 
 describe("thinkingLevelLabel", () => {
   it("keeps model thinking levels in English", () => {
-    expect([
-      "off",
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ].map(thinkingLevelLabel)).toEqual([
+    expect(["off", "minimal", "low", "medium", "high", "xhigh"].map(thinkingLevelLabel)).toEqual([
       "Off",
       "Minimal",
       "Low",

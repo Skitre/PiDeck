@@ -71,8 +71,7 @@ export function setPackageResourceFilter(
       // Force-excludes win over force-includes in the SDK, so remove every
       // exact force-exclude that targets this resource before enabling it.
       const filters = existing.filter(
-        (filter) =>
-          !filter.startsWith("-") || !matchesResourcePattern(rel, filter.slice(1), true),
+        (filter) => !filter.startsWith("-") || !matchesResourcePattern(rel, filter.slice(1), true),
       );
       if (!isEnabledByPackagePatterns(rel, filters)) {
         filters.push(`+${rel}`);
@@ -93,8 +92,7 @@ export function setPackageResourceFilter(
       next[key] = [];
     } else {
       const filters = existing.filter(
-        (filter) =>
-          !filter.startsWith("+") || !matchesResourcePattern(rel, filter.slice(1), true),
+        (filter) => !filter.startsWith("+") || !matchesResourcePattern(rel, filter.slice(1), true),
       );
       if (!filters.includes(`-${rel}`)) {
         filters.push(`-${rel}`);
@@ -121,8 +119,7 @@ export function setTopLevelPathEnabled(
 
   if (!enabled) {
     const next = patterns.filter(
-      (pattern) =>
-        !pattern.startsWith("+") || !matchesResourcePattern(rel, pattern.slice(1), true),
+      (pattern) => !pattern.startsWith("+") || !matchesResourcePattern(rel, pattern.slice(1), true),
     );
     if (!next.includes(minus)) next.push(minus);
     return next;
@@ -130,16 +127,13 @@ export function setTopLevelPathEnabled(
 
   // enable
   let next = patterns.filter(
-    (pattern) =>
-      !pattern.startsWith("-") || !matchesResourcePattern(rel, pattern.slice(1), true),
+    (pattern) => !pattern.startsWith("-") || !matchesResourcePattern(rel, pattern.slice(1), true),
   );
   const stillExcluded = next.some(
-    (pattern) =>
-      pattern.startsWith("!") && matchesResourcePattern(rel, pattern.slice(1)),
+    (pattern) => pattern.startsWith("!") && matchesResourcePattern(rel, pattern.slice(1)),
   );
   const forceIncluded = next.some(
-    (pattern) =>
-      pattern.startsWith("+") && matchesResourcePattern(rel, pattern.slice(1), true),
+    (pattern) => pattern.startsWith("+") && matchesResourcePattern(rel, pattern.slice(1), true),
   );
   if (stillExcluded && !forceIncluded) {
     next = [...next, plus];
@@ -147,11 +141,7 @@ export function setTopLevelPathEnabled(
   return next;
 }
 
-export function matchesResourcePattern(
-  path: string,
-  pattern: string,
-  exact = false,
-): boolean {
+export function matchesResourcePattern(path: string, pattern: string, exact = false): boolean {
   const normalizedPath = toPosixPath(path);
   const normalizedPattern = toPosixPath(pattern).replace(/^\.\//, "");
   if (exact) {

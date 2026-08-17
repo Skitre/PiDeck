@@ -35,9 +35,7 @@ describe("setPackageResourceFilter", () => {
       "extensions/a.ts",
       false,
     );
-    expect(result).toEqual([
-      { source: "npm:foo", extensions: ["-extensions/a.ts"] },
-    ]);
+    expect(result).toEqual([{ source: "npm:foo", extensions: ["-extensions/a.ts"] }]);
   });
 
   it("re-enables a single extension", () => {
@@ -78,13 +76,7 @@ describe("setPackageResourceFilter", () => {
   });
 
   it("does not rewrite unrelated packages", () => {
-    const result = setPackageResourceFilter(
-      ["npm:a", "npm:b"],
-      "npm:a",
-      "theme",
-      "t.json",
-      false,
-    );
+    const result = setPackageResourceFilter(["npm:a", "npm:b"], "npm:a", "theme", "t.json", false);
     expect(result[1]).toBe("npm:b");
   });
 
@@ -157,11 +149,7 @@ describe("setPackageResourceFilter", () => {
     expect(result).toEqual([
       {
         source: "npm:foo",
-        skills: [
-          "skills/**",
-          "!skills/private/**",
-          "+skills/private/write/SKILL.md",
-        ],
+        skills: ["skills/**", "!skills/private/**", "+skills/private/write/SKILL.md"],
       },
     ]);
   });
@@ -170,12 +158,8 @@ describe("setPackageResourceFilter", () => {
 describe("matchesResourcePattern", () => {
   it("supports minimatch globstar semantics", () => {
     expect(matchesResourcePattern("extensions/a.ts", "extensions/**/a.ts")).toBe(true);
-    expect(matchesResourcePattern("extensions/deep/nested/a.ts", "extensions/**/a.ts")).toBe(
-      true,
-    );
-    expect(matchesResourcePattern("extensions/deep/nested/a.ts", "extensions/*/a.ts")).toBe(
-      false,
-    );
+    expect(matchesResourcePattern("extensions/deep/nested/a.ts", "extensions/**/a.ts")).toBe(true);
+    expect(matchesResourcePattern("extensions/deep/nested/a.ts", "extensions/*/a.ts")).toBe(false);
   });
 
   it("matches skill directory patterns", () => {
@@ -190,16 +174,11 @@ describe("setTopLevelPathEnabled", () => {
   });
 
   it("enables by removing -path", () => {
-    expect(setTopLevelPathEnabled(["-ext/a.ts", "other"], "ext/a.ts", true)).toEqual([
-      "other",
-    ]);
+    expect(setTopLevelPathEnabled(["-ext/a.ts", "other"], "ext/a.ts", true)).toEqual(["other"]);
   });
 
   it("adds +path when still excluded by !pattern", () => {
-    expect(setTopLevelPathEnabled(["!ext/*"], "ext/a.ts", true)).toEqual([
-      "!ext/*",
-      "+ext/a.ts",
-    ]);
+    expect(setTopLevelPathEnabled(["!ext/*"], "ext/a.ts", true)).toEqual(["!ext/*", "+ext/a.ts"]);
   });
 
   it("uses globstar exclusions when re-enabling", () => {
@@ -210,9 +189,9 @@ describe("setTopLevelPathEnabled", () => {
   });
 
   it("removes a skill parent force-include before disabling the skill", () => {
-    expect(
-      setTopLevelPathEnabled(["+skills/review"], "skills/review/SKILL.md", false),
-    ).toEqual(["-skills/review/SKILL.md"]);
+    expect(setTopLevelPathEnabled(["+skills/review"], "skills/review/SKILL.md", false)).toEqual([
+      "-skills/review/SKILL.md",
+    ]);
   });
 
   it("normalizes backslashes", () => {
