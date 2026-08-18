@@ -247,16 +247,39 @@ export function mapPackageUpdates(
   return summaries;
 }
 
+type SdkPackageMutationRecord = Pick<PackageSnapshot["configured"][number], "source"> &
+  Partial<Pick<PackageSnapshot["configured"][number], "kind" | "installedPath">>;
+
+/**
+ * SDK update/remove identity for a relative local source is resolved against
+ * cwd when the input has no scope, but settings store the path relative to
+ * agentDir (user) or `<cwd>/.pi` (project). Those bases diverge: project
+ * settings vs process cwd, and on Darwin a realpathed workspace (`/private/var`)
+ * vs an unresolved agentDir (`/var`). The already-resolved installedPath
+ * matches the settings-side identity.
+ */
+function sourceForSdkPackageMutation(record: SdkPackageMutationRecord): string {
+  if (!record.installedPath) return record.source;
+  const kind = record.kind ?? normalizePackageIdentity(record.source).kind;
+  return kind === "local" ? record.installedPath : record.source;
+}
+
 export async function updatePackageInScope(
   packageManager: NonNullable<WorkspaceGraph["packageManager"]>,
-  record: Pick<PackageSnapshot["configured"][number], "source" | "scope">,
+  record: Pick<PackageSnapshot["configured"][number], "source" | "scope"> &
+    Partial<Pick<PackageSnapshot["configured"][number], "kind" | "installedPath">>,
 ): Promise<void> {
-  await packageManager.update(record.source, { local: record.scope === "project" });
+  await packageManager.update(sourceForSdkPackageMutation(record), {
+    local: record.scope === "project",
+  });
 }
 
 export async function updateAllUserScopedPackages(
   packageManager: NonNullable<WorkspaceGraph["packageManager"]>,
-  configured: ReadonlyArray<Pick<PackageSnapshot["configured"][number], "source" | "scope">>,
+  configured: ReadonlyArray<
+    Pick<PackageSnapshot["configured"][number], "source" | "scope"> &
+      Partial<Pick<PackageSnapshot["configured"][number], "kind" | "installedPath">>
+  >,
 ): Promise<void> {
   for (const record of configured) {
     if (record.scope !== "user") continue;
@@ -1162,10 +1185,7 @@ async function runMutation(
         const rec = g.packageSnapshot?.configured.find((c) => c.id === p.packageId);
         if (!rec) throw new Error("Package not found");
         emitProgress("start", "remove", rec.source);
-        // Project-local settings store paths relative to `<workspace>/.pi`, while
-        // the SDK matches remove inputs relative to the process cwd. Use the
-        // already-resolved local path so both sides identify the same package.
-        const source = rec.kind === "local" && rec.installedPath ? rec.installedPath : rec.source;
+        const source = sourceForSdkPackageMutation(rec);
         const local = rec.scope === "project";
         try {
           const ok = await pm.removeAndPersist(source, { local });
