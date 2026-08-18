@@ -13,7 +13,7 @@ Chat with your coding agent, watch its tools work, manage sessions, models, and 
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-<img src="docs/assets/readme/hero-zh.png" alt="PiDeck main window in Chinese with the right dock" width="840">
+<img src="docs/assets/readme/workspace-new-zh.png" alt="PiDeck new conversation in a workspace" width="840">
 
 </div>
 
@@ -26,11 +26,66 @@ Chat with your coding agent, watch its tools work, manage sessions, models, and 
 - **Workspace Dock** — inspect the project file tree, reference files in a prompt, open conversation links in embedded browser tabs, and keep terminals beside the chat.
 - **Packages** — browse the pi.dev catalog, then install and manage user-scope Extensions, Skills, Prompts, and Themes.
 - **Extension UI & terminal** — extensions render their own interactive panels, and an integrated workspace terminal is one shortcut away.
-- **Make it yours** — customizable keyboard shortcuts, context menus, and an interface available in English and 简体中文.
+- **Make it yours** — PiDeck, Vercel, and Apple themes; customizable keyboard shortcuts and context menus; English and 简体中文.
 
 ![Interactive extension prompt and the Git changes panel](docs/assets/readme/features-1.png)
 
 ![Markdown rendering, extension widgets, and branch history](docs/assets/readme/features-2.png)
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/workspace-sessions-apple-zh.png" alt="Workspaces in the Apple theme">
+      <br><sub>Apple theme — workspaces</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/settings-appearance-zh.png" alt="Appearance settings with PiDeck, Vercel, and Apple themes">
+      <br><sub>Themes — PiDeck / Vercel / Apple</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/settings-models-apple-zh.png" alt="Model providers in the Apple theme">
+      <br><sub>Apple theme — model providers</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/chat-tools-zh.png" alt="Streaming reply with tool calls">
+      <br><sub>Vercel — streaming replies and tools</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/dock-mcp-zh.png" alt="Chat with the MCP servers dock">
+      <br><sub>Vercel — Workspace Dock / MCP</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/chat-brainstorm-zh.png" alt="Brainstorm mode overlay">
+      <br><sub>Vercel — Brainstorm overlay</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/extension-ask-zh.png" alt="Interactive extension question in chat">
+      <br><sub>Vercel — extension prompt</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/packages-installed-zh.png" alt="Installed user-scope packages">
+      <br><sub>Packages — Installed</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/packages-market-zh.png" alt="Package market catalog">
+      <br><sub>Packages — Market</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/readme/usage-zh.png" alt="Usage dashboard with token trends">
+      <br><sub>Usage dashboard</sub>
+    </td>
+  </tr>
+</table>
 
 ## Download
 
