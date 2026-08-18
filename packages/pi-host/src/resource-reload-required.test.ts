@@ -293,9 +293,9 @@ describe("isMissingPathError", () => {
       "github.com/owner/repo/index.ts",
     );
     expect(isUninstalledPackageMissingPathError(deletedGitError, [])).toBe(true);
-    expect(
-      isUninstalledPackageMissingPathError(deletedGitError, ["npm:pi-markdown-preview"]),
-    ).toBe(true);
+    expect(isUninstalledPackageMissingPathError(deletedGitError, ["npm:pi-markdown-preview"])).toBe(
+      true,
+    );
     expect(
       isUninstalledPackageMissingPathError(deletedGitError, ["git:github.com/owner/repo"]),
     ).toBe(false);
@@ -314,9 +314,7 @@ describe("isMissingPathError", () => {
         ["git:github.com/owner/repo"],
       ),
     ).toBe(true);
-    expect(
-      gitInstallSuffixFromMissingPath("C:\\Program Files\\Git\\usr\\bin\\git.exe"),
-    ).toBeNull();
+    expect(gitInstallSuffixFromMissingPath("C:\\Program Files\\Git\\usr\\bin\\git.exe")).toBeNull();
     expect(
       isUninstalledPackageMissingPathError(
         new Error(

@@ -68,9 +68,11 @@ function writeUserExtension(
   return { stateKey, extensionPath };
 }
 
-function writeGitPackageExtension(
-  agentDir: string,
-): { stateKey: string; extensionPath: string; packageRoot: string } {
+function writeGitPackageExtension(agentDir: string): {
+  stateKey: string;
+  extensionPath: string;
+  packageRoot: string;
+} {
   const packageRoot = join(agentDir, "git", "github.com", "owner", "repo");
   mkdirSync(join(packageRoot, "src"), { recursive: true });
   const { stateKey, extensionPath } = writeUserExtension(agentDir, {
@@ -84,7 +86,10 @@ function writeGitPackageExtension(
       pi: { extensions: ["./src/index.js"] },
     }),
   );
-  writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: ["git:github.com/owner/repo"] }));
+  writeFileSync(
+    join(agentDir, "settings.json"),
+    JSON.stringify({ packages: ["git:github.com/owner/repo"] }),
+  );
   return { stateKey, extensionPath, packageRoot };
 }
 
@@ -265,9 +270,13 @@ describe("UserResourceCache", () => {
       cwd: workspace,
       settingsManager: SettingsManager.create(workspace, agentDir, { projectTrusted: false }),
     });
-    expect(loader.getExtensions().extensions.some((ext) => ext.path.includes("owner\\repo") || ext.path.includes("owner/repo"))).toBe(
-      true,
-    );
+    expect(
+      loader
+        .getExtensions()
+        .extensions.some(
+          (ext) => ext.path.includes("owner\\repo") || ext.path.includes("owner/repo"),
+        ),
+    ).toBe(true);
 
     rmSync(packageRoot, { recursive: true, force: true });
     writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: [] }));
