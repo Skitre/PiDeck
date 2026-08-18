@@ -26,7 +26,15 @@ import {
   type PackageSourceObject,
 } from "./package-filters.js";
 import { logger } from "./logger.js";
+import { withoutImplicitPackageInstall } from "./offline-package-resolution.js";
 import type { ExtensionRefreshTransaction } from "./user-resource-cache.js";
+
+export function isMissingPathError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === "ENOENT") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /\bENOENT\b/.test(message);
+}
 
 export const PACKAGE_MUTATION_TIMEOUT_MS = 10 * 60 * 1000;
 const PACKAGE_MUTATION_CANCELLATION_GRACE_MS = 5_000;
@@ -656,8 +664,10 @@ async function mutatePackageUnderLock(
         refresh?.apply();
         if (g.agentSession) {
           // The 0.82.1 patch drops preserveExtensionCache; every reconcile now
-          // goes through the official full reload.
-          await g.agentSession.reload();
+          // goes through the official full reload. Keep PI_OFFLINE on so a
+          // later disable/reload cannot npm-install a package the user just
+          // removed; install/update already persisted the target on disk.
+          await withoutImplicitPackageInstall(() => g.agentSession!.reload());
           refresh?.commit();
           const sessionRevision = server.identity.bumpSessionRevision();
           g.extensionUiUpdateIdentity?.(server.getIdentity());
@@ -674,27 +684,38 @@ async function mutatePackageUnderLock(
           g.sessionSnapshot = sessionSnap;
           sessionChanged = true;
         } else if (g.resourceLoader) {
-          await g.resourceLoader.reload();
+          await withoutImplicitPackageInstall(() => g.resourceLoader!.reload());
           refresh?.commit();
         } else {
           throw new Error("Resource loader unavailable");
         }
         g.resourceReloadRequired = false;
       } catch (err) {
-        await refresh?.settleFailure({
-          session: g.agentSession,
-          runnerBefore,
-          loader: g.resourceLoader,
-        });
-        status = "partialFailure";
-        reconcileRequired = true;
-        g.resourceReloadRequired = true;
-        warnings.push(
-          createHostError(
-            "RESOURCE_RELOAD_FAILED",
-            err instanceof Error ? err.message : "Reload failed",
-          ),
-        );
+        if (isMissingPathError(err)) {
+          // npm/jiti still stats a just-uninstalled package on the next
+          // disable or reload. Settings already match the user's action.
+          logger.warn("Resource reload after package mutation hit a missing file", {
+            kind,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          refresh?.commit();
+          g.resourceReloadRequired = false;
+        } else {
+          await refresh?.settleFailure({
+            session: g.agentSession,
+            runnerBefore,
+            loader: g.resourceLoader,
+          });
+          status = "partialFailure";
+          reconcileRequired = true;
+          g.resourceReloadRequired = true;
+          warnings.push(
+            createHostError(
+              "RESOURCE_RELOAD_FAILED",
+              err instanceof Error ? err.message : "Reload failed",
+            ),
+          );
+        }
       }
     }
 
@@ -1063,8 +1084,25 @@ async function runMutation(
         // the SDK matches remove inputs relative to the process cwd. Use the
         // already-resolved local path so both sides identify the same package.
         const source = rec.kind === "local" && rec.installedPath ? rec.installedPath : rec.source;
-        const ok = await pm.removeAndPersist(source, { local: rec.scope === "project" });
-        if (!ok) throw new Error("Package not found in configuration");
+        const local = rec.scope === "project";
+        try {
+          const ok = await pm.removeAndPersist(source, { local });
+          if (!ok) throw new Error("Package not found in configuration");
+        } catch (err) {
+          // npm/jiti often stats the package entry after deleting it. The files
+          // are already gone; persist the settings drop instead of failing.
+          if (!isMissingPathError(err)) throw err;
+          const stillConfigured = pm
+            .listConfiguredPackages()
+            .some((pkg) => pkg.source === rec.source || pkg.source === source);
+          if (stillConfigured && !pm.removeSourceFromSettings(source, { local })) {
+            throw err instanceof Error ? err : new Error(String(err));
+          }
+          logger.warn("Package remove continued after a missing-path error", {
+            source,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
         emitProgress("complete", "remove", rec.source);
         break;
       }

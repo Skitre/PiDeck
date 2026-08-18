@@ -29,8 +29,9 @@ const OFFLINE_ENV = "PI_OFFLINE";
  *
  * Missing packages are skipped rather than fetched; they surface through the
  * normal resource diagnostics, and the user installs them from the Packages
- * page. Use this for any reload the user did not explicitly request. Do NOT
- * use it for package mutation reconcile, where fetching is the point.
+ * page. Use this for implicit reloads, including post-mutation session/loader
+ * reload: install/update already fetched the target package, and reload must
+ * not resurrect an unrelated package the user just removed.
  */
 export async function withoutImplicitPackageInstall<T>(fn: () => Promise<T>): Promise<T> {
   const previous = process.env[OFFLINE_ENV];

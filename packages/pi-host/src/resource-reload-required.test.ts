@@ -15,7 +15,7 @@ import { createTestModelServices } from "./test-helpers/model-runtime.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentHandlers } from "./agent-controller.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
-import { createPackageHandlers } from "./package-controller.js";
+import { createPackageHandlers, isMissingPathError } from "./package-controller.js";
 import { createSessionHandlers } from "./session-controller.js";
 import { logger } from "./logger.js";
 import { GraphOperationRegistry } from "./operation-lifecycle.js";
@@ -79,6 +79,9 @@ function mockFactory(opts: {
         themes: [],
       }),
       setProgressCallback: () => {},
+      removeAndPersist: vi.fn(async () => true),
+      removeSourceFromSettings: vi.fn(() => false),
+      getInstalledPath: () => undefined,
     },
     settingsManager: {
       flush: async () => {},
@@ -239,6 +242,20 @@ const preferenceCtx = {
     preference: "disabled",
   },
 };
+
+describe("isMissingPathError", () => {
+  it("recognizes Node ENOENT codes and messages", () => {
+    expect(isMissingPathError(Object.assign(new Error("gone"), { code: "ENOENT" }))).toBe(true);
+    expect(
+      isMissingPathError(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\index.ts'",
+        ),
+      ),
+    ).toBe(true);
+    expect(isMissingPathError(new Error("PACKAGE_REMOVE_FAILED"))).toBe(false);
+  });
+});
 
 describe("RESOURCE_RELOAD_FAILED prompt block", () => {
   it("blocks agent.prompt when resourceReloadRequired", async () => {
@@ -506,6 +523,154 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
 
     expect("error" in reloadOut).toBe(false);
     expect(reloadGraph.agentSession!.reload).toHaveBeenCalledWith();
+  });
+
+  it("treats ENOENT during package.remove as a finished uninstall", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    const configured = [
+      {
+        source: "npm:pi-markdown-preview",
+        scope: "user" as const,
+        filtered: false,
+      },
+    ];
+    graph.packageSnapshot = {
+      ...graph.packageSnapshot!,
+      configured: [
+        {
+          id: "pkg-markdown",
+          source: "npm:pi-markdown-preview",
+          kind: "npm",
+          scope: "user",
+        },
+      ],
+    } as typeof graph.packageSnapshot;
+    graph.packageManager!.listConfiguredPackages = vi.fn(() => configured);
+    graph.packageManager!.removeAndPersist = vi.fn(async () => {
+      throw Object.assign(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\index.ts'",
+        ),
+        { code: "ENOENT" },
+      );
+    });
+    graph.packageManager!.removeSourceFromSettings = vi.fn(() => {
+      configured.splice(0, configured.length);
+      return true;
+    });
+
+    const out = await createPackageHandlers(factory)["package.remove"]!({
+      ...reloadCtx,
+      id: "req-remove-enoent",
+      params: { packageId: "pkg-markdown" },
+    } as never);
+
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      const result = out.result as {
+        status: string;
+        reconcileRequired: boolean;
+        packageSnapshot: { resourceReloadRequired?: boolean };
+      };
+      expect(result.status).toBe("committed");
+      expect(result.reconcileRequired).toBe(false);
+      expect(result.packageSnapshot.resourceReloadRequired).toBe(false);
+    }
+    expect(graph.packageManager!.removeSourceFromSettings).toHaveBeenCalledWith(
+      "npm:pi-markdown-preview",
+      { local: false },
+    );
+    expect(graph.resourceReloadRequired).toBe(false);
+  });
+
+  it("does not raise reconcile banners when reload after remove stats a deleted file", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    graph.packageSnapshot = {
+      ...graph.packageSnapshot!,
+      configured: [
+        {
+          id: "pkg-markdown",
+          source: "npm:pi-markdown-preview",
+          kind: "npm",
+          scope: "user",
+        },
+      ],
+    } as typeof graph.packageSnapshot;
+    graph.packageManager!.removeAndPersist = vi.fn(async () => true);
+    graph.agentSession!.reload = vi.fn(async () => {
+      throw Object.assign(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\index.ts'",
+        ),
+        { code: "ENOENT" },
+      );
+    });
+
+    const out = await createPackageHandlers(factory)["package.remove"]!({
+      ...reloadCtx,
+      id: "req-remove-reload-enoent",
+      params: { packageId: "pkg-markdown" },
+    } as never);
+
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      const result = out.result as {
+        status: string;
+        reconcileRequired: boolean;
+        warnings: Array<{ message: string }>;
+        packageSnapshot: { resourceReloadRequired?: boolean };
+      };
+      expect(result.status).toBe("committed");
+      expect(result.reconcileRequired).toBe(false);
+      expect(result.warnings).toEqual([]);
+      expect(result.packageSnapshot.resourceReloadRequired).toBe(false);
+    }
+    expect(graph.agentSession!.reload).toHaveBeenCalled();
+    expect(graph.resourceReloadRequired).toBe(false);
+  });
+
+  it("does not raise reconcile banners when disable reloads a just-deleted package path", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    graph.resourceIdMap.set("resource-extension", {
+      type: "extension",
+      scope: "user",
+      path: "/tmp/.pi/extensions/example.ts",
+      baseDir: "/tmp/.pi",
+      relativePath: "extensions/example.ts",
+      origin: "top-level",
+      configurableScopes: ["user"],
+    });
+    graph.agentSession!.reload = vi.fn(async () => {
+      throw Object.assign(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-web-access\\index.ts'",
+        ),
+        { code: "ENOENT" },
+      );
+    });
+
+    const out = await createPackageHandlers(factory)["resource.setPreference"]!(
+      preferenceCtx as never,
+    );
+
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      const result = out.result as {
+        status: string;
+        reconcileRequired: boolean;
+        warnings: Array<{ message: string }>;
+        packageSnapshot: { resourceReloadRequired?: boolean };
+      };
+      expect(result.status).toBe("committed");
+      expect(result.reconcileRequired).toBe(false);
+      expect(result.warnings).toEqual([]);
+      expect(result.packageSnapshot.resourceReloadRequired).toBe(false);
+    }
+    expect(graph.agentSession!.reload).toHaveBeenCalled();
+    expect(graph.resourceReloadRequired).toBe(false);
   });
 
   it("clean package failure does not advance the authoritative package revision", async () => {
