@@ -414,6 +414,10 @@ button {
   padding-right: 148px;
 }
 
+[data-window-platform="windows"] [data-settings-top-banner] {
+  padding-right: 148px;
+}
+
 /* Multi-select checkboxes follow the app accent instead of the OS default. */
 input[type="checkbox"] {
   accent-color: var(--color-accent);

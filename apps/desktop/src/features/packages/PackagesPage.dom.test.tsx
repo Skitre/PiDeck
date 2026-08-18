@@ -265,25 +265,17 @@ describe("PackagesPage DOM workflows", () => {
     const user = userEvent.setup();
     render(<PackagesPage />);
     const installedTab = await screen.findByRole("button", { name: "Installed" });
-    const resourcesTab = screen.getByRole("button", { name: "Resources" });
     expect(installedTab).toHaveAttribute("aria-pressed", "true");
     expect(installedTab).toHaveAttribute("data-state", "active");
-    expect(resourcesTab).toHaveAttribute("aria-pressed", "false");
-    expect(resourcesTab).toHaveAttribute("data-state", "inactive");
+    expect(screen.queryByRole("button", { name: "Resources" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Market" })).toBeInTheDocument();
 
-    await user.click(resourcesTab);
-    expect(installedTab).toHaveAttribute("data-state", "inactive");
-    expect(resourcesTab).toHaveAttribute("aria-pressed", "true");
-    expect(resourcesTab).toHaveAttribute("data-state", "active");
+    await user.click(screen.getByRole("button", { name: /Tools.*User/ }));
     expect(screen.queryByRole("button", { name: "project" })).not.toBeInTheDocument();
-
-    for (const name of ["All", "Extensions", "Skills", "Prompts", "Themes"]) {
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
-    }
-    expect(screen.getByLabelText("Resource source")).toHaveTextContent("Standalone");
-    expect(screen.getByLabelText("Resource source")).toHaveTextContent("Runtime");
-    expect(screen.getByRole("heading", { name: /Packages \(1\)/ })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /Runtime \(1\)/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Extensions" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(screen.getByText("Tools extension")).toBeInTheDocument();
+    expect(screen.getByText("Review skill")).toBeInTheDocument();
 
     const toolsControls = screen.getByRole("group", { name: "Tools package" });
     expect(
@@ -299,8 +291,8 @@ describe("PackagesPage DOM workflows", () => {
         name: "disabled all resources in Tools package",
       }),
     ).toBeInTheDocument();
+    expect(screen.getByText("3 enabled / 0 disabled")).toBeInTheDocument();
     expect(screen.getByText("Managed by extension")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Provided by Tools extension" })).toBeInTheDocument();
     const runtimeRow = screen.getByText("Dynamic review").closest("li");
     expect(runtimeRow).not.toBeNull();
     expect(within(runtimeRow!).queryByTitle("enabled in user scope")).not.toBeInTheDocument();
@@ -332,12 +324,6 @@ describe("PackagesPage DOM workflows", () => {
         615_000,
       ]);
     });
-    await user.click(screen.getByRole("button", { name: "Provided by Tools extension" }));
-    expect(screen.getByLabelText("Search resources")).toHaveValue("Tools");
-    expect(screen.getByRole("button", { name: "Extensions" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
   });
 
   it("controls all direct resources from the installed package detail", async () => {
@@ -429,7 +415,7 @@ describe("PackagesPage DOM workflows", () => {
 
     const user = userEvent.setup();
     render(<PackagesPage />);
-    await user.click(await screen.findByRole("button", { name: "Resources" }));
+    await user.click(await screen.findByRole("button", { name: /Tools.*User/ }));
     const enable = screen.getByRole("button", {
       name: "enabled all resources in Tools package",
     });
@@ -533,7 +519,7 @@ describe("PackagesPage DOM workflows", () => {
 
     const user = userEvent.setup();
     render(<PackagesPage />);
-    await user.click(screen.getByRole("button", { name: "Resources" }));
+    await user.click(await screen.findByRole("button", { name: /Tools.*User/ }));
     await user.click(
       screen.getByRole("button", {
         name: "enabled all resources in Tools package",
@@ -558,26 +544,14 @@ describe("PackagesPage DOM workflows", () => {
     expect(useAppStore.getState().packages?.revision).toBe(committedSnapshot.revision);
   });
 
-  it("makes the manage-resources owner filter visibly clearable", async () => {
-    const user = userEvent.setup();
-    render(<PackagesPage />);
-    await user.click(await screen.findByRole("button", { name: /Tools.*User/ }));
-    await user.click(screen.getByRole("button", { name: "Manage resources" }));
-
-    expect(screen.getByLabelText("Resource owner")).toHaveValue("package:user:tools");
-    const clearOwner = screen.getByRole("button", { name: "Clear owner filter" });
-    expect(clearOwner).toBeVisible();
-    await user.click(clearOwner);
-    expect(screen.getByLabelText("Resource owner")).toHaveValue("");
-  });
-
   it("opens a user package's resources without a project mode toggle", async () => {
     const user = userEvent.setup();
     render(<PackagesPage />);
     await user.click(await screen.findByRole("button", { name: /Legacy theme/ }));
-    await user.click(screen.getByRole("button", { name: "Manage resources" }));
 
-    expect(screen.getByLabelText("Resource owner")).toHaveValue("package:user:legacy-theme");
+    expect(
+      screen.getByText("Counts are unavailable because this package is replaced by the project."),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "project" })).not.toBeInTheDocument();
   });
 
@@ -648,6 +622,7 @@ describe("PackagesPage DOM workflows", () => {
       render(<PackagesPage />);
 
       expect(await screen.findByText("Working…")).toBeInTheDocument();
+      expect(screen.getByText("Installing package")).toBeInTheDocument();
       expect(screen.queryByText("progress")).not.toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Dismiss package progress" }));
@@ -741,7 +716,7 @@ describe("PackagesPage DOM workflows", () => {
     render(<PackagesPage />);
 
     expect(await screen.findByRole("button", { name: "Update all packages" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Resources" }));
+    await user.click(screen.getByRole("button", { name: /Tools.*User/ }));
     const toolsControls = screen.getByRole("group", { name: "Tools package" });
     expect(
       within(toolsControls).getByRole("button", { name: "enabled all resources in Tools package" }),
@@ -751,41 +726,6 @@ describe("PackagesPage DOM workflows", () => {
         name: "disabled all resources in Tools package",
       }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Enable all shown" })).toBeDisabled();
-  });
-
-  it("keeps a package bundled under a type filter and mutates all cross-type members", async () => {
-    const user = userEvent.setup();
-    render(<PackagesPage />);
-    await user.click(await screen.findByRole("button", { name: "Resources" }));
-    await user.click(screen.getByRole("button", { name: "Extensions" }));
-
-    expect(screen.getByRole("heading", { name: /Packages \(1\)/ })).toBeInTheDocument();
-    expect(screen.getAllByRole("group", { name: "Tools package" })).toHaveLength(1);
-    const packageRow = screen.getByRole("group", { name: "Tools package" }).closest("li");
-    expect(packageRow).not.toBeNull();
-    await user.click(within(packageRow!).getByText("Show package resources"));
-    expect(within(packageRow!).getByText("Tools extension")).toBeInTheDocument();
-    expect(within(packageRow!).getByText("Review skill")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Disable all shown" }));
-    await waitFor(() => {
-      const mutations = request.mock.calls.filter(
-        ([method]) => method === "resource.setPreferences",
-      );
-      expect(mutations).toHaveLength(1);
-      expect(mutations[0]).toEqual([
-        "resource.setPreferences",
-        expect.anything(),
-        {
-          updates: [
-            { resourceId: "resource:extension:tools", targetScope: "user", preference: "disabled" },
-            { resourceId: "resource:skill:review", targetScope: "user", preference: "disabled" },
-          ],
-        },
-        615_000,
-      ]);
-    });
   });
 
   it("renders the installed empty state from an authoritative snapshot", async () => {
@@ -795,27 +735,14 @@ describe("PackagesPage DOM workflows", () => {
     expect(await screen.findByText("No packages are installed yet.")).toBeInTheDocument();
   });
 
-  it("distinguishes an empty resource inventory from filtered-out resources", async () => {
-    const user = userEvent.setup();
-    render(<PackagesPage />);
-    await user.click(await screen.findByRole("button", { name: "Resources" }));
-    await user.type(screen.getByLabelText("Search resources"), "nothing-can-match-this");
-    expect(screen.getByText("No resources match these filters.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Clear filters" }));
-    expect(screen.getByText("Tools extension")).toBeInTheDocument();
-
-    cleanup();
-    currentSnapshot = snapshot({ resources: [] });
-    useAppStore.getState().applyPackageSnapshot(currentSnapshot);
-    render(<PackagesPage />);
-    await user.click(await screen.findByRole("button", { name: "Resources" }));
-    expect(screen.getByText("No resources are available yet.")).toBeInTheDocument();
-  });
-
   it("opens the hardcoded catalog URL with the Tauri shell", async () => {
     const user = userEvent.setup();
     render(<PackagesPage />);
-    await user.click(await screen.findByRole("button", { name: /pi.dev catalog/ }));
+    expect(screen.getByRole("heading", { name: "Packages" })).toBeInTheDocument();
+    expect(screen.getByText("Install, enable, and browse user-scope packages")).toBeInTheDocument();
+    const catalog = await screen.findByRole("button", { name: /pi.dev catalog/ });
+    expect(catalog.closest("[data-settings-header-actions]")).not.toBeNull();
+    await user.click(catalog);
     expect(shellOpen).toHaveBeenCalledWith("https://pi.dev/packages");
   });
 });
