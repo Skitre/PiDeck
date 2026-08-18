@@ -23,8 +23,8 @@ import { requestGlobalSearchOpen, subscribeSidebarToggle } from "../lib/commands
 
 export const SIDEBAR_WORKSPACE_PANE_HEIGHT_KEY = "pideck.sidebar.workspacePaneHeight";
 export const SIDEBAR_WORKSPACE_PANE_MIN = 72;
-export const SIDEBAR_SESSION_PANE_MIN = 96;
-export const SIDEBAR_SPLITTER_HEIGHT = 8;
+const SIDEBAR_SESSION_PANE_MIN = 96;
+const SIDEBAR_SPLITTER_HEIGHT = 8;
 
 export function clampWorkspacePaneHeight(height: number, splitHeight: number): number {
   if (!Number.isFinite(height)) return SIDEBAR_WORKSPACE_PANE_MIN;

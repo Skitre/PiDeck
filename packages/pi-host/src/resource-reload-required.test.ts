@@ -15,7 +15,13 @@ import { createTestModelServices } from "./test-helpers/model-runtime.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentHandlers } from "./agent-controller.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
-import { createPackageHandlers, isMissingPathError } from "./package-controller.js";
+import {
+  createPackageHandlers,
+  isMissingPathError,
+  isUninstalledPackageMissingPathError,
+  missingPathFromError,
+  npmPackageNameFromMissingPath,
+} from "./package-controller.js";
 import { createSessionHandlers } from "./session-controller.js";
 import { logger } from "./logger.js";
 import { GraphOperationRegistry } from "./operation-lifecycle.js";
@@ -244,16 +250,35 @@ const preferenceCtx = {
 };
 
 describe("isMissingPathError", () => {
+  const deletedPackageError = new Error(
+    "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\index.ts'",
+  );
+
   it("recognizes Node ENOENT codes and messages", () => {
     expect(isMissingPathError(Object.assign(new Error("gone"), { code: "ENOENT" }))).toBe(true);
-    expect(
-      isMissingPathError(
-        new Error(
-          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\index.ts'",
-        ),
-      ),
-    ).toBe(true);
+    expect(isMissingPathError(deletedPackageError)).toBe(true);
     expect(isMissingPathError(new Error("PACKAGE_REMOVE_FAILED"))).toBe(false);
+  });
+
+  it("only treats ENOENT for an uninstalled npm package path as ignorable", () => {
+    expect(missingPathFromError(deletedPackageError)).toBe(
+      "C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\index.ts",
+    );
+    expect(npmPackageNameFromMissingPath(missingPathFromError(deletedPackageError)!)).toBe(
+      "pi-markdown-preview",
+    );
+    expect(isUninstalledPackageMissingPathError(deletedPackageError, [])).toBe(true);
+    expect(
+      isUninstalledPackageMissingPathError(deletedPackageError, ["npm:pi-markdown-preview"]),
+    ).toBe(false);
+    expect(
+      isUninstalledPackageMissingPathError(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\settings.json'",
+        ),
+        [],
+      ),
+    ).toBe(false);
   });
 });
 
@@ -671,6 +696,52 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
     }
     expect(graph.agentSession!.reload).toHaveBeenCalled();
     expect(graph.resourceReloadRequired).toBe(false);
+  });
+
+  it("still raises reload failure when ENOENT is a still-configured package", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    graph.resourceIdMap.set("resource-extension", {
+      type: "extension",
+      scope: "user",
+      path: "/tmp/.pi/extensions/example.ts",
+      baseDir: "/tmp/.pi",
+      relativePath: "extensions/example.ts",
+      origin: "top-level",
+      configurableScopes: ["user"],
+    });
+    graph.packageManager!.listConfiguredPackages = vi.fn(() => [
+      { source: "npm:pi-web-access", scope: "user" as const, filtered: false },
+    ]);
+    graph.agentSession!.reload = vi.fn(async () => {
+      throw Object.assign(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-web-access\\index.ts'",
+        ),
+        { code: "ENOENT" },
+      );
+    });
+
+    const out = await createPackageHandlers(factory)["resource.setPreference"]!(
+      preferenceCtx as never,
+    );
+
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      const result = out.result as {
+        status: string;
+        reconcileRequired: boolean;
+        warnings: Array<{ code: string }>;
+        packageSnapshot: { resourceReloadRequired?: boolean };
+      };
+      expect(result.status).toBe("partialFailure");
+      expect(result.reconcileRequired).toBe(true);
+      expect(result.warnings.some((warning) => warning.code === "RESOURCE_RELOAD_FAILED")).toBe(
+        true,
+      );
+      expect(result.packageSnapshot.resourceReloadRequired).toBe(true);
+    }
+    expect(graph.resourceReloadRequired).toBe(true);
   });
 
   it("clean package failure does not advance the authoritative package revision", async () => {

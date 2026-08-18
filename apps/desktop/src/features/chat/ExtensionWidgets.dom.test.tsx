@@ -109,4 +109,47 @@ describe("extension widget popover layout tracking", () => {
 
     expect(panel).toHaveStyle({ left: "180px" });
   });
+
+  it("clears the portaled drawer when a usable anchor collapses to zero width", () => {
+    let anchorWidth = 600;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      if (this.dataset.testid !== "composer-anchor") {
+        return new DOMRect();
+      }
+      return {
+        top: 500,
+        bottom: 600,
+        left: 100,
+        right: 100 + anchorWidth,
+        width: anchorWidth,
+        height: 100,
+        x: 100,
+        y: 500,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+
+    function Harness({ open }: { open: boolean }) {
+      const anchorRef = useRef<HTMLDivElement>(null);
+      return (
+        <div data-testid="composer-container">
+          <div ref={anchorRef} data-testid="composer-anchor">
+            <ExtensionWidgetsPopover anchorRef={anchorRef} open={open} onClose={() => undefined} />
+          </div>
+        </div>
+      );
+    }
+
+    const { rerender } = render(<Harness open={false} />);
+    rerender(<Harness open />);
+
+    expect(screen.getByLabelText("Extension widgets above editor")).toBeInTheDocument();
+
+    anchorWidth = 0;
+    act(() => TestResizeObserver.instance?.trigger(screen.getByTestId("composer-anchor")));
+
+    expect(screen.queryByLabelText("Extension widgets above editor")).not.toBeInTheDocument();
+  });
 });

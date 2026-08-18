@@ -3,9 +3,9 @@ import { AlertCircle, AlertTriangle, Bell, CheckCircle2, Info, Trash2, X } from 
 import { useT } from "../lib/i18n/use-t";
 import { useAppStore, type AppNotification } from "../lib/stores/app-store";
 
-export const NOTIFICATION_POPUP_WIDTH = 240;
-export const NOTIFICATION_POPUP_MARGIN = 8;
-export const NOTIFICATION_POPUP_GAP = 6;
+const NOTIFICATION_POPUP_WIDTH = 240;
+const NOTIFICATION_POPUP_MARGIN = 8;
+const NOTIFICATION_POPUP_GAP = 6;
 
 export function notificationPopupLeft(
   bellCenterX: number,

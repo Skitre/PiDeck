@@ -36,6 +36,45 @@ export function isMissingPathError(error: unknown): boolean {
   return /\bENOENT\b/.test(message);
 }
 
+export function missingPathFromError(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : String(error);
+  const quoted = message.match(/ENOENT:[^'"]*['"]([^'"]+)['"]/u);
+  return quoted?.[1] ?? null;
+}
+
+export function npmPackageNameFromMissingPath(filePath: string): string | null {
+  const normalized = filePath.replaceAll("\\", "/");
+  const marker = "/npm/node_modules/";
+  const index = normalized.toLowerCase().indexOf(marker);
+  if (index < 0) return null;
+  const parts = normalized
+    .slice(index + marker.length)
+    .split("/")
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  if (parts[0]!.startsWith("@")) {
+    return parts[1] ? `${parts[0]}/${parts[1]}` : null;
+  }
+  return parts[0] ?? null;
+}
+
+export function isUninstalledPackageMissingPathError(
+  error: unknown,
+  configuredSources: readonly string[],
+): boolean {
+  if (!isMissingPathError(error)) return false;
+  const filePath = missingPathFromError(error);
+  if (!filePath) return false;
+  const npmName = npmPackageNameFromMissingPath(filePath);
+  if (!npmName) return false;
+  const configured = new Set(
+    configuredSources
+      .filter((source) => source.startsWith("npm:"))
+      .map((source) => normalizePackageIdentity(source).identity.slice("npm:".length)),
+  );
+  return !configured.has(npmName);
+}
+
 export const PACKAGE_MUTATION_TIMEOUT_MS = 10 * 60 * 1000;
 const PACKAGE_MUTATION_CANCELLATION_GRACE_MS = 5_000;
 
@@ -655,6 +694,7 @@ async function mutatePackageUnderLock(
     // constructing the final package snapshot for every clean mutation.
     if (status === "committed") {
       let refresh: ExtensionRefreshTransaction | null = null;
+      let refreshApplied = false;
       const runnerBefore = g.agentSession?.extensionRunner;
       try {
         await factory.userResourceCache?.invalidate();
@@ -662,6 +702,7 @@ async function mutatePackageUnderLock(
           ? await factory.userResourceCache?.prepareLoaderExtensionRefresh(g.resourceLoader)
           : null;
         refresh?.apply();
+        refreshApplied = true;
         if (g.agentSession) {
           // The 0.82.1 patch drops preserveExtensionCache; every reconcile now
           // goes through the official full reload. Keep PI_OFFLINE on so a
@@ -691,10 +732,15 @@ async function mutatePackageUnderLock(
         }
         g.resourceReloadRequired = false;
       } catch (err) {
-        if (isMissingPathError(err)) {
-          // npm/jiti still stats a just-uninstalled package on the next
-          // disable or reload. Settings already match the user's action.
-          logger.warn("Resource reload after package mutation hit a missing file", {
+        const configuredSources = g.packageManager
+          .listConfiguredPackages()
+          .map((pkg) => pkg.source);
+        if (refreshApplied && isUninstalledPackageMissingPathError(err, configuredSources)) {
+          // jiti still stats a package that is no longer configured. The new
+          // extension bundle is already applied; keep it and do not roll back
+          // to the deleted package. Other ENOENT (settings, still-installed
+          // files) stay a real reload failure.
+          logger.warn("Resource reload after package mutation hit a removed package file", {
             kind,
             error: err instanceof Error ? err.message : String(err),
           });

@@ -175,7 +175,10 @@ function useWidgetPopoverLayout(
 
     const update = () => {
       const anchor = anchorRef.current;
-      if (!anchor) return;
+      if (!anchor) {
+        setLayout(null);
+        return;
+      }
       const rect = anchor.getBoundingClientRect();
       const nextAnchor = {
         top: rect.top,
@@ -183,7 +186,10 @@ function useWidgetPopoverLayout(
         left: rect.left,
         width: rect.width,
       };
-      if (!isUsableWidgetAnchor(nextAnchor)) return;
+      if (!isUsableWidgetAnchor(nextAnchor)) {
+        setLayout(null);
+        return;
+      }
       setLayout(
         calculateWidgetPopoverLayout({
           anchor: nextAnchor,
