@@ -765,7 +765,7 @@ export function SessionList({
             <ChevronDown
               size={12}
               className={`opacity-0 transition-all group-hover:opacity-100 ${
-                collapsed ? "rotate-180" : ""
+                collapsed ? "-rotate-90" : ""
               }`}
             />
           </button>

@@ -14,7 +14,6 @@ import {
   notifyDesktopSettingsSaveFailure,
   persistDesktopSettings,
 } from "../../lib/desktop-settings";
-import { sidebarPref, setSidebarPref } from "../../lib/sidebar-prefs";
 import { useT } from "../../lib/i18n/use-t";
 import {
   captureRequestGeneration,
@@ -108,7 +107,13 @@ export function workspaceLiveRuntimeState(args: {
 // Stable fallback: a fresh [] per render makes the zustand selector loop.
 const NO_WORKSPACES: string[] = [];
 
-export function WorkspacePicker() {
+export function WorkspacePicker({
+  collapsed,
+  onToggleCollapsed,
+}: {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   const t = useT();
   const host = useAppStore((s) => s.host);
   const workspace = useAppStore((s) => s.workspace);
@@ -121,17 +126,7 @@ export function WorkspacePicker() {
   const setSession = useAppStore((s) => s.setSession);
   const pushNotification = useAppStore((s) => s.pushNotification);
   const [pending, setPending] = useState(false);
-  const [collapsed, setCollapsed] = useState(() =>
-    sidebarPref("pideck.sidebar.workspacesCollapsed"),
-  );
   const requestRef = useRef(0);
-
-  function toggleCollapsed() {
-    setCollapsed((current) => {
-      setSidebarPref("pideck.sidebar.workspacesCollapsed", !current);
-      return !current;
-    });
-  }
 
   const currentCwd = workspace?.canonicalCwd ?? null;
   const requestedCwd = workspace?.cwd ?? null;
@@ -242,11 +237,11 @@ export function WorkspacePicker() {
   const listed = currentCwd ? addKnownWorkspace(knownWorkspaces, currentCwd) : knownWorkspaces;
 
   return (
-    <section>
-      <div className="mb-1 flex h-7 items-center justify-between px-2">
+    <section className="flex min-h-0 flex-col overflow-hidden">
+      <div className="mb-1 flex h-7 shrink-0 items-center justify-between px-2">
         <button
           type="button"
-          onClick={toggleCollapsed}
+          onClick={onToggleCollapsed}
           aria-expanded={!collapsed}
           aria-controls="workspace-list-region"
           title={collapsed ? t("workspacesExpand") : t("workspacesCollapse")}
@@ -271,89 +266,91 @@ export function WorkspacePicker() {
           <Plus size={15} />
         </button>
       </div>
-      <CollapsibleRegion open={!collapsed} id="workspace-list-region">
-        {listed.length === 0 ? (
-          <button
-            type="button"
-            onClick={() => void pickAndAdd()}
-            disabled={!host || pending}
-            className="interface-density-nav-row flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
-          >
-            <FolderPlus size={16} />
-            <span>{pending ? t("workspacesOpening") : t("workspacesAdd")}</span>
-          </button>
-        ) : (
-          <ul className="flex flex-col gap-0.5">
-            {listed.map((path) => {
-              const active = Boolean(currentCwd && samePath(currentCwd, path));
-              const liveRuntime = workspaceLiveRuntimeState({
-                path,
-                workspace,
-                session,
-                catalog: sessionCatalog,
-                drafts: transcriptDrafts,
-              });
-              const liveDot = liveRuntime ? sessionStatusDotClass(liveRuntime) : null;
-              return (
-                <li
-                  key={path}
-                  className={`interface-density-nav-row group flex h-9 items-center rounded-md text-[13px] ${
-                    active ? "bg-surface-overlay font-medium" : "hover:bg-surface-overlay/70"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => void switchTo(path)}
-                    disabled={!host || pending || active}
-                    className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left disabled:cursor-default"
-                    title={`${workspaceDisplayName(path)}\n${path}`}
-                    aria-current={active ? "true" : undefined}
+      <div className="scrollbar-auto-hide min-h-0 flex-1 overflow-y-auto">
+        <CollapsibleRegion open={!collapsed} id="workspace-list-region">
+          {listed.length === 0 ? (
+            <button
+              type="button"
+              onClick={() => void pickAndAdd()}
+              disabled={!host || pending}
+              className="interface-density-nav-row flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-sm text-muted transition-colors hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
+            >
+              <FolderPlus size={16} />
+              <span>{pending ? t("workspacesOpening") : t("workspacesAdd")}</span>
+            </button>
+          ) : (
+            <ul className="flex flex-col gap-0.5">
+              {listed.map((path) => {
+                const active = Boolean(currentCwd && samePath(currentCwd, path));
+                const liveRuntime = workspaceLiveRuntimeState({
+                  path,
+                  workspace,
+                  session,
+                  catalog: sessionCatalog,
+                  drafts: transcriptDrafts,
+                });
+                const liveDot = liveRuntime ? sessionStatusDotClass(liveRuntime) : null;
+                return (
+                  <li
+                    key={path}
+                    className={`interface-density-nav-row group flex h-9 items-center rounded-md text-[13px] ${
+                      active ? "bg-surface-overlay font-medium" : "hover:bg-surface-overlay/70"
+                    }`}
                   >
-                    {pending && switchTarget !== null && samePath(switchTarget, path) ? (
-                      <LoaderCircle size={16} className="shrink-0 animate-spin text-muted" />
-                    ) : (
-                      <Folder
-                        size={16}
-                        className={`shrink-0 ${active ? "text-accent" : "text-muted"}`}
-                      />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">{workspaceDisplayName(path)}</span>
-                    {liveDot ? (
-                      <span
-                        className={`size-1.5 shrink-0 rounded-full ${liveDot} ${
-                          active ? "" : "group-hover:opacity-0"
-                        }`}
-                        title={t("sessionsRunningInBackground")}
-                        aria-label={t("sessionsRunningInBackground")}
-                      />
-                    ) : (
-                      active && (
-                        <span
-                          className={`size-1.5 shrink-0 rounded-full ${
-                            workspace?.servicesReady ? "bg-success" : "bg-warning"
-                          }`}
-                        />
-                      )
-                    )}
-                  </button>
-                  {!active && (
                     <button
                       type="button"
-                      onClick={() => removeFromList(path)}
-                      disabled={pending}
-                      className="mr-1 hidden rounded p-1 text-muted hover:bg-surface hover:text-foreground group-hover:block"
-                      title={t("workspacesRemoveTitle")}
-                      aria-label={t("workspacesRemoveAria", { name: workspaceDisplayName(path) })}
+                      onClick={() => void switchTo(path)}
+                      disabled={!host || pending || active}
+                      className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left disabled:cursor-default"
+                      title={`${workspaceDisplayName(path)}\n${path}`}
+                      aria-current={active ? "true" : undefined}
                     >
-                      <X size={13} />
+                      {pending && switchTarget !== null && samePath(switchTarget, path) ? (
+                        <LoaderCircle size={16} className="shrink-0 animate-spin text-muted" />
+                      ) : (
+                        <Folder
+                          size={16}
+                          className={`shrink-0 ${active ? "text-accent" : "text-muted"}`}
+                        />
+                      )}
+                      <span className="min-w-0 flex-1 truncate">{workspaceDisplayName(path)}</span>
+                      {liveDot ? (
+                        <span
+                          className={`size-1.5 shrink-0 rounded-full ${liveDot} ${
+                            active ? "" : "group-hover:opacity-0"
+                          }`}
+                          title={t("sessionsRunningInBackground")}
+                          aria-label={t("sessionsRunningInBackground")}
+                        />
+                      ) : (
+                        active && (
+                          <span
+                            className={`size-1.5 shrink-0 rounded-full ${
+                              workspace?.servicesReady ? "bg-success" : "bg-warning"
+                            }`}
+                          />
+                        )
+                      )}
                     </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </CollapsibleRegion>
+                    {!active && (
+                      <button
+                        type="button"
+                        onClick={() => removeFromList(path)}
+                        disabled={pending}
+                        className="mr-1 hidden rounded p-1 text-muted hover:bg-surface hover:text-foreground group-hover:block"
+                        title={t("workspacesRemoveTitle")}
+                        aria-label={t("workspacesRemoveAria", { name: workspaceDisplayName(path) })}
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CollapsibleRegion>
+      </div>
     </section>
   );
 }

@@ -553,6 +553,7 @@ export const zh: Record<MessageKey, string> = {
   sidebarCreating: "正在创建…",
   sidebarExpand: "展开侧栏",
   sidebarCollapse: "收起侧栏",
+  sidebarSplitResize: "调整工作区与对话列表高度",
   sidebarHostOffline: "Host 离线",
   sidebarConnecting: "正在连接 Pi Host",
   sidebarResync: "正在与 Host 重新同步",

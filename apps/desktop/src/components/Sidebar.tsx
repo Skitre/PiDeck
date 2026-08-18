@@ -6,7 +6,7 @@ import {
   Search,
   Settings,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore, type NavPage } from "../lib/stores/app-store";
 import { SessionList } from "../features/sessions/SessionList";
 import { useT } from "../lib/i18n/use-t";
@@ -20,6 +20,46 @@ import {
   subscribeCreateSessionPending,
 } from "../lib/commands/actions";
 import { requestGlobalSearchOpen, subscribeSidebarToggle } from "../lib/commands/events";
+
+export const SIDEBAR_WORKSPACE_PANE_HEIGHT_KEY = "pideck.sidebar.workspacePaneHeight";
+export const SIDEBAR_WORKSPACE_PANE_MIN = 72;
+export const SIDEBAR_SESSION_PANE_MIN = 96;
+export const SIDEBAR_SPLITTER_HEIGHT = 8;
+
+export function clampWorkspacePaneHeight(height: number, splitHeight: number): number {
+  if (!Number.isFinite(height)) return SIDEBAR_WORKSPACE_PANE_MIN;
+  const maxHeight =
+    Number.isFinite(splitHeight) && splitHeight > 0
+      ? Math.max(
+          SIDEBAR_WORKSPACE_PANE_MIN,
+          splitHeight - SIDEBAR_SESSION_PANE_MIN - SIDEBAR_SPLITTER_HEIGHT,
+        )
+      : Number.POSITIVE_INFINITY;
+  return Math.min(maxHeight, Math.max(SIDEBAR_WORKSPACE_PANE_MIN, Math.round(height)));
+}
+
+export function readWorkspacePaneHeight(): number | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(SIDEBAR_WORKSPACE_PANE_HEIGHT_KEY);
+    if (raw == null || raw === "") return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? clampWorkspacePaneHeight(value, 0) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistWorkspacePaneHeight(height: number | null): void {
+  try {
+    if (height == null) {
+      globalThis.localStorage?.removeItem(SIDEBAR_WORKSPACE_PANE_HEIGHT_KEY);
+      return;
+    }
+    globalThis.localStorage?.setItem(SIDEBAR_WORKSPACE_PANE_HEIGHT_KEY, String(height));
+  } catch {
+    /* ignore unavailable localStorage */
+  }
+}
 
 function NewSessionButton() {
   const t = useT();
@@ -74,13 +114,38 @@ export function SidebarLayout({
   const [sessionsCollapsed, setSessionsCollapsed] = useState(() =>
     sidebarPref("pideck.sidebar.sessionsCollapsed"),
   );
+  const [workspacesCollapsed, setWorkspacesCollapsed] = useState(() =>
+    sidebarPref("pideck.sidebar.workspacesCollapsed"),
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     sidebarPref("pideck.sidebar.collapsed"),
   );
+  const [workspacePaneHeight, setWorkspacePaneHeight] = useState<number | null>(
+    readWorkspacePaneHeight,
+  );
+  const [splitHeight, setSplitHeight] = useState(0);
+  const [resizing, setResizing] = useState(false);
+  const splitRef = useRef<HTMLDivElement>(null);
+  const workspacePaneRef = useRef<HTMLDivElement>(null);
+  const workspacePaneHeightRef = useRef(workspacePaneHeight);
+  const resizeStart = useRef<{ pointerId: number; y: number; height: number } | null>(null);
+  workspacePaneHeightRef.current = workspacePaneHeight;
+  const splitEnabled = !workspacesCollapsed;
+  const workspaceMaxHeight =
+    splitHeight > 0
+      ? clampWorkspacePaneHeight(Number.POSITIVE_INFINITY, splitHeight)
+      : undefined;
 
   function toggleSessionsCollapsed() {
     setSessionsCollapsed((current) => {
       setSidebarPref("pideck.sidebar.sessionsCollapsed", !current);
+      return !current;
+    });
+  }
+
+  function toggleWorkspacesCollapsed() {
+    setWorkspacesCollapsed((current) => {
+      setSidebarPref("pideck.sidebar.workspacesCollapsed", !current);
       return !current;
     });
   }
@@ -92,14 +157,45 @@ export function SidebarLayout({
     });
   }
 
+  function applyWorkspacePaneHeight(height: number) {
+    const next = clampWorkspacePaneHeight(height, splitRef.current?.clientHeight ?? 0);
+    workspacePaneHeightRef.current = next;
+    setWorkspacePaneHeight(next);
+    return next;
+  }
+
+  function finishWorkspacePaneResize(target: HTMLDivElement, pointerId: number) {
+    if (resizeStart.current?.pointerId !== pointerId) return;
+    resizeStart.current = null;
+    setResizing(false);
+    persistWorkspacePaneHeight(workspacePaneHeightRef.current);
+    if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+  }
+
   useEffect(() => subscribeSidebarToggle(toggleSidebarCollapsed), []);
+
+  useEffect(() => {
+    const root = splitRef.current;
+    if (!root || typeof ResizeObserver === "undefined") return;
+    const sync = () => {
+      setSplitHeight(root.clientHeight);
+      const current = workspacePaneHeightRef.current;
+      if (current == null) return;
+      const next = clampWorkspacePaneHeight(current, root.clientHeight);
+      if (next !== current) setWorkspacePaneHeight(next);
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <aside
       style={{ marginLeft: sidebarCollapsed ? -268 : 0 }}
       data-sidebar
       data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
-      className="sidebar-edge-shadow relative flex w-[268px] shrink-0 flex-col border-r border-border bg-sidebar transition-[margin-left] duration-200 ease-out"
+      className="sidebar-edge-shadow relative flex h-full min-h-0 w-[268px] shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar transition-[margin-left] duration-200 ease-out"
     >
       <div className="group/sidebar-edge absolute -right-4 top-0 z-40 h-full w-4">
         <button
@@ -144,17 +240,109 @@ export function SidebarLayout({
             <NewSessionButton />
           </div>
 
-          <div className="border-t border-border px-2 py-3">
-            <WorkspacePicker />
-          </div>
+          <div
+            ref={splitRef}
+            data-sidebar-split-root
+            className={`flex min-h-0 flex-1 flex-col overflow-hidden ${
+              resizing ? "select-none" : ""
+            }`}
+          >
+            <div
+              ref={workspacePaneRef}
+              data-sidebar-workspaces
+              style={
+                splitEnabled && workspacePaneHeight != null
+                  ? { height: workspacePaneHeight }
+                  : undefined
+              }
+              className={
+                splitEnabled && workspacePaneHeight != null
+                  ? "flex shrink-0 flex-col overflow-hidden border-t border-border px-2 pb-2.5 pt-3"
+                  : "flex min-h-0 max-h-[min(40%,15rem)] shrink-0 flex-col overflow-hidden border-t border-border px-2 pb-2.5 pt-3"
+              }
+            >
+              <WorkspacePicker
+                collapsed={workspacesCollapsed}
+                onToggleCollapsed={toggleWorkspacesCollapsed}
+              />
+            </div>
 
-          {/* Collapsed or not, the header row stays in place below Workspaces. */}
-          <div className="scrollbar-auto-hide min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-            <SessionList
-              showCreateAction={false}
-              collapsed={sessionsCollapsed}
-              onToggleCollapsed={toggleSessionsCollapsed}
-            />
+            <div
+              role="separator"
+              tabIndex={splitEnabled ? 0 : -1}
+              aria-disabled={splitEnabled ? undefined : true}
+              aria-label={t("sidebarSplitResize")}
+              aria-orientation="horizontal"
+              aria-valuemin={SIDEBAR_WORKSPACE_PANE_MIN}
+              aria-valuemax={workspaceMaxHeight}
+              aria-valuenow={workspacePaneHeight ?? undefined}
+              title={t("sidebarSplitResize")}
+              data-sidebar-split
+              className={`group relative z-10 h-2 shrink-0 touch-none outline-none ${
+                splitEnabled ? "cursor-row-resize" : "pointer-events-none"
+              }`}
+              onPointerDown={(event) => {
+                if (!splitEnabled || event.button !== 0) return;
+                event.preventDefault();
+                resizeStart.current = {
+                  pointerId: event.pointerId,
+                  y: event.clientY,
+                  height: workspacePaneRef.current?.offsetHeight ?? SIDEBAR_WORKSPACE_PANE_MIN,
+                };
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setResizing(true);
+              }}
+              onPointerMove={(event) => {
+                const start = resizeStart.current;
+                if (!start || start.pointerId !== event.pointerId) return;
+                applyWorkspacePaneHeight(start.height + event.clientY - start.y);
+              }}
+              onPointerUp={(event) =>
+                finishWorkspacePaneResize(event.currentTarget, event.pointerId)
+              }
+              onPointerCancel={(event) =>
+                finishWorkspacePaneResize(event.currentTarget, event.pointerId)
+              }
+              onLostPointerCapture={() => {
+                resizeStart.current = null;
+                setResizing(false);
+              }}
+              onDoubleClick={() => {
+                if (!splitEnabled) return;
+                workspacePaneHeightRef.current = null;
+                setWorkspacePaneHeight(null);
+                persistWorkspacePaneHeight(null);
+              }}
+              onKeyDown={(event) => {
+                if (!splitEnabled || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) {
+                  return;
+                }
+                event.preventDefault();
+                const current =
+                  workspacePaneHeight ??
+                  workspacePaneRef.current?.offsetHeight ??
+                  SIDEBAR_WORKSPACE_PANE_MIN;
+                persistWorkspacePaneHeight(
+                  applyWorkspacePaneHeight(
+                    current + (event.key === "ArrowDown" ? 16 : -16),
+                  ),
+                );
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-1 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border/70 transition-colors group-hover:bg-accent group-focus-visible:bg-accent"
+              />
+            </div>
+
+            {/* Collapsed or not, the header row stays in place below Workspaces. */}
+            <div className="scrollbar-auto-hide min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+              <SessionList
+                showCreateAction={false}
+                collapsed={sessionsCollapsed}
+                onToggleCollapsed={toggleSessionsCollapsed}
+              />
+            </div>
           </div>
 
           <div className="shrink-0 border-t border-border p-2">

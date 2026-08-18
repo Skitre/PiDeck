@@ -577,6 +577,7 @@ export const en = {
   sidebarCreating: "Creating...",
   sidebarExpand: "Expand sidebar",
   sidebarCollapse: "Collapse sidebar",
+  sidebarSplitResize: "Resize workspaces and conversations",
   sidebarHostOffline: "Host offline",
   sidebarConnecting: "Connecting to Pi Host",
   sidebarResync: "Resynchronizing with Host",
