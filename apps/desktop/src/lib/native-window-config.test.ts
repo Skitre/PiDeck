@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import defaultCapability from "../../src-tauri/capabilities/default.json";
 import macosConfig from "../../src-tauri/tauri.macos.conf.json";
 import baseConfig from "../../src-tauri/tauri.conf.json";
@@ -26,6 +27,7 @@ type WindowConfig = {
 const baseWindow = baseConfig.app.windows[0] as WindowConfig;
 const macosWindow = macosConfig.app.windows[0] as WindowConfig;
 const windowsWindow = windowsConfig.app.windows[0] as WindowConfig;
+const cargoManifest = readFileSync(new URL("../../src-tauri/Cargo.toml", import.meta.url), "utf8");
 
 describe("native window platform configuration", () => {
   it("allows the intercepted close flow to destroy the main window", () => {
@@ -37,6 +39,15 @@ describe("native window platform configuration", () => {
         "core:window:allow-hide",
       ]),
     );
+  });
+
+  it("pins the upstream Windows child-WebView focus restoration", () => {
+    for (const packageName of ["tauri-runtime-wry", "tauri-runtime", "tauri-utils"]) {
+      expect(cargoManifest).toContain(
+        `${packageName} = { git = "https://github.com/tauri-apps/tauri", rev = "08acfb3fa04945a6a4f822d66c7556111d9385aa" }`,
+      );
+    }
+    expect(cargoManifest).not.toContain("vendor/tauri-runtime-wry");
   });
 
   it("keeps the Cargo-managed macOS private API feature allowlisted in shared config", () => {

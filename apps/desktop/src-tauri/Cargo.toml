@@ -34,6 +34,13 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
+# Tauri #15625 restores the last child WebView focus after Windows activation.
+# Remove this Git patch after the fix ships in a tauri-runtime-wry release.
+[patch.crates-io]
+tauri-runtime-wry = { git = "https://github.com/tauri-apps/tauri", rev = "08acfb3fa04945a6a4f822d66c7556111d9385aa" }
+tauri-runtime = { git = "https://github.com/tauri-apps/tauri", rev = "08acfb3fa04945a6a4f822d66c7556111d9385aa" }
+tauri-utils = { git = "https://github.com/tauri-apps/tauri", rev = "08acfb3fa04945a6a4f822d66c7556111d9385aa" }
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
