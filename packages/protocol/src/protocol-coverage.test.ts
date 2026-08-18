@@ -498,6 +498,18 @@ describe("protocol coverage — methods", () => {
     expect(validateRequestParams("package.updateAll", null).ok).toBe(true);
     expect(validateRequestParams("package.updateAll", { scope: "all" }).ok).toBe(false);
   });
+
+  it("accepts a single catalog page query and rejects an invalid page", () => {
+    expect(
+      validateRequestParams("package.catalog", {
+        page: 2,
+        query: "web",
+        type: "skill",
+        sort: "recent",
+      }).ok,
+    ).toBe(true);
+    expect(validateRequestParams("package.catalog", { page: 0 }).ok).toBe(false);
+  });
 });
 
 describe("unified package resources", () => {

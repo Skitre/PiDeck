@@ -1,5 +1,6 @@
 import type {
   HostRequestParams,
+  PackageCatalog,
   PackageCatalogItem,
   PackageRecord,
   ResourcePreferenceUpdate,
@@ -402,4 +403,21 @@ export function formatDownloadsPerMonth(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
   if (count >= 1_000) return `${(count / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
   return String(count);
+}
+
+export function catalogPageRange(
+  catalog: Pick<PackageCatalog, "page" | "pageSize" | "items" | "total">,
+): { start: number; end: number } {
+  if (catalog.total === 0 || catalog.items.length === 0) return { start: 0, end: 0 };
+  const start = (catalog.page - 1) * catalog.pageSize + 1;
+  return { start, end: start + catalog.items.length - 1 };
+}
+
+export function formatCatalogPublishedAt(publishedAt: number, locale: "en" | "zh"): string {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(publishedAt));
 }

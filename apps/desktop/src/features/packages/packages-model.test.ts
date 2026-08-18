@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { PackageCatalogItem, PackageRecord, ResourceRecord } from "@pideck/protocol";
 import {
   filterCatalogItems,
+  catalogPageRange,
+  formatCatalogPublishedAt,
   formatDownloadsPerMonth,
   isCatalogItemInstalled,
   sortCatalogItems,
@@ -564,5 +566,26 @@ describe("catalog model", () => {
     expect(formatDownloadsPerMonth(43_100)).toBe("43.1K");
     expect(formatDownloadsPerMonth(480_000)).toBe("480K");
     expect(formatDownloadsPerMonth(1_500_000)).toBe("1.5M");
+  });
+
+  it("computes the visible catalog range", () => {
+    expect(
+      catalogPageRange({
+        page: 2,
+        pageSize: 50,
+        total: 5415,
+        items: [catalogItem({ name: "a" }), catalogItem({ name: "b" })],
+      }),
+    ).toEqual({ start: 51, end: 52 });
+    expect(catalogPageRange({ page: 1, pageSize: 50, total: 0, items: [] })).toEqual({
+      start: 0,
+      end: 0,
+    });
+  });
+
+  it("formats catalog published dates in UTC for the UI locale", () => {
+    const publishedAt = Date.UTC(2026, 7, 18);
+    expect(formatCatalogPublishedAt(publishedAt, "en")).toMatch(/Aug.*18.*2026/);
+    expect(formatCatalogPublishedAt(publishedAt, "zh")).toMatch(/2026.*8.*18/);
   });
 });

@@ -267,9 +267,19 @@ export function createPackageHandlers(
 
     "package.catalog": async (ctx) => {
       // Host-scoped discovery read: no workspace graph or lock involved.
-      const params = (ctx.params ?? {}) as { refresh?: boolean };
+      const params = (ctx.params ?? {}) as {
+        refresh?: boolean;
+        page?: number;
+        query?: string;
+        type?: string;
+        sort?: "downloads" | "recent";
+      };
       const out = await getPackageCatalog({
         ...(params.refresh !== undefined ? { refresh: params.refresh } : {}),
+        ...(params.page !== undefined ? { page: params.page } : {}),
+        ...(params.query !== undefined ? { query: params.query } : {}),
+        ...(params.type !== undefined ? { type: params.type } : {}),
+        ...(params.sort !== undefined ? { sort: params.sort } : {}),
       });
       if ("error" in out) return { error: out.error };
       return { result: out.catalog };

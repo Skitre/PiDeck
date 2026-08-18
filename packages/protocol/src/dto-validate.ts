@@ -889,14 +889,31 @@ function isPackageCatalogItem(value: unknown): boolean {
   );
 }
 
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
+}
+
 function isPackageCatalog(value: unknown): boolean {
   return (
     isPlainObject(value) &&
-    hasExactKeys(value, ["generatedAt", "fromCache", "items"]) &&
+    hasExactKeys(value, [
+      "generatedAt",
+      "fromCache",
+      "items",
+      "page",
+      "pageSize",
+      "total",
+      "lastPage",
+    ]) &&
     isNonNegativeNumber(value.generatedAt) &&
     isBoolean(value.fromCache) &&
     Array.isArray(value.items) &&
-    value.items.every(isPackageCatalogItem)
+    value.items.every(isPackageCatalogItem) &&
+    isPositiveSafeInteger(value.page) &&
+    isPositiveSafeInteger(value.pageSize) &&
+    isNonNegativeNumber(value.total) &&
+    Number.isSafeInteger(value.total) &&
+    isPositiveSafeInteger(value.lastPage)
   );
 }
 

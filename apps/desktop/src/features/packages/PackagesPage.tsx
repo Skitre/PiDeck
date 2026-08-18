@@ -3,10 +3,12 @@ import {
   AlertTriangle,
   Boxes,
   Check,
+  ChevronLeft,
   ChevronRight,
   Download,
   ExternalLink,
   FolderOpen,
+  Github,
   PackageOpen,
   RefreshCw,
   Search,
@@ -35,7 +37,7 @@ import {
   workspaceContext,
 } from "../../lib/bridge/host-context";
 import { useAppStore } from "../../lib/stores/app-store";
-import { useT, type Translate } from "../../lib/i18n/use-t";
+import { useLocale, useT, type Translate } from "../../lib/i18n/use-t";
 import {
   PACKAGE_RESOURCE_TYPES,
   PACKAGE_LIST_PARAMS,
@@ -44,9 +46,10 @@ import {
   buildResourcePreferenceUpdate,
   buildResourcePreferenceUpdates,
   canConfigureResource,
-  filterCatalogItems,
+  catalogPageRange,
   filterInstalledPackages,
   filterResources,
+  formatCatalogPublishedAt,
   formatDownloadsPerMonth,
   hasActiveInstalledFilters,
   hasActiveResourceFilters,
@@ -54,7 +57,6 @@ import {
   planPackageUpdate,
   preferenceResourcesForListItems,
   resourcePreference,
-  sortCatalogItems,
   summarizeResources,
   type CatalogSort,
   type ResourceListItem,
@@ -213,8 +215,163 @@ function PackagePreferenceControl({
   );
 }
 
+const MARKET_CATALOG_TIMEOUT_MS = 30_000;
+const MARKET_QUERY_DEBOUNCE_MS = 300;
+
+function MarketPackageCard({
+  item,
+  installed,
+  locale,
+  t,
+  mutationBlocked,
+  onOpen,
+  onInstall,
+}: {
+  item: PackageCatalogItem;
+  installed: boolean;
+  locale: "en" | "zh";
+  t: Translate;
+  mutationBlocked: boolean;
+  onOpen: (url: string) => void;
+  onInstall: (item: PackageCatalogItem) => void;
+}) {
+  return (
+    <article
+      data-market-card={item.name}
+      className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="min-w-0 text-[13px] font-semibold">
+          <button
+            type="button"
+            className="min-w-0 truncate text-left hover:underline"
+            title={t("packagesMarketOpenPage", { name: item.name })}
+            aria-label={t("packagesMarketOpenPage", { name: item.name })}
+            onClick={() => onOpen(item.pageUrl)}
+          >
+            {item.name}
+          </button>
+        </h3>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {item.types.map((type) => (
+            <span
+              key={type}
+              className="meta-chip rounded border border-border px-1 text-[10px] text-muted"
+            >
+              {type}
+            </span>
+          ))}
+        </div>
+      </div>
+      <p className="line-clamp-2 min-h-10 text-xs leading-5 text-muted" title={item.description}>
+        {item.description}
+      </p>
+      <div className="mt-auto flex items-center gap-2 text-[11px] text-muted">
+        {item.author && (
+          <span className="min-w-0 truncate" title={item.author}>
+            {item.author}
+          </span>
+        )}
+        {item.downloadsPerMonth !== undefined && (
+          <span className="shrink-0 tabular-nums">
+            {t("packagesMarketDownloads", {
+              count: formatDownloadsPerMonth(item.downloadsPerMonth),
+            })}
+          </span>
+        )}
+        {item.publishedAt !== undefined && (
+          <span
+            className="shrink-0 tabular-nums"
+            title={t("packagesMarketPublished", {
+              date: formatCatalogPublishedAt(item.publishedAt, locale),
+            })}
+          >
+            {formatCatalogPublishedAt(item.publishedAt, locale)}
+          </span>
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          {item.githubUrl && (
+            <button
+              type="button"
+              className="text-muted hover:text-foreground"
+              title={t("packagesMarketOpenGithub", { name: item.name })}
+              aria-label={t("packagesMarketOpenGithub", { name: item.name })}
+              onClick={() => onOpen(item.githubUrl!)}
+            >
+              <Github size={12} />
+            </button>
+          )}
+          {item.npmUrl && (
+            <button
+              type="button"
+              className="text-muted hover:text-foreground"
+              title={t("packagesMarketOpenNpm", { name: item.name })}
+              aria-label={t("packagesMarketOpenNpm", { name: item.name })}
+              onClick={() => onOpen(item.npmUrl!)}
+            >
+              <ExternalLink size={12} />
+            </button>
+          )}
+          {installed ? (
+            <span className="inline-flex items-center gap-1 text-success">
+              <Check size={12} />
+              {t("packagesMarketInstalled")}
+            </span>
+          ) : (
+            <button
+              type="button"
+              className={primaryButton}
+              disabled={mutationBlocked}
+              onClick={() => onInstall(item)}
+            >
+              <Download size={13} />
+              {t("packagesInstallAction")}
+            </button>
+          )}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+function MarketCatalogGrid({
+  items,
+  allPackages,
+  locale,
+  t,
+  mutationBlocked,
+  onOpen,
+  onInstall,
+}: {
+  items: PackageCatalogItem[];
+  allPackages: PackageRecord[];
+  locale: "en" | "zh";
+  t: Translate;
+  mutationBlocked: boolean;
+  onOpen: (url: string) => void;
+  onInstall: (item: PackageCatalogItem) => void;
+}) {
+  return (
+    <div className="scrollbar-auto-hide grid min-h-0 flex-1 auto-rows-min grid-cols-1 gap-3 overflow-y-auto p-4 lg:grid-cols-2 2xl:grid-cols-3">
+      {items.map((item) => (
+        <MarketPackageCard
+          key={item.name}
+          item={item}
+          installed={isCatalogItemInstalled(item, allPackages)}
+          locale={locale}
+          t={t}
+          mutationBlocked={mutationBlocked}
+          onOpen={onOpen}
+          onInstall={onInstall}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function PackagesPage() {
   const t = useT();
+  const locale = useLocale();
   const host = useAppStore((state) => state.host);
   const workspace = useAppStore((state) => state.workspace);
   const packages = useAppStore((state) => state.packages);
@@ -289,14 +446,8 @@ export function PackagesPage() {
     () => new Map(allResources.map((item) => [item.id, item])),
     [allResources],
   );
-  const visibleMarketItems = useMemo(
-    () =>
-      sortCatalogItems(
-        filterCatalogItems(marketCatalog?.items ?? [], marketQuery, marketType),
-        marketSort,
-      ),
-    [marketCatalog, marketQuery, marketType, marketSort],
-  );
+  const visibleMarketItems = marketCatalog?.items ?? [];
+  const marketRange = marketCatalog ? catalogPageRange(marketCatalog) : null;
   const selectedResources = selected
     ? filterResources(allResources, allPackages, {
         query: "",
@@ -385,18 +536,26 @@ export function PackagesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [host?.hostInstanceId, workspace?.id, workspace?.revision]);
 
-  async function loadMarket(refresh = false) {
+  async function loadMarket(args: { page?: number; refresh?: boolean } = {}) {
     if (!host) return;
     const request = ++marketRequest.current;
     const expectedHostId = host.hostInstanceId;
+    const page = args.page ?? marketCatalog?.page ?? 1;
+    const params: HostRequestParams["package.catalog"] = {
+      page,
+      sort: marketSort,
+      ...(args.refresh ? { refresh: true } : {}),
+      ...(marketQuery.trim() ? { query: marketQuery.trim() } : {}),
+      ...(marketType !== "all" ? { type: marketType } : {}),
+    };
     setMarketState("loading");
     setMarketError("");
     try {
       const response = await hostClient.request(
         "package.catalog",
         hostContext(host),
-        refresh ? { refresh: true } : {},
-        30_000,
+        params,
+        MARKET_CATALOG_TIMEOUT_MS,
       );
       if (
         request !== marketRequest.current ||
@@ -405,24 +564,44 @@ export function PackagesPage() {
         return;
       }
       if (!response.ok) {
-        setMarketState("error");
         setMarketError(response.error?.message ?? t("packagesMarketError"));
+        setMarketState(marketCatalog ? "ready" : "error");
         return;
       }
       setMarketCatalog(response.result);
       setMarketState("ready");
     } catch (error) {
       if (request !== marketRequest.current) return;
-      setMarketState("error");
       setMarketError(error instanceof Error ? error.message : t("packagesMarketError"));
+      setMarketState(marketCatalog ? "ready" : "error");
     }
   }
 
   useEffect(() => {
-    if (tab === "market" && marketState === "idle") void loadMarket();
-    // The catalog is host-global; a single lazy load per Host epoch suffices.
+    marketRequest.current += 1;
+    setMarketCatalog(null);
+    setMarketState("idle");
+    setMarketError("");
+  }, [host?.hostInstanceId]);
+
+  useEffect(() => {
+    if (tab === "market" && marketState === "idle") void loadMarket({ page: 1 });
+    // The first page is host-global; later pages and filters request on demand.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, marketState, host?.hostInstanceId]);
+
+  useEffect(() => {
+    if (tab !== "market" || marketState === "idle") return;
+    const timer = window.setTimeout(() => void loadMarket({ page: 1 }), MARKET_QUERY_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marketQuery]);
+
+  useEffect(() => {
+    if (tab !== "market" || marketState === "idle") return;
+    void loadMarket({ page: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marketType, marketSort]);
 
   function beginCatalogInstall(item: PackageCatalogItem) {
     if (!host || !workspace) return;
@@ -1309,10 +1488,43 @@ export function PackagesPage() {
               title={t("packagesMarketRefresh")}
               aria-label={t("packagesMarketRefresh")}
               disabled={marketState === "loading"}
-              onClick={() => void loadMarket(true)}
+              onClick={() => void loadMarket({ refresh: true })}
             >
               <RefreshCw size={13} className={marketState === "loading" ? "animate-spin" : ""} />
             </button>
+            {marketCatalog && marketRange && (
+              <div className="ml-auto flex items-center gap-1.5 text-[11px] text-muted">
+                <button
+                  type="button"
+                  className={secondaryButton}
+                  title={t("packagesMarketPrev")}
+                  aria-label={t("packagesMarketPrev")}
+                  disabled={marketState === "loading" || marketCatalog.page <= 1}
+                  onClick={() => void loadMarket({ page: marketCatalog.page - 1 })}
+                >
+                  <ChevronLeft size={13} />
+                </button>
+                <span className="min-w-24 text-center tabular-nums">
+                  {t("packagesMarketRange", {
+                    start: marketRange.start,
+                    end: marketRange.end,
+                    total: marketCatalog.total,
+                  })}
+                </span>
+                <button
+                  type="button"
+                  className={secondaryButton}
+                  title={t("packagesMarketNext")}
+                  aria-label={t("packagesMarketNext")}
+                  disabled={
+                    marketState === "loading" || marketCatalog.page >= marketCatalog.lastPage
+                  }
+                  onClick={() => void loadMarket({ page: marketCatalog.page + 1 })}
+                >
+                  <ChevronRight size={13} />
+                </button>
+              </div>
+            )}
           </div>
           {marketState === "error" && !marketCatalog ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
@@ -1325,7 +1537,7 @@ export function PackagesPage() {
                 <button
                   type="button"
                   className={secondaryButton}
-                  onClick={() => void loadMarket(true)}
+                  onClick={() => void loadMarket({ refresh: true, page: 1 })}
                 >
                   <RefreshCw size={13} />
                   {t("packagesTryAgain")}
@@ -1345,83 +1557,15 @@ export function PackagesPage() {
           ) : visibleMarketItems.length === 0 ? (
             <p className="p-8 text-center text-sm text-muted">{t("packagesMarketEmpty")}</p>
           ) : (
-            <div className="scrollbar-auto-hide grid min-h-0 flex-1 auto-rows-min grid-cols-1 gap-3 overflow-y-auto p-4 lg:grid-cols-2 2xl:grid-cols-3">
-              {visibleMarketItems.map((item) => {
-                const installed = isCatalogItemInstalled(item, allPackages);
-                return (
-                  <article
-                    key={item.name}
-                    data-market-card={item.name}
-                    className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="min-w-0 truncate text-[13px] font-semibold" title={item.name}>
-                        {item.name}
-                      </h3>
-                      <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                        {item.types.map((type) => (
-                          <span
-                            key={type}
-                            className="meta-chip rounded border border-border px-1 text-[10px] text-muted"
-                          >
-                            {type}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                    <p
-                      className="line-clamp-2 min-h-10 text-xs leading-5 text-muted"
-                      title={item.description}
-                    >
-                      {item.description}
-                    </p>
-                    <div className="mt-auto flex items-center gap-2 text-[11px] text-muted">
-                      {item.author && (
-                        <span className="min-w-0 truncate" title={item.author}>
-                          {item.author}
-                        </span>
-                      )}
-                      {item.downloadsPerMonth !== undefined && (
-                        <span className="shrink-0 tabular-nums">
-                          {t("packagesMarketDownloads", {
-                            count: formatDownloadsPerMonth(item.downloadsPerMonth),
-                          })}
-                        </span>
-                      )}
-                      <span className="ml-auto flex shrink-0 items-center gap-1.5">
-                        {item.npmUrl && (
-                          <button
-                            type="button"
-                            className="text-muted hover:text-foreground"
-                            title="npm"
-                            aria-label={`npm: ${item.name}`}
-                            onClick={() => void openExternal(item.npmUrl!)}
-                          >
-                            <ExternalLink size={12} />
-                          </button>
-                        )}
-                        {installed ? (
-                          <span className="inline-flex items-center gap-1 text-success">
-                            <Check size={12} />
-                            {t("packagesMarketInstalled")}
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className={primaryButton}
-                            disabled={mutationBlocked}
-                            onClick={() => beginCatalogInstall(item)}
-                          >
-                            <Download size={13} />
-                            {t("packagesInstallAction")}
-                          </button>
-                        )}
-                      </span>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
+            <MarketCatalogGrid
+              items={visibleMarketItems}
+              allPackages={allPackages}
+              locale={locale}
+              t={t}
+              mutationBlocked={mutationBlocked}
+              onOpen={(url) => void openExternal(url)}
+              onInstall={beginCatalogInstall}
+            />
           )}
         </div>
       ) : loadState === "error" && !packages ? (

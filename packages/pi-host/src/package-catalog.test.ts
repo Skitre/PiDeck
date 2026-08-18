@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  catalogPageUrl,
   getPackageCatalog,
+  parseCatalogIndexMeta,
   parsePackageCatalogHtml,
   resetPackageCatalogCache,
 } from "./package-catalog.js";
@@ -99,6 +101,27 @@ describe("parsePackageCatalogHtml", () => {
   });
 });
 
+describe("parseCatalogIndexMeta", () => {
+  it("reads the visible range, total, and last page link", () => {
+    const html =
+      `<span class="packages-count">1-50 / 5413</span>` +
+      `<nav class="pagination packages-pagination">` +
+      `<a class="pagination-page" href="/packages?page=2">2</a>` +
+      `<a class="pagination-page" href="/packages?page=109">109</a>` +
+      `</nav>`;
+    expect(parseCatalogIndexMeta(html)).toEqual({
+      rangeStart: 1,
+      rangeEnd: 50,
+      total: 5413,
+      lastPage: 109,
+    });
+  });
+
+  it("defaults to a single page when the index has no pager", () => {
+    expect(parseCatalogIndexMeta("<html><body>no pager</body></html>")).toEqual({ lastPage: 1 });
+  });
+});
+
 describe("getPackageCatalog", () => {
   afterEach(() => {
     resetPackageCatalogCache();
@@ -117,6 +140,12 @@ describe("getPackageCatalog", () => {
 
     const first = await getPackageCatalog({ fetchImpl, now });
     expect("catalog" in first && first.catalog.fromCache).toBe(false);
+    expect("catalog" in first && first.catalog).toMatchObject({
+      page: 1,
+      pageSize: 1,
+      total: 1,
+      lastPage: 1,
+    });
 
     clock += 60_000;
     const second = await getPackageCatalog({ fetchImpl, now });
@@ -157,5 +186,71 @@ describe("getPackageCatalog", () => {
       fetchImpl: okFetch("<html><body>redesigned page</body></html>"),
     });
     expect("error" in result && result.error.code).toBe("CATALOG_UNAVAILABLE");
+  });
+
+  it("fetches only the requested page", async () => {
+    const pageOne =
+      `<span class="packages-count">1-2 / 4</span>` +
+      `<a href="/packages?page=2">2</a>` +
+      card({ name: "pi-one" }) +
+      card({ name: "pi-two" });
+    const pageTwo =
+      `<span class="packages-count">3-4 / 4</span>` +
+      card({ name: "pi-three" }) +
+      card({ name: "pi-four" });
+    const fetchImpl = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      text: async () => (url.includes("page=2") ? pageTwo : pageOne),
+    }));
+
+    const first = await getPackageCatalog({ fetchImpl });
+    expect("catalog" in first && first.catalog.items.map((item) => item.name)).toEqual([
+      "pi-one",
+      "pi-two",
+    ]);
+    expect("catalog" in first && first.catalog).toMatchObject({ page: 1, total: 4, lastPage: 2 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://pi.dev/packages",
+      expect.objectContaining({ headers: { accept: "text/html" } }),
+    );
+
+    const second = await getPackageCatalog({ fetchImpl, page: 2 });
+    expect("catalog" in second && second.catalog.items.map((item) => item.name)).toEqual([
+      "pi-three",
+      "pi-four",
+    ]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://pi.dev/packages?page=2",
+      expect.objectContaining({ headers: { accept: "text/html" } }),
+    );
+  });
+
+  it("maps search, type, and sort onto the pi.dev query string", async () => {
+    expect(catalogPageUrl({ page: 3, query: "web", type: "skill", sort: "recent" })).toBe(
+      "https://pi.dev/packages?page=3&name=web&type=skill&sort=recent",
+    );
+    const fetchImpl = okFetch(card({ name: "pi-web" }));
+    await getPackageCatalog({
+      fetchImpl,
+      page: 2,
+      query: "web",
+      type: "extension",
+      sort: "recent",
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://pi.dev/packages?page=2&name=web&type=extension&sort=recent",
+      expect.objectContaining({ headers: { accept: "text/html" } }),
+    );
+  });
+
+  it("returns an empty page for a filtered miss instead of CATALOG_UNAVAILABLE", async () => {
+    const result = await getPackageCatalog({
+      fetchImpl: okFetch("<html><body>no cards</body></html>"),
+      query: "definitely-missing",
+    });
+    expect("catalog" in result && result.catalog.items).toEqual([]);
+    expect("catalog" in result && result.catalog.total).toBe(0);
   });
 });

@@ -24,7 +24,7 @@ Chat with your coding agent, watch its tools work, manage sessions, models, and 
 - **Models & providers** — switch providers, models, and thinking levels from the UI, with usage visibility per conversation.
 - **Git built in** — review changes, stage or unstage individual hunks, and browse branch history without leaving the app.
 - **Workspace Dock** — inspect the project file tree, reference files in a prompt, open conversation links in embedded browser tabs, and keep terminals beside the chat.
-- **Packages** — install and manage Pi Extensions, Skills, Prompts, and Themes, including project-local packages.
+- **Packages** — browse the pi.dev catalog, then install and manage user-scope Extensions, Skills, Prompts, and Themes.
 - **Extension UI & terminal** — extensions render their own interactive panels, and an integrated workspace terminal is one shortcut away.
 - **Make it yours** — customizable keyboard shortcuts, context menus, and an interface available in English and 简体中文.
 
@@ -59,10 +59,11 @@ PiDeck bundles the Pi SDK (currently `0.82.1`) and its own Node runtime, so
 it runs standalone — no global `pi` executable or Node installation required.
 The Windows build bundles Git as well.
 
-If you also use the Pi CLI, both share the same data in `~/.pi/agent` and each
-workspace's `.pi` directory: sessions and history, authentication and model
-settings, and installed packages. Keep the CLI version close to PiDeck's
-pinned SDK version, and avoid editing the same session from both apps at once.
+If you also use the Pi CLI, both share `~/.pi/agent` (authentication, model
+settings, and user-scope packages) and each workspace's `.pi` directory
+(sessions and history). PiDeck does not load or manage project-local packages
+from `<workspace>/.pi`. Keep the CLI version close to PiDeck's pinned SDK
+version, and avoid editing the same session from both apps at once.
 
 ## Build from source
 

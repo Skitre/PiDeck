@@ -22,6 +22,7 @@ the current Windows development-candidate boundary follow
 | Session lifecycle ops | `packages/pi-host/src/session-lifecycle.ts` | `session-file-lifecycle`, session-controller integration |
 | Package filters | `packages/pi-host/src/package-filters.ts` | `package-filters.test.ts` |
 | Package controller | `packages/pi-host/src/package-controller.ts` | integration + disk fingerprint + resource-reload-required |
+| Package catalog | `packages/pi-host/src/package-catalog.ts` | `package-catalog.test.ts` |
 | Agent controller | `packages/pi-host/src/agent-controller.ts` | integration |
 | Extension invocation provenance | `packages/pi-host/src/extension-invocation-context.ts` + pinned SDK patch | `extension-command-context.test.ts`, `sdk-invocation-runner.test.ts` |
 | Extension UI routing policy | `packages/pi-host/src/extension-ui-policy.ts` | `extension-ui-policy.test.ts` decision/risk/ownership matrix |
@@ -49,7 +50,7 @@ the current Windows development-candidate boundary follow
 | Stores / epoch / decision groups | `apps/desktop/src/lib/stores/` | `app-store.test.ts` (redacted group transitions), `epoch-store.test.ts` |
 | Session Catalog / runtime projection | `apps/desktop/src/lib/stores/session-catalog.ts` | `session-catalog.test.ts`, `app-store.test.ts` |
 | Chat | `apps/desktop/src/features/chat/` | `transcript-model.test.ts` (row build + stable-row reuse), `ExtensionPresentation.dom.test.tsx` (group continuity, Composer blocking/focus, large-option search/virtualization) |
-| Packages | `apps/desktop/src/features/packages/PackagesPage.tsx` | atomic mutation apply |
+| Packages | `apps/desktop/src/features/packages/PackagesPage.tsx` | `PackagesPage.dom.test.tsx` (mutation apply, market tab), `packages-model.test.ts` |
 | Settings | `apps/desktop/src/features/settings/` | `SettingsPage.dom.test.tsx` (nav dirty guard, routing mode sync/rollback, Host split), `ProvidersSettings.dom.test.tsx` (dirty tracking, key-removal safety, number fields), `HostSettings.dom.test.tsx` (capabilities, restart confirm, agent-dir change) |
 | Shared confirm dialog | `apps/desktop/src/components/Dialog.tsx` (tones: default/warning/danger) | `Dialog.dom.test.tsx` (Escape containment, focus) |
 | Shared UI controls | `apps/desktop/src/components/Switch.tsx`, `SectionHeader.tsx` | via settings/packages DOM tests |

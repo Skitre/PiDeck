@@ -67,10 +67,24 @@ completes successfully.
 
 ## UI
 
-The Packages page installs and manages user-scope packages only. It provides
-install source entry, configured Package selection, resource toggles,
-standalone resources, and update actions. Install, update, and remove all
-confirm through the shared review dialog (`components/Dialog.tsx`); removal
-uses the danger tone. Update all shows the known update count and is disabled
-when a completed check found none; the progress strip reports human-readable
-states, auto-clears after completion, and can be dismissed.
+The Packages page has three tabs: Installed, Resources, and Market. Install,
+update, remove, and resource preference mutations are user-scope only.
+
+Installed provides install source entry, configured Package selection, and
+update actions. Resources lists package-owned and standalone resources with
+enable/disable toggles. Install, update, and remove all confirm through the
+shared review dialog (`components/Dialog.tsx`); removal uses the danger tone.
+Update all shows the known update count and is disabled when a completed
+check found none; the progress strip reports human-readable states,
+auto-clears after completion, and can be dismissed.
+
+Market loads Host `package.catalog` the first time the tab is opened. Host
+scrapes one `https://pi.dev/packages` page per request (`?page=`, `name`,
+`type`, `sort`; 50 cards per page; there is no public JSON API yet) and
+caches that page for 10 minutes. An unfiltered first page with no cards is
+`CATALOG_UNAVAILABLE`; a filtered miss is an empty page. Desktop search,
+type, and sort are forwarded to Host, and Next/Previous fetch the next
+page. Install from a card uses the same review dialog
+as Installed, with `source: "npm:<name>"` and `scope: "user"`. Cards show
+author, monthly downloads, and published date when present, and link out to
+the pi.dev detail page, npm, and GitHub.

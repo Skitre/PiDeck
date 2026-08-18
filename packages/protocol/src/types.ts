@@ -495,6 +495,12 @@ export type PackageCatalog = {
   /** True when served from the in-memory cache instead of a fresh fetch. */
   fromCache: boolean;
   items: PackageCatalogItem[];
+  /** 1-based page that produced `items`. */
+  page: number;
+  pageSize: number;
+  /** Catalog-reported match count for the current query. */
+  total: number;
+  lastPage: number;
 };
 
 export type PackageRecord = {

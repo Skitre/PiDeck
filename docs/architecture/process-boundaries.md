@@ -57,7 +57,7 @@ Host's own shutdown handling remain defense in depth for that external case.
 **Owns**
 
 - Zustand projections, typed Host requests/events, and all user-facing views.
-- Package install, update, and remove confirmation for user-scope packages.
+- Package catalog browse and user-scope install, update, and remove confirmation.
 
 **Must not**
 

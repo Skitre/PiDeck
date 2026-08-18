@@ -24,7 +24,7 @@
 - **模型与 Provider** —— 在界面里切换 Provider、模型和思考等级,每个对话的用量一目了然。
 - **内置 Git** —— 查看变更、按 hunk 暂存/撤销、浏览分支历史,不用离开应用。
 - **工作区 Dock** —— 浏览项目文件树、在提示词中引用文件、在内置浏览器标签中打开对话链接,并把终端常驻在对话旁边。
-- **Packages** —— 安装和管理 Pi 的 Extensions、Skills、Prompts 和 Themes,支持项目级 Package。
+- **Packages** —— 浏览 pi.dev 目录,安装和管理用户级 Extensions、Skills、Prompts 和 Themes。
 - **Extension UI 与终端** —— 扩展可以渲染自己的交互面板,集成的工作区终端一个快捷键即达。
 - **顺手好用** —— 自定义键盘快捷键、右键菜单,界面支持简体中文和 English。
 
@@ -55,9 +55,10 @@ PiDeck 会自动检查并原地安装更新。
 PiDeck 内置 Pi SDK(当前为 `0.82.1`)和独立的 Node 运行时,开箱即用:
 不需要全局安装 `pi` 命令行或 Node;Windows 版还内置了 Git。
 
-如果你同时使用 Pi CLI,两者共享 `~/.pi/agent` 和各工作区 `.pi` 目录中的
-数据:会话与历史、认证与模型设置、已安装的 Packages。建议让 CLI 版本与
-PiDeck 固定的 SDK 版本保持接近,并避免同时在两个应用中编辑同一个会话。
+如果你同时使用 Pi CLI,两者共享 `~/.pi/agent`(认证、模型设置、用户级
+Packages)和各工作区 `.pi` 目录(会话与历史)。PiDeck 不会加载或管理
+`<workspace>/.pi` 中的项目级 Package。建议让 CLI 版本与 PiDeck 固定的
+SDK 版本保持接近,并避免同时在两个应用中编辑同一个会话。
 
 ## 从源码构建
 

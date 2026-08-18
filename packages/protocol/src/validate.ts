@@ -626,11 +626,35 @@ export function validateRequestParams<M extends HostMethod>(
         (params.includeResources === undefined || isBoolean(params.includeResources))
         ? ok(params)
         : fail("invalid package.list params", { method });
-    case "package.catalog":
-      return exactObject(params, [], ["refresh"]) &&
-        (params.refresh === undefined || isBoolean(params.refresh))
+    case "package.catalog": {
+      if (!exactObject(params, [], ["refresh", "page", "query", "type", "sort"])) {
+        return fail("invalid package.catalog params", { method });
+      }
+      const pageOk =
+        params.page === undefined ||
+        (typeof params.page === "number" &&
+          Number.isSafeInteger(params.page) &&
+          params.page >= 1 &&
+          params.page <= 10_000);
+      const queryOk =
+        params.query === undefined ||
+        (typeof params.query === "string" && params.query.length > 0 && params.query.length <= 200);
+      const typeOk =
+        params.type === undefined ||
+        params.type === "extension" ||
+        params.type === "skill" ||
+        params.type === "theme" ||
+        params.type === "prompt";
+      const sortOk =
+        params.sort === undefined || params.sort === "downloads" || params.sort === "recent";
+      return (params.refresh === undefined || isBoolean(params.refresh)) &&
+        pageOk &&
+        queryOk &&
+        typeOk &&
+        sortOk
         ? ok(params)
         : fail("invalid package.catalog params", { method });
+    }
     case "package.install":
       return exactObject(params, ["source", "scope"]) &&
         isNonEmptyString(params.source) &&

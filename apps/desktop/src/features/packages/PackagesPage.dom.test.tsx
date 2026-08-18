@@ -14,6 +14,7 @@ import type {
 } from "@pideck/protocol";
 import { hostClient } from "../../lib/bridge/host-client";
 import { useAppStore } from "../../lib/stores/app-store";
+import { formatCatalogPublishedAt } from "./packages-model";
 import { PackagesPage } from "./PackagesPage";
 
 const { shellOpen } = vi.hoisted(() => ({ shellOpen: vi.fn() }));
@@ -821,37 +822,54 @@ describe("PackagesPage DOM workflows", () => {
 
 describe("PackagesPage market tab", () => {
   let request: MockInstance<typeof hostClient.request>;
-  let catalogResult: () => HostResponseEnvelope;
+  let catalogResult: (page?: number) => HostResponseEnvelope;
 
-  function catalogEnvelope(): HostResponseEnvelope {
+  function catalogEnvelope(page = 1): HostResponseEnvelope {
+    const firstPage = [
+      {
+        name: "tools",
+        description: "Already installed helper",
+        author: "tester",
+        types: ["extension"],
+        downloadsPerMonth: 43_100,
+        publishedAt: 1_784_623_367_738,
+        npmUrl: "https://www.npmjs.com/package/tools",
+        searchText: "tools already installed helper",
+        installSource: "npm:tools",
+        pageUrl: "https://pi.dev/packages/tools",
+      },
+      {
+        name: "pi-web-access",
+        description: "Web search for Pi",
+        author: "nicopreme",
+        types: ["extension", "skill"],
+        downloadsPerMonth: 222_000,
+        publishedAt: 1_785_450_190_149,
+        searchText: "pi-web-access web search",
+        installSource: "npm:pi-web-access",
+        pageUrl: "https://pi.dev/packages/pi-web-access",
+        githubUrl: "https://github.com/nicopreme/pi-web-access",
+        npmUrl: "https://www.npmjs.com/package/pi-web-access",
+      },
+    ];
+    const secondPage = [
+      {
+        name: "pi-later",
+        description: "Second page package",
+        types: ["skill"],
+        searchText: "pi-later second page",
+        installSource: "npm:pi-later",
+        pageUrl: "https://pi.dev/packages/pi-later",
+      },
+    ];
     return envelope("package.catalog", {
       generatedAt: 1,
       fromCache: false,
-      items: [
-        {
-          name: "tools",
-          description: "Already installed helper",
-          author: "tester",
-          types: ["extension"],
-          downloadsPerMonth: 43_100,
-          publishedAt: 1_784_623_367_738,
-          npmUrl: "https://www.npmjs.com/package/tools",
-          searchText: "tools already installed helper",
-          installSource: "npm:tools",
-          pageUrl: "https://pi.dev/packages/tools",
-        },
-        {
-          name: "pi-web-access",
-          description: "Web search for Pi",
-          author: "nicopreme",
-          types: ["extension", "skill"],
-          downloadsPerMonth: 222_000,
-          publishedAt: 1_785_450_190_149,
-          searchText: "pi-web-access web search",
-          installSource: "npm:pi-web-access",
-          pageUrl: "https://pi.dev/packages/pi-web-access",
-        },
-      ],
+      page,
+      pageSize: 50,
+      total: 100,
+      lastPage: 2,
+      items: page === 2 ? secondPage : firstPage,
     });
   }
 
@@ -864,11 +882,16 @@ describe("PackagesPage market tab", () => {
     useAppStore.getState().setHost(host());
     useAppStore.getState().setWorkspace(workspace());
     useAppStore.getState().applyPackageSnapshot(snapshot());
-    request = vi.spyOn(hostClient, "request").mockImplementation(async (method: string) => {
-      if (method === "package.list") return envelope(method, snapshot());
-      if (method === "package.catalog") return catalogResult();
-      throw new Error(`Unexpected method ${method}`);
-    });
+    request = vi
+      .spyOn(hostClient, "request")
+      .mockImplementation(async (method: string, _ctx?: unknown, params?: unknown) => {
+        if (method === "package.list") return envelope(method, snapshot());
+        if (method === "package.catalog") {
+          const page = (params as { page?: number } | undefined)?.page ?? 1;
+          return catalogResult(page);
+        }
+        throw new Error(`Unexpected method ${method}`);
+      });
   });
 
   afterEach(() => {
@@ -891,7 +914,7 @@ describe("PackagesPage market tab", () => {
     expect(request).toHaveBeenCalledWith(
       "package.catalog",
       { expectedHostInstanceId: "h1" },
-      {},
+      { page: 1, sort: "downloads" },
       30_000,
     );
 
@@ -899,6 +922,51 @@ describe("PackagesPage market tab", () => {
     expect(installedCard).not.toBeNull();
     expect(within(installedCard as HTMLElement).getByText("Installed")).toBeInTheDocument();
     expect(screen.getByText("222K/mo")).toBeInTheDocument();
+    expect(screen.getByText("1–2 / 100")).toBeInTheDocument();
+  });
+
+  it("fetches the next catalog page on demand", async () => {
+    const user = userEvent.setup();
+    render(<PackagesPage />);
+    await user.click(await screen.findByRole("button", { name: "Market" }));
+    expect(await screen.findByText("pi-web-access")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByText("pi-later")).toBeInTheDocument();
+    expect(screen.queryByText("pi-web-access")).not.toBeInTheDocument();
+    expect(request).toHaveBeenCalledWith(
+      "package.catalog",
+      { expectedHostInstanceId: "h1" },
+      { page: 2, sort: "downloads" },
+      30_000,
+    );
+    expect(screen.getByText("51–51 / 100")).toBeInTheDocument();
+  });
+
+  it("opens pi.dev, GitHub, and npm from a market card", async () => {
+    const user = userEvent.setup();
+    render(<PackagesPage />);
+    await user.click(await screen.findByRole("button", { name: "Market" }));
+
+    const card = (await screen.findByText("pi-web-access")).closest("[data-market-card]");
+    expect(card).not.toBeNull();
+    const published = formatCatalogPublishedAt(1_785_450_190_149, "en");
+    expect(within(card as HTMLElement).getByText(published)).toBeInTheDocument();
+
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "Open pi-web-access on pi.dev" }),
+    );
+    expect(shellOpen).toHaveBeenCalledWith("https://pi.dev/packages/pi-web-access");
+
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "Open pi-web-access on GitHub" }),
+    );
+    expect(shellOpen).toHaveBeenCalledWith("https://github.com/nicopreme/pi-web-access");
+
+    await user.click(
+      within(card as HTMLElement).getByRole("button", { name: "Open pi-web-access on npm" }),
+    );
+    expect(shellOpen).toHaveBeenCalledWith("https://www.npmjs.com/package/pi-web-access");
   });
 
   it("starts the existing install review from a market card", async () => {

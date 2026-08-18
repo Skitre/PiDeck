@@ -275,7 +275,13 @@ export type HostRequestParams = {
   "model.setCurrent": { provider: string; modelId: string };
   "model.setThinkingLevel": { level: string };
   "package.list": { scope: "user" | "project" | "all"; includeResources?: boolean };
-  "package.catalog": { refresh?: boolean };
+  "package.catalog": {
+    refresh?: boolean;
+    page?: number;
+    query?: string;
+    type?: string;
+    sort?: "downloads" | "recent";
+  };
   "package.install": { source: string; scope: "user" | "project" };
   "package.remove": { packageId: string };
   "package.checkUpdates": { packageId?: string } | null;
