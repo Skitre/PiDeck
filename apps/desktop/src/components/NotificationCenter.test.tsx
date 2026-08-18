@@ -1,6 +1,19 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { NotificationPanel } from "./NotificationCenter";
+import {
+  NotificationPanel,
+  notificationPopupLeft,
+  notificationPopupTop,
+} from "./NotificationCenter";
+
+describe("notification popup position", () => {
+  it("centers the panel on the bell and keeps it on screen", () => {
+    expect(notificationPopupLeft(220, 240, 1280)).toBe(100);
+    expect(notificationPopupLeft(20, 240, 1280)).toBe(8);
+    expect(notificationPopupLeft(1260, 240, 1280)).toBe(1032);
+    expect(notificationPopupTop(64)).toBe(70);
+  });
+});
 
 describe("NotificationPanel", () => {
   it("renders retained notifications newest first with actionable controls", () => {
@@ -28,6 +41,8 @@ describe("NotificationPanel", () => {
     );
 
     expect(html).toContain('role="dialog"');
+    expect(html).toContain("data-notification-panel");
+    expect(html).toContain("w-60");
     expect(html).toContain('aria-label="Notifications"');
     expect(html).toContain('aria-label="Clear all"');
     expect(html).toContain('aria-label="Dismiss notification"');

@@ -5,6 +5,7 @@ import {
   WidgetPanel,
   calculateWidgetPopoverLayout,
   calculateWidgetPopoverPosition,
+  isUsableWidgetAnchor,
   partitionExtensionWidgets,
 } from "./ExtensionWidgets";
 
@@ -91,6 +92,41 @@ describe("extension widget popover geometry", () => {
     expect(markup).toContain('data-widget-popover-side="above"');
     expect(markup).toContain('aria-expanded="true"');
     expect(markup).toContain("5 pattools");
+  });
+
+  it("rejects a collapsed composer as a drawer anchor", () => {
+    expect(isUsableWidgetAnchor({ top: 0, bottom: 0, left: 0, width: 0 })).toBe(false);
+    expect(isUsableWidgetAnchor({ top: 500, bottom: 600, left: 100, width: 600 })).toBe(true);
+  });
+
+  it("does not park an unmeasured drawer at the window origin", () => {
+    const markup = renderToStaticMarkup(
+      createElement(WidgetPanel, {
+        entries: [{ key: "nano-context", widget: ["hidden until measured"] }],
+        collapsedWidgetKeys: {},
+        placementLabel: "above",
+        position: null,
+        onClose: () => undefined,
+        onToggleCollapsed: () => undefined,
+      }),
+    );
+
+    expect(markup).toBe("");
+  });
+
+  it("does not render a drawer that is too narrow to be the composer popover", () => {
+    const markup = renderToStaticMarkup(
+      createElement(WidgetPanel, {
+        entries: [{ key: "nano-context", widget: ["clipped sliver"] }],
+        collapsedWidgetKeys: {},
+        placementLabel: "above",
+        position: { side: "above", left: 0, width: 1, maxHeight: 200, bottom: 8 },
+        onClose: () => undefined,
+        onToggleCollapsed: () => undefined,
+      }),
+    );
+
+    expect(markup).toBe("");
   });
 
   it("keeps a collapsed widget header accessible without rendering its body", () => {

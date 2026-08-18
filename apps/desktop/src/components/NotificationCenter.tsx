@@ -1,7 +1,40 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { AlertCircle, AlertTriangle, Bell, CheckCircle2, Info, Trash2, X } from "lucide-react";
 import { useT } from "../lib/i18n/use-t";
 import { useAppStore, type AppNotification } from "../lib/stores/app-store";
+
+export const NOTIFICATION_POPUP_WIDTH = 240;
+export const NOTIFICATION_POPUP_MARGIN = 8;
+export const NOTIFICATION_POPUP_GAP = 6;
+
+export function notificationPopupLeft(
+  bellCenterX: number,
+  width = NOTIFICATION_POPUP_WIDTH,
+  viewportWidth = 1280,
+  margin = NOTIFICATION_POPUP_MARGIN,
+): number {
+  const centered = bellCenterX - width / 2;
+  const maxLeft = viewportWidth - width - margin;
+  return Math.round(Math.min(Math.max(margin, centered), Math.max(margin, maxLeft)));
+}
+
+export function notificationPopupTop(bellBottom: number, gap = NOTIFICATION_POPUP_GAP): number {
+  return Math.round(bellBottom + gap);
+}
+
+function readPopupPosition(bell: HTMLElement | null): CSSProperties | null {
+  if (!bell) return null;
+  const rect = bell.getBoundingClientRect();
+  const width = Math.min(
+    NOTIFICATION_POPUP_WIDTH,
+    Math.max(0, window.innerWidth - NOTIFICATION_POPUP_MARGIN * 2),
+  );
+  return {
+    width,
+    top: notificationPopupTop(rect.bottom),
+    left: notificationPopupLeft(rect.left + rect.width / 2, width, window.innerWidth),
+  };
+}
 
 function levelStyle(level: string) {
   switch (level) {
@@ -38,17 +71,21 @@ export function NotificationPanel({
   notifications,
   onDismiss,
   onClear,
+  style,
 }: {
   notifications: AppNotification[];
   onDismiss: (id: string) => void;
   onClear: () => void;
+  style?: CSSProperties;
 }) {
   const t = useT();
   return (
     <section
       role="dialog"
       aria-label={t("notifCenterTitle")}
-      className="theme-floating-surface fixed left-3 top-14 z-[70] flex max-h-[min(32rem,calc(100vh-4.25rem))] w-[min(25rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-lg border border-border bg-surface-raised shadow-xl"
+      data-notification-panel
+      style={style}
+      className="theme-floating-surface fixed z-[70] flex max-h-[min(32rem,calc(100vh-4.25rem))] w-60 flex-col overflow-hidden rounded-lg border border-border bg-surface-raised shadow-xl"
     >
       <header className="flex h-10 shrink-0 items-center border-b border-border px-3">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{t("notifCenterTitle")}</h2>
@@ -126,7 +163,11 @@ export function NotificationCenter() {
   const markNotificationsRead = useAppStore((state) => state.markNotificationsRead);
   const [open, setOpen] = useState(false);
   const [toasts, setToasts] = useState<ActiveToast[]>([]);
+  const [popupStyle, setPopupStyle] = useState<CSSProperties>({
+    width: NOTIFICATION_POPUP_WIDTH,
+  });
   const rootRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLButtonElement>(null);
   const previousLatestId = useRef<string | null>(null);
   const toastTimers = useRef(new Map<string, number[]>());
   const latestId = notifications.at(-1)?.id ?? null;
@@ -149,6 +190,7 @@ export function NotificationCenter() {
     previousLatestId.current = latestId;
     // The open panel already shows (and marks read) incoming notifications.
     if (open) return;
+    syncPopupPosition();
     setToasts((current) =>
       [...current.filter((toast) => toast.id !== latestId), { id: latestId, leaving: false }].slice(
         -MAX_STACKED_TOASTS,
@@ -174,6 +216,18 @@ export function NotificationCenter() {
     },
     [],
   );
+
+  function syncPopupPosition() {
+    const next = readPopupPosition(bellRef.current);
+    if (next) setPopupStyle(next);
+  }
+
+  useEffect(() => {
+    if (!open && toasts.length === 0) return;
+    syncPopupPosition();
+    window.addEventListener("resize", syncPopupPosition);
+    return () => window.removeEventListener("resize", syncPopupPosition);
+  }, [open, toasts.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -203,6 +257,7 @@ export function NotificationCenter() {
   }, [open, unreadCount, markNotificationsRead]);
 
   function openPanel() {
+    syncPopupPosition();
     setOpen(true);
     markNotificationsRead();
     dismissAllToasts();
@@ -214,6 +269,7 @@ export function NotificationCenter() {
         the toast stack is a sibling so its own z-[70] layer stays on top of both. */}
       <div ref={rootRef} className="relative z-30">
         <button
+          ref={bellRef}
           type="button"
           title={t("notifCenterTitle")}
           aria-label={t("notifCenterLabel", { count: unreadCount })}
@@ -243,15 +299,17 @@ export function NotificationCenter() {
               notifications={notifications}
               onDismiss={dismissNotification}
               onClear={clearNotifications}
+              style={popupStyle}
             />
           </div>
         )}
       </div>
-      {!open && toasts.length > 0 && (
+      {!open && toasts.length > 0 && popupStyle.top != null && popupStyle.left != null && (
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed right-3 top-14 z-[70] flex w-[min(23rem,calc(100vw-1.5rem))] flex-col gap-2"
+          style={popupStyle}
+          className="pointer-events-none fixed z-[70] flex w-60 flex-col gap-2"
         >
           {toasts.map(({ id, leaving }) => {
             const notification = notifications.find((item) => item.id === id);

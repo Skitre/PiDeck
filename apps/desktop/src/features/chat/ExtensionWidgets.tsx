@@ -57,6 +57,10 @@ export type WidgetPopoverLayout = {
   combined: WidgetPopoverPosition | null;
 };
 
+export function isUsableWidgetAnchor(anchor: WidgetAnchorRect): boolean {
+  return Number.isFinite(anchor.width) && anchor.width >= 80;
+}
+
 export function calculateWidgetPopoverPosition({
   anchor,
   viewportWidth,
@@ -164,20 +168,25 @@ function useWidgetPopoverLayout(
   const [layout, setLayout] = useState<WidgetPopoverLayout | null>(null);
 
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setLayout(null);
+      return;
+    }
 
     const update = () => {
       const anchor = anchorRef.current;
       if (!anchor) return;
       const rect = anchor.getBoundingClientRect();
+      const nextAnchor = {
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        width: rect.width,
+      };
+      if (!isUsableWidgetAnchor(nextAnchor)) return;
       setLayout(
         calculateWidgetPopoverLayout({
-          anchor: {
-            top: rect.top,
-            bottom: rect.bottom,
-            left: rect.left,
-            width: rect.width,
-          },
+          anchor: nextAnchor,
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
           hasAbove,
@@ -242,23 +251,22 @@ export function WidgetPanel({
         ? t("extWidgetsCloseBelowEditor")
         : t("extWidgetsCloseAroundEditor");
 
-  const style: CSSProperties = position
-    ? {
-        left: position.left,
-        width: position.width,
-        maxHeight: position.maxHeight,
-        ...(position.top !== undefined ? { top: position.top } : {}),
-        ...(position.bottom !== undefined ? { bottom: position.bottom } : {}),
-      }
-    : { left: 0, top: 0, width: 1, maxHeight: 1 };
+  if (!position || position.width < 80) return null;
+
+  const style: CSSProperties = {
+    left: position.left,
+    width: position.width,
+    maxHeight: position.maxHeight,
+    ...(position.top !== undefined ? { top: position.top } : {}),
+    ...(position.bottom !== undefined ? { bottom: position.bottom } : {}),
+  };
 
   return (
     <div
-      className={`theme-floating-surface fixed z-40 overflow-auto rounded-lg border border-border bg-surface-raised px-4 py-2 shadow-xl ${
-        position ? "" : "invisible pointer-events-none"
-      }`}
+      className="theme-floating-surface fixed z-40 overflow-auto rounded-lg border border-border bg-surface-raised px-4 py-2 shadow-xl"
       style={style}
-      data-widget-popover-side={position?.side}
+      data-widget-popover
+      data-widget-popover-side={position.side}
       aria-label={panelLabel}
     >
       <button
@@ -356,7 +364,7 @@ export function ExtensionWidgetsPopover({
     belowEditor.length > 0,
   );
 
-  if (!open || entries.length === 0) return null;
+  if (!open || entries.length === 0 || !layout) return null;
 
   const panels = (
     <>
