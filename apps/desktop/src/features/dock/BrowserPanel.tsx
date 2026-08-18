@@ -24,6 +24,8 @@ type BrowserBounds = {
 };
 
 const FLOATING_FRAME_INSET_FALLBACK = 12;
+/** Keep the native webview off the dock's left resize handle. */
+const BROWSER_RESIZE_GUTTER = 8;
 
 export function clipBrowserBounds(
   bounds: BrowserBounds,
@@ -37,7 +39,7 @@ export function clipBrowserBounds(
     bottom: bounds.y + bounds.height,
   };
   const inset = Math.max(0, cornerInset);
-  const left = Math.max(bounds.x, box.left);
+  const left = Math.max(bounds.x, box.left + (dock ? BROWSER_RESIZE_GUTTER : 0));
   const top = Math.max(bounds.y, box.top);
   const right = Math.min(bounds.x + bounds.width, box.right - inset);
   const bottom = Math.min(bounds.y + bounds.height, box.bottom - inset);
@@ -359,7 +361,7 @@ export function BrowserPanel({
           />
         </form>
       </div>
-      <div ref={bodyRef} className="relative min-h-0 flex-1 bg-white">
+      <div ref={bodyRef} className="relative min-h-0 flex-1 bg-white pl-2">
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-surface px-6 text-center text-xs text-muted">
             <Globe2 size={20} />

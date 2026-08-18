@@ -83,6 +83,16 @@ describe("RightDock pages", () => {
     expect(screen.getByRole("button", { name: "Open Terminal" })).toBeVisible();
   });
 
+  it("keeps the new-page menu in the dock header stacking context", async () => {
+    const user = userEvent.setup();
+    render(<RightDock />);
+    await user.click(screen.getByRole("button", { name: "Open Files" }));
+    const menu = await openAddMenu(user);
+    expect(menu).toBeVisible();
+    expect(menu.closest("[data-right-dock]")).toHaveClass("z-30");
+    expect(menu.closest("[data-dock-header]")).toHaveClass("z-50");
+  });
+
   it("localizes Dock navigation and shortcuts in Chinese", async () => {
     const user = userEvent.setup();
     useAppStore.setState({ desktopSettings: settings("auto", "zh") });

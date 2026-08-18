@@ -21,6 +21,7 @@ import {
 } from "../lib/commands/actions";
 import { requestGlobalSearchOpen, subscribeSidebarToggle } from "../lib/commands/events";
 
+export const SIDEBAR_WIDTH = 268;
 export const SIDEBAR_WORKSPACE_PANE_HEIGHT_KEY = "pideck.sidebar.workspacePaneHeight";
 export const SIDEBAR_WORKSPACE_PANE_MIN = 72;
 const SIDEBAR_SESSION_PANE_MIN = 96;
@@ -190,18 +191,18 @@ export function SidebarLayout({
 
   return (
     <aside
-      style={{ marginLeft: sidebarCollapsed ? -268 : 0 }}
+      style={{ width: SIDEBAR_WIDTH, marginLeft: sidebarCollapsed ? -SIDEBAR_WIDTH : 0 }}
       data-sidebar
       data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
-      className="sidebar-edge-shadow relative flex h-full min-h-0 w-[268px] shrink-0 flex-col overflow-hidden border-r border-border bg-sidebar transition-[margin-left] duration-200 ease-out"
+      className="sidebar-edge-shadow relative z-20 flex h-full min-h-0 shrink-0 flex-col border-r border-border bg-sidebar transition-[margin-left] duration-200 ease-out"
     >
-      <div className="group/sidebar-edge absolute -right-4 top-0 z-40 h-full w-4">
+      <div className="group/sidebar-edge absolute -right-3 top-0 z-40 h-full w-6">
         <button
           type="button"
           title={sidebarCollapsed ? t("sidebarExpand") : t("sidebarCollapse")}
           aria-label={sidebarCollapsed ? t("sidebarExpand") : t("sidebarCollapse")}
           aria-expanded={!sidebarCollapsed}
-          className="absolute top-1/2 flex h-12 w-4 -translate-y-1/2 items-center justify-center rounded-r-md border border-l-0 border-border bg-surface-raised text-muted opacity-0 shadow-sm transition-opacity group-hover/sidebar-edge:opacity-100 hover:text-foreground focus-visible:opacity-100"
+          className="absolute left-3 top-1/2 flex h-12 w-4 -translate-y-1/2 items-center justify-center rounded-r-md border border-l-0 border-border bg-surface-raised text-muted opacity-0 shadow-sm transition-opacity group-hover/sidebar-edge:opacity-100 hover:text-foreground focus-visible:opacity-100"
           onClick={toggleSidebarCollapsed}
         >
           {sidebarCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
@@ -209,7 +210,7 @@ export function SidebarLayout({
       </div>
 
       {sidebarCollapsed ? null : (
-        <>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div
             className="flex h-16 shrink-0 items-center gap-3 px-4"
             data-sidebar-header
@@ -375,7 +376,7 @@ export function SidebarLayout({
               )}
             </button>
           </div>
-        </>
+        </div>
       )}
     </aside>
   );

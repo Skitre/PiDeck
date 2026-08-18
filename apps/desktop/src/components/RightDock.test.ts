@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
-import {
-  clampDockWidth,
-  partitionDockTabs,
-  visibleDockTabLimit,
-} from "./RightDock";
+import { clampDockWidth, partitionDockTabs, visibleDockTabLimit } from "./RightDock";
 
 describe("clampDockWidth", () => {
   it("uses the configured desktop limits", () => {
-    expect(clampDockWidth(300, 1280)).toBe(460);
+    expect(clampDockWidth(200, 1280)).toBe(268);
+    expect(clampDockWidth(268, 1280)).toBe(268);
+    expect(clampDockWidth(300, 1280)).toBe(300);
     expect(clampDockWidth(460, 1280)).toBe(460);
     expect(clampDockWidth(520, 1280)).toBe(520);
     expect(clampDockWidth(900, 1280)).toBe(720);

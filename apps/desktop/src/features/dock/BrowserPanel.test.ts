@@ -36,10 +36,22 @@ describe("clipBrowserBounds", () => {
         12,
       ),
     ).toEqual({
-      x: 790,
+      x: 798,
       y: 40,
-      width: 398,
+      width: 390,
       height: 628,
+      devicePixelRatio: 1.5,
+    });
+  });
+
+  it("leaves a left gutter so the dock resize handle stays above the webview", () => {
+    expect(
+      clipBrowserBounds({ x: 790, y: 80, width: 410, height: 600, devicePixelRatio: 1.5 }, dock, 0),
+    ).toEqual({
+      x: 798,
+      y: 80,
+      width: 402,
+      height: 600,
       devicePixelRatio: 1.5,
     });
   });

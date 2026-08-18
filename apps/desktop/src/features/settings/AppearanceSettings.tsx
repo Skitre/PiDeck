@@ -319,7 +319,7 @@ export function AppearanceSettings() {
                       min={MIN_CONVERSATION_CONTENT_WIDTH}
                       step={1}
                       inputMode="numeric"
-                      className="min-w-0 flex-1 bg-transparent text-right text-xs text-foreground outline-none"
+                      className="min-w-0 h-full flex-1 border-0 !bg-transparent text-right text-xs text-foreground !shadow-none outline-none"
                       value={conversationWidthDraft}
                       aria-invalid={conversationWidthInvalid || undefined}
                       aria-describedby={`conversation-content-width-description${

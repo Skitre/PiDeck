@@ -64,6 +64,8 @@ describe("Sidebar", () => {
       expect(html).toContain("data-sidebar-workspaces");
       expect(html).toContain("data-sidebar-split");
       expect(html).toContain("Resize workspaces and conversations");
+      expect(html).toContain("Collapse sidebar");
+      expect(html).not.toContain("overflow-hidden border-r border-border bg-sidebar");
       expect(html).toContain("max-h-[min(40%,15rem)]");
       expect(html).not.toContain(">Chat<");
       expect(html).not.toContain(">Packages<");

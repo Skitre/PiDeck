@@ -15,6 +15,7 @@ import type { TerminalProfileId } from "@pideck/protocol";
 import { useAppStore } from "../lib/stores/app-store";
 import { setSidebarPref } from "../lib/sidebar-prefs";
 import { PiMark } from "./PiMark";
+import { SIDEBAR_WIDTH } from "./Sidebar";
 import {
   ExtensionTerminal,
   cancelExtensionTerminal,
@@ -53,7 +54,7 @@ type BrowserDockTab = {
 
 const DOCK_WIDTH_KEY = "pideck.dock.width.v1";
 const DEFAULT_DOCK_WIDTH = 460;
-const MIN_DOCK_WIDTH = 460;
+const MIN_DOCK_WIDTH = SIDEBAR_WIDTH;
 const MAX_DOCK_WIDTH = 720;
 const MAX_BROWSER_TABS = 8;
 const MIN_TAB_WIDTH = 96;
@@ -445,9 +446,9 @@ export function RightDock() {
       style={{ width: dockWidth, marginRight: dockOpen ? 0 : -dockWidth }}
       data-right-dock
       data-dock-open={dockOpen ? "true" : "false"}
-      className={`relative flex shrink-0 flex-col overflow-hidden border-l border-border bg-surface ${
-        resizing ? "transition-none" : "transition-[margin-right] duration-200 ease-out"
-      }`}
+      className={`relative z-30 flex shrink-0 flex-col border-l border-border bg-surface ${
+        dockOpen ? "" : "overflow-hidden"
+      } ${resizing ? "transition-none" : "transition-[margin-right] duration-200 ease-out"}`}
     >
       {dockOpen && (
         <div
@@ -458,7 +459,7 @@ export function RightDock() {
           aria-valuemin={MIN_DOCK_WIDTH}
           aria-valuemax={MAX_DOCK_WIDTH}
           aria-valuenow={dockWidth}
-          className="absolute -left-1 top-0 z-30 h-full w-2 cursor-col-resize touch-none hover:bg-accent/20"
+          className="absolute left-0 top-0 z-40 h-full w-2 cursor-col-resize touch-none hover:bg-accent/20"
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.preventDefault();
@@ -504,7 +505,7 @@ export function RightDock() {
       <div
         data-tauri-drag-region
         data-dock-header
-        className="flex h-11 shrink-0 items-center border-b border-border pl-2 pr-[180px]"
+        className="relative z-50 flex h-11 shrink-0 items-center border-b border-border pl-2 pr-[180px]"
       >
         <div ref={tabBarRef} className="flex min-w-0 flex-1 items-center gap-1 self-stretch">
           <div
@@ -527,7 +528,7 @@ export function RightDock() {
                   key={tabId}
                   data-ui="tab"
                   data-state={activeTab === tabId ? "active" : "inactive"}
-                  className={`flex h-full w-44 min-w-[96px] shrink items-center border-b-2 text-xs ${
+                  className={`flex h-full min-w-0 max-w-44 shrink items-center border-b-2 text-xs ${
                     activeTab === tabId
                       ? "border-accent text-foreground"
                       : "border-transparent text-muted hover:text-foreground"
@@ -539,7 +540,7 @@ export function RightDock() {
                     id={`dock-tab-${tabId}`}
                     aria-controls={`dock-panel-${tabId}`}
                     aria-selected={activeTab === tabId}
-                    className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch pl-2"
+                    className="flex min-w-0 flex-1 items-center gap-1.5 self-stretch overflow-hidden pl-2"
                     title={label}
                     aria-label={label}
                     onClick={() => setActiveTab(tabId)}
@@ -733,7 +734,7 @@ export function RightDock() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative z-0 flex min-h-0 flex-1 flex-col overflow-hidden">
         {tabOrder.includes("files") && (
           <div
             role="tabpanel"
