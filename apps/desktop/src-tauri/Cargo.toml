@@ -1,6 +1,6 @@
 [package]
 name = "pideck"
-version = "0.1.9"
+version = "0.1.10"
 description = "PiDeck"
 authors = ["PiDeck contributors"]
 edition = "2021"
