@@ -79,9 +79,9 @@ pnpm --filter @pideck/desktop run tauri:dev
 
 ## 安全说明
 
-打开工作区即授权加载其项目资源:`.pi/extensions` 中的代码会以当前用户权限
-在本机执行。请只打开可信的工作区、只安装可信来源的 Packages。Provider
-凭据、设置和会话属于 `~/.pi/agent` 下的用户数据,切勿提交到任何仓库。
+PiDeck 只从 `~/.pi/agent` 加载用户级 Package。打开工作区不会执行
+`<workspace>/.pi/extensions`。请只安装可信来源的 Packages。Provider
+凭据、设置和会话属于 `~/.pi/agent` 下的用户数据，切勿提交到任何仓库。
 
 ## 仓库结构
 

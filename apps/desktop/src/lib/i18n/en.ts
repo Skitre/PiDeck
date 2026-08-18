@@ -239,7 +239,8 @@ export const en = {
   usageOverviewHint:
     "Lifetime totals for sessions last updated in this range. Streak uses all activity.",
   usageHeatmap: "Activity heatmap",
-  usageHeatmapHint: "Days a session was last updated — not per-message activity",
+  usageHeatmapHint:
+    "About a year of last-update days — not filtered by the time range, and not per-message",
   usageHeatmapLess: "Less",
   usageHeatmapMore: "More",
   usageDailyTrend: "Daily token trend",

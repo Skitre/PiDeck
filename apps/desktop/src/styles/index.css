@@ -1006,8 +1006,10 @@ html[data-theme-family="apple"] .mac-sidebar-brand-mark {
 }
 
 /* Fixed + backdrop-filter in WebView2 paints a second copy at the viewport
-   origin. Widget drawers are portaled and already have an opaque surface. */
-[data-widget-popover].theme-floating-surface {
+   origin. Widget drawers and notification popups already have an opaque surface. */
+[data-widget-popover].theme-floating-surface,
+[data-notification-panel].theme-floating-surface,
+.notification-toast.theme-floating-surface {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }

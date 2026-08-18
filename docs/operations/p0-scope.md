@@ -25,22 +25,23 @@ The first accepted-installer scope remains Windows x64. macOS Developer ID
 signing, notarization, installed acceptance, and public-release support remain
 outside the current P0 release claim.
 
-Selecting a workspace authorizes its project resources. PiDeck immediately
-loads them with `projectTrusted: true`; existing `.pi/extensions` may execute
-local code. There is no pending, deny, or per-workspace trust state.
+PiDeck loads only user/global packages from the agent directory. Selecting a
+workspace does not run `<workspace>/.pi/extensions`. Host constructs
+`SettingsManager` with `projectTrusted: false`. There is no pending, deny, or
+per-workspace trust prompt because project-local packages are not loaded.
 
 ## P0 requirements
 
 | Area | Required behavior | Acceptance evidence |
 |---|---|---|
 | Desktop lifecycle | Tauri starts and exits; bundled Host starts, shuts down, and receives one bounded automatic restart after an unexpected exit | Rust lifecycle tests plus installed-app smoke and orphan audit |
-| Workspace selection | Cwd is canonicalized and immediately receives a ready cwd-bound graph with project resources enabled | Host workspace integration tests and core desktop workspace bootstrap |
+| Workspace selection | Cwd is canonicalized and immediately receives a ready cwd-bound graph with user-scope packages; project-local packages are not loaded | Host workspace integration tests and core desktop workspace bootstrap |
 | Settings durability | Desktop settings use versioned, recoverable, atomic persistence; corrupt input is surfaced rather than silently discarded | Rust corruption/recovery and atomic-write tests |
 | Session lifecycle | Create, persist, open, and rehydrate the active Session without cross-Session identity leakage | Host integration tests and core desktop rehydrate step |
 | Core chat | `prompt`, streaming transcript updates, one real tool call/result, and `abort` settle through the public Pi SDK path | Deterministic faux-provider core WebView2 E2E |
 | Recovery | Sequence gaps fail closed; Host restart restores workspace, Session, transcript, tools, and package snapshots | Frontend epoch tests and core desktop restart/rehydrate step |
 | Error visibility | Host, Session, Provider, Package, and Extension failures are visibly actionable and remain inspectable | Desktop notification/error-center component tests and E2E |
-| Package safety | Local Package install/remove, explicit Project Package executable-code confirmation, resource enable/disable, reconcile, and reload are safe | Host Package integration tests; full release regression for the complete UI matrix |
+| Package safety | Local user-scope Package install/remove, resource enable/disable, reconcile, and reload are safe | Host Package integration tests; full release regression for the complete UI matrix |
 
 Rust lifecycle evidence is platform-specific but shares one ownership goal:
 Windows tests exercise kill-on-close Job Object behavior, while macOS/Linux

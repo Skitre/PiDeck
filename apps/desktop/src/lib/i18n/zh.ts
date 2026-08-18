@@ -227,7 +227,7 @@ export const zh: Record<MessageKey, string> = {
   usageEmptyRange: "这段时间内没有更新过的会话。",
   usageOverviewHint: "数字是该时间范围内有更新的会话的累计用量。连续天数按全部活跃记录计算。",
   usageHeatmap: "活跃热力图",
-  usageHeatmapHint: "按会话最近一次更新的日期统计，不是逐条消息",
+  usageHeatmapHint: "近一年按会话最后更新日着色，不受上方时间范围筛选，也不是逐条消息",
   usageHeatmapLess: "较少",
   usageHeatmapMore: "较多",
   usageDailyTrend: "按天 Token 趋势",

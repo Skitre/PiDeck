@@ -42,13 +42,15 @@ export function missingPathFromError(error: unknown): string | null {
   return quoted?.[1] ?? null;
 }
 
+const NPM_INSTALL_MARKER = "/npm/node_modules/";
+const GIT_INSTALL_MARKER = "/git/";
+
 export function npmPackageNameFromMissingPath(filePath: string): string | null {
   const normalized = filePath.replaceAll("\\", "/");
-  const marker = "/npm/node_modules/";
-  const index = normalized.toLowerCase().indexOf(marker);
+  const index = normalized.toLowerCase().indexOf(NPM_INSTALL_MARKER);
   if (index < 0) return null;
   const parts = normalized
-    .slice(index + marker.length)
+    .slice(index + NPM_INSTALL_MARKER.length)
     .split("/")
     .filter(Boolean);
   if (parts.length === 0) return null;
@@ -58,6 +60,31 @@ export function npmPackageNameFromMissingPath(filePath: string): string | null {
   return parts[0] ?? null;
 }
 
+/**
+ * SDK git clones live under `agentDir/git/<host>/<path>/`. Require a hostname-like
+ * first segment and at least host/owner/repo so Portable Git and other `/git/`
+ * paths are not treated as package installs.
+ */
+export function gitInstallSuffixFromMissingPath(filePath: string): string | null {
+  const normalized = filePath.replaceAll("\\", "/");
+  const lower = normalized.toLowerCase();
+  const gitIndex = lower.indexOf(GIT_INSTALL_MARKER);
+  if (gitIndex < 0) return null;
+  const npmIndex = lower.indexOf(NPM_INSTALL_MARKER);
+  if (npmIndex >= 0 && npmIndex < gitIndex) return null;
+  const parts = lower
+    .slice(gitIndex + GIT_INSTALL_MARKER.length)
+    .split("/")
+    .filter(Boolean);
+  if (parts.length < 3) return null;
+  if (!parts[0]!.includes(".")) return null;
+  return parts.join("/");
+}
+
+function posixPathHasPrefix(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}/`);
+}
+
 export function isUninstalledPackageMissingPathError(
   error: unknown,
   configuredSources: readonly string[],
@@ -65,6 +92,16 @@ export function isUninstalledPackageMissingPathError(
   if (!isMissingPathError(error)) return false;
   const filePath = missingPathFromError(error);
   if (!filePath) return false;
+
+  const gitSuffix = gitInstallSuffixFromMissingPath(filePath);
+  if (gitSuffix) {
+    const configuredGit = configuredSources
+      .map((source) => normalizePackageIdentity(source))
+      .filter((pkg) => pkg.kind === "git")
+      .map((pkg) => pkg.identity.slice("git:".length).replaceAll("\\", "/").toLowerCase());
+    return !configuredGit.some((identityPath) => posixPathHasPrefix(gitSuffix, identityPath));
+  }
+
   const npmName = npmPackageNameFromMissingPath(filePath);
   if (!npmName) return false;
   const configured = new Set(
@@ -694,7 +731,6 @@ async function mutatePackageUnderLock(
     // constructing the final package snapshot for every clean mutation.
     if (status === "committed") {
       let refresh: ExtensionRefreshTransaction | null = null;
-      let refreshApplied = false;
       const runnerBefore = g.agentSession?.extensionRunner;
       try {
         await factory.userResourceCache?.invalidate();
@@ -702,7 +738,6 @@ async function mutatePackageUnderLock(
           ? await factory.userResourceCache?.prepareLoaderExtensionRefresh(g.resourceLoader)
           : null;
         refresh?.apply();
-        refreshApplied = true;
         if (g.agentSession) {
           // The 0.82.1 patch drops preserveExtensionCache; every reconcile now
           // goes through the official full reload. Keep PI_OFFLINE on so a
@@ -735,11 +770,12 @@ async function mutatePackageUnderLock(
         const configuredSources = g.packageManager
           .listConfiguredPackages()
           .map((pkg) => pkg.source);
-        if (refreshApplied && isUninstalledPackageMissingPathError(err, configuredSources)) {
-          // jiti still stats a package that is no longer configured. The new
-          // extension bundle is already applied; keep it and do not roll back
-          // to the deleted package. Other ENOENT (settings, still-installed
-          // files) stay a real reload failure.
+        if (isUninstalledPackageMissingPathError(err, configuredSources)) {
+          // jiti still stats a package that is no longer configured (npm
+          // node_modules or git clone). The new extension bundle is already
+          // applied; keep it and do not roll back to the deleted package.
+          // Other ENOENT (settings, still-installed files) stay a real reload
+          // failure.
           logger.warn("Resource reload after package mutation hit a removed package file", {
             kind,
             error: err instanceof Error ? err.message : String(err),

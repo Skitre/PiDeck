@@ -17,6 +17,7 @@ import { createAgentHandlers } from "./agent-controller.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
 import {
   createPackageHandlers,
+  gitInstallSuffixFromMissingPath,
   isMissingPathError,
   isUninstalledPackageMissingPathError,
   missingPathFromError,
@@ -269,8 +270,87 @@ describe("isMissingPathError", () => {
     );
     expect(isUninstalledPackageMissingPathError(deletedPackageError, [])).toBe(true);
     expect(
+      isUninstalledPackageMissingPathError(deletedPackageError, ["git:github.com/owner/repo"]),
+    ).toBe(true);
+    expect(
       isUninstalledPackageMissingPathError(deletedPackageError, ["npm:pi-markdown-preview"]),
     ).toBe(false);
+    expect(
+      isUninstalledPackageMissingPathError(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\settings.json'",
+        ),
+        [],
+      ),
+    ).toBe(false);
+  });
+
+  it("only treats ENOENT for an uninstalled git package path as ignorable", () => {
+    const deletedGitError = new Error(
+      "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\git\\github.com\\owner\\repo\\index.ts'",
+    );
+    expect(gitInstallSuffixFromMissingPath(missingPathFromError(deletedGitError)!)).toBe(
+      "github.com/owner/repo/index.ts",
+    );
+    expect(isUninstalledPackageMissingPathError(deletedGitError, [])).toBe(true);
+    expect(
+      isUninstalledPackageMissingPathError(deletedGitError, ["npm:pi-markdown-preview"]),
+    ).toBe(true);
+    expect(
+      isUninstalledPackageMissingPathError(deletedGitError, ["git:github.com/owner/repo"]),
+    ).toBe(false);
+    expect(isUninstalledPackageMissingPathError(deletedGitError, ["git:owner/repo"])).toBe(false);
+    expect(
+      isUninstalledPackageMissingPathError(deletedGitError, ["https://github.com/owner/repo"]),
+    ).toBe(false);
+    expect(
+      isUninstalledPackageMissingPathError(deletedGitError, ["git:github.com/owner/other"]),
+    ).toBe(true);
+    expect(
+      isUninstalledPackageMissingPathError(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\git\\github.com\\owner\\repo-extra\\index.ts'",
+        ),
+        ["git:github.com/owner/repo"],
+      ),
+    ).toBe(true);
+    expect(
+      gitInstallSuffixFromMissingPath("C:\\Program Files\\Git\\usr\\bin\\git.exe"),
+    ).toBeNull();
+    expect(
+      isUninstalledPackageMissingPathError(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Program Files\\Git\\usr\\bin\\git.exe'",
+        ),
+        [],
+      ),
+    ).toBe(false);
+    expect(
+      gitInstallSuffixFromMissingPath(
+        "C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\vendor\\git\\github.com\\owner\\repo\\index.ts",
+      ),
+    ).toBeNull();
+    expect(
+      isUninstalledPackageMissingPathError(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-markdown-preview\\vendor\\git\\github.com\\owner\\repo\\index.ts'",
+        ),
+        ["npm:pi-markdown-preview"],
+      ),
+    ).toBe(false);
+    expect(
+      gitInstallSuffixFromMissingPath(
+        "C:\\Users\\Admin\\.pi\\agent\\git\\github.com\\owner\\repo\\npm\\node_modules\\dep\\index.ts",
+      ),
+    ).toBe("github.com/owner/repo/npm/node_modules/dep/index.ts");
+    expect(
+      isUninstalledPackageMissingPathError(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\git\\github.com\\owner\\repo\\npm\\node_modules\\dep\\index.ts'",
+        ),
+        [],
+      ),
+    ).toBe(true);
     expect(
       isUninstalledPackageMissingPathError(
         new Error(
@@ -656,6 +736,105 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
     expect(graph.resourceReloadRequired).toBe(false);
   });
 
+  it("does not raise reconcile banners when reload after remove stats a deleted git clone", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    graph.packageSnapshot = {
+      ...graph.packageSnapshot!,
+      configured: [
+        {
+          id: "pkg-git-repo",
+          source: "git:github.com/owner/repo",
+          kind: "git",
+          scope: "user",
+        },
+      ],
+    } as typeof graph.packageSnapshot;
+    graph.packageManager!.removeAndPersist = vi.fn(async () => true);
+    graph.agentSession!.reload = vi.fn(async () => {
+      throw Object.assign(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\git\\github.com\\owner\\repo\\index.ts'",
+        ),
+        { code: "ENOENT" },
+      );
+    });
+
+    const out = await createPackageHandlers(factory)["package.remove"]!({
+      ...reloadCtx,
+      id: "req-remove-reload-git-enoent",
+      params: { packageId: "pkg-git-repo" },
+    } as never);
+
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      const result = out.result as {
+        status: string;
+        reconcileRequired: boolean;
+        warnings: Array<{ message: string }>;
+        packageSnapshot: { resourceReloadRequired?: boolean };
+      };
+      expect(result.status).toBe("committed");
+      expect(result.reconcileRequired).toBe(false);
+      expect(result.warnings).toEqual([]);
+      expect(result.packageSnapshot.resourceReloadRequired).toBe(false);
+    }
+    expect(graph.agentSession!.reload).toHaveBeenCalled();
+    expect(graph.resourceReloadRequired).toBe(false);
+  });
+
+  it("does not raise reconcile banners when cache refresh stats a deleted git clone", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    graph.packageSnapshot = {
+      ...graph.packageSnapshot!,
+      configured: [
+        {
+          id: "pkg-git-repo",
+          source: "git:github.com/badlogic/pi-doom",
+          kind: "git",
+          scope: "user",
+        },
+      ],
+    } as typeof graph.packageSnapshot;
+    graph.packageManager!.removeAndPersist = vi.fn(async () => true);
+    Object.assign(factory, {
+      userResourceCache: {
+        invalidate: vi.fn(async () => {}),
+        prepareLoaderExtensionRefresh: vi.fn(async () => {
+          throw Object.assign(
+            new Error(
+              "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\git\\github.com\\badlogic\\pi-doom\\src\\index.ts'",
+            ),
+            { code: "ENOENT" },
+          );
+        }),
+      },
+    });
+
+    const out = await createPackageHandlers(factory)["package.remove"]!({
+      ...reloadCtx,
+      id: "req-remove-cache-git-enoent",
+      params: { packageId: "pkg-git-repo" },
+    } as never);
+
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      const result = out.result as {
+        status: string;
+        reconcileRequired: boolean;
+        warnings: Array<{ message: string }>;
+        packageSnapshot: { resourceReloadRequired?: boolean };
+      };
+      expect(result.status).toBe("committed");
+      expect(result.reconcileRequired).toBe(false);
+      expect(result.warnings).toEqual([]);
+      expect(result.packageSnapshot.resourceReloadRequired).toBe(false);
+    }
+    expect(graph.agentSession!.reload).not.toHaveBeenCalled();
+    expect(graph.resourceReloadRequired).toBe(false);
+  });
+
   it("does not raise reconcile banners when disable reloads a just-deleted package path", async () => {
     const factory = mockFactory({ resourceReloadRequired: false });
     const graph = factory.getGraph()!;
@@ -717,6 +896,52 @@ describe("RESOURCE_RELOAD_FAILED prompt block", () => {
       throw Object.assign(
         new Error(
           "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\npm\\node_modules\\pi-web-access\\index.ts'",
+        ),
+        { code: "ENOENT" },
+      );
+    });
+
+    const out = await createPackageHandlers(factory)["resource.setPreference"]!(
+      preferenceCtx as never,
+    );
+
+    expect("error" in out).toBe(false);
+    if (!("error" in out)) {
+      const result = out.result as {
+        status: string;
+        reconcileRequired: boolean;
+        warnings: Array<{ code: string }>;
+        packageSnapshot: { resourceReloadRequired?: boolean };
+      };
+      expect(result.status).toBe("partialFailure");
+      expect(result.reconcileRequired).toBe(true);
+      expect(result.warnings.some((warning) => warning.code === "RESOURCE_RELOAD_FAILED")).toBe(
+        true,
+      );
+      expect(result.packageSnapshot.resourceReloadRequired).toBe(true);
+    }
+    expect(graph.resourceReloadRequired).toBe(true);
+  });
+
+  it("still raises reload failure when ENOENT is a still-configured git clone", async () => {
+    const factory = mockFactory({ resourceReloadRequired: false });
+    const graph = factory.getGraph()!;
+    graph.resourceIdMap.set("resource-extension", {
+      type: "extension",
+      scope: "user",
+      path: "/tmp/.pi/extensions/example.ts",
+      baseDir: "/tmp/.pi",
+      relativePath: "extensions/example.ts",
+      origin: "top-level",
+      configurableScopes: ["user"],
+    });
+    graph.packageManager!.listConfiguredPackages = vi.fn(() => [
+      { source: "git:github.com/owner/repo", scope: "user" as const, filtered: false },
+    ]);
+    graph.agentSession!.reload = vi.fn(async () => {
+      throw Object.assign(
+        new Error(
+          "ENOENT: no such file or directory, stat 'C:\\Users\\Admin\\.pi\\agent\\git\\github.com\\owner\\repo\\index.ts'",
         ),
         { code: "ENOENT" },
       );

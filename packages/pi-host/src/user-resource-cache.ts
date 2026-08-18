@@ -76,8 +76,10 @@ export class UserResourceCache {
   ): Promise<ExtensionRefreshTransaction | null> {
     const holder = this.bindings.get(loader);
     if (!holder) return null;
-    await withoutImplicitPackageInstall(() => loader.reload());
     const previous = holder.current;
+    // Do not reload `loader` here: its override still exposes the previous
+    // bundle, and the SDK stats those just-deleted git/npm entry files.
+    await this.bustExtensionModuleCache();
     const next = await this.instantiateExtensions();
     let phase: "prepared" | "applied" | "committed" | "rolledBack" = "prepared";
     const commit = () => {
@@ -150,6 +152,31 @@ export class UserResourceCache {
       extensions: holder.current.extensions.length,
     });
     return loader;
+  }
+
+  /**
+   * A throwaway loader's second reload is what clears the SDK's cwd-keyed
+   * extension module cache. The workspace loader cannot do that first: it would
+   * still publish the previous bundle and stat removed package files.
+   */
+  private async bustExtensionModuleCache(): Promise<void> {
+    const settingsManager = SettingsManager.create(this.agentDir, this.agentDir, {
+      projectTrusted: false,
+    });
+    const loader = new DefaultResourceLoader({
+      cwd: this.agentDir,
+      agentDir: this.agentDir,
+      settingsManager,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await withoutImplicitPackageInstall(async () => {
+      await loader.reload();
+      await loader.reload();
+    });
   }
 
   /**

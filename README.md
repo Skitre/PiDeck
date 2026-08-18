@@ -86,10 +86,10 @@ production build and Rust tests). Native installers are built with
 
 ## Security
 
-Opening a workspace authorizes its project resources: code in
-`.pi/extensions` runs locally with your user permissions. Only open workspaces
-and install packages you trust. Provider credentials, settings, and sessions
-are user data under `~/.pi/agent` — never commit them to a repository.
+PiDeck loads only user-scope packages from `~/.pi/agent`. Opening a
+workspace does not run `<workspace>/.pi/extensions`. Only install packages
+you trust. Provider credentials, settings, and sessions are user data under
+`~/.pi/agent` — never commit them to a repository.
 
 ## Project layout
 

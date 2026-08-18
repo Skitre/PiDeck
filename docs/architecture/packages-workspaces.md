@@ -67,13 +67,16 @@ completes successfully.
 
 ## UI
 
-The Packages page has three tabs: Installed, Resources, and Market. Install,
-update, remove, and resource preference mutations are user-scope only.
+The Packages page has two views: Installed and Market. Install, update,
+remove, and resource preference mutations are user-scope only.
 
 Installed provides install source entry, configured Package selection, and
-update actions. Resources lists package-owned and standalone resources with
-enable/disable toggles. Install, update, and remove all confirm through the
-shared review dialog (`components/Dialog.tsx`); removal uses the danger tone.
+update actions. Selecting a package shows its resources grouped by type,
+with per-resource enable/disable toggles. Runtime resources owned by a
+package extension appear in that list as read-only. There is no
+cross-package or standalone resource inventory. Install, update, and remove
+all confirm through the shared review dialog (`components/Dialog.tsx`);
+removal uses the danger tone.
 Update all shows the known update count and is disabled when a completed
 check found none; the progress strip reports human-readable states,
 auto-clears after completion, and can be dismissed.

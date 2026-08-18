@@ -68,6 +68,26 @@ function writeUserExtension(
   return { stateKey, extensionPath };
 }
 
+function writeGitPackageExtension(
+  agentDir: string,
+): { stateKey: string; extensionPath: string; packageRoot: string } {
+  const packageRoot = join(agentDir, "git", "github.com", "owner", "repo");
+  mkdirSync(join(packageRoot, "src"), { recursive: true });
+  const { stateKey, extensionPath } = writeUserExtension(agentDir, {
+    fileName: join("git", "github.com", "owner", "repo", "src", "index.js"),
+  });
+  writeFileSync(
+    join(packageRoot, "package.json"),
+    JSON.stringify({
+      name: "pi-test-git-package",
+      type: "module",
+      pi: { extensions: ["./src/index.js"] },
+    }),
+  );
+  writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: ["git:github.com/owner/repo"] }));
+  return { stateKey, extensionPath, packageRoot };
+}
+
 function cacheState(stateKey: string): CacheState {
   return globalState[stateKey] as CacheState;
 }
@@ -229,6 +249,35 @@ describe("UserResourceCache", () => {
     refresh?.commit();
     expect(() => before.runtime.assertActive()).toThrow(/user-resource-refresh/);
     expect(loader.getExtensions().extensions[0]?.path).toContain("user-ext.js");
+  });
+
+  it("does not stat a just-removed git clone while preparing the next bundle", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pideck-user-resource-git-remove-"));
+    roots.push(root);
+    const agentDir = join(root, "agent");
+    const workspace = join(root, "workspace");
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(workspace, { recursive: true });
+    const { packageRoot } = writeGitPackageExtension(agentDir);
+
+    const cache = new UserResourceCache(agentDir);
+    const loader = await cache.createWorkspaceLoader({
+      cwd: workspace,
+      settingsManager: SettingsManager.create(workspace, agentDir, { projectTrusted: false }),
+    });
+    expect(loader.getExtensions().extensions.some((ext) => ext.path.includes("owner\\repo") || ext.path.includes("owner/repo"))).toBe(
+      true,
+    );
+
+    rmSync(packageRoot, { recursive: true, force: true });
+    writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: [] }));
+    await cache.invalidate();
+    const refresh = await cache.prepareLoaderExtensionRefresh(loader);
+    expect(refresh).not.toBeNull();
+    refresh?.apply();
+    await loader.reload();
+    expect(loader.getExtensions().extensions).toHaveLength(0);
+    refresh?.commit();
   });
 
   it("keeps the previous bundle when minting the next runtime fails", async () => {
