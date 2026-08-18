@@ -55,9 +55,7 @@ describe("Sidebar", () => {
         removeItem: vi.fn(),
       });
 
-      const html = renderToStaticMarkup(
-        createElement(SidebarLayout, { page, setPage: vi.fn() }),
-      );
+      const html = renderToStaticMarkup(createElement(SidebarLayout, { page, setPage: vi.fn() }));
 
       expect(html).toContain("New conversation");
       expect(html).toContain("Workspaces");

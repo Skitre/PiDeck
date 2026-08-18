@@ -48,13 +48,8 @@ describe("extension widget placement", () => {
     const partitioned = partitionExtensionWidgets(entries);
 
     expect(partitioned.aboveEditor.map((entry) => entry.key)).toEqual(["default", "above"]);
-    expect(partitioned.belowEditor.map((entry) => entry.key)).toEqual([
-      "below-1",
-      "below-2",
-    ]);
-    expect([...partitioned.aboveEditor, ...partitioned.belowEditor]).toHaveLength(
-      entries.length,
-    );
+    expect(partitioned.belowEditor.map((entry) => entry.key)).toEqual(["below-1", "below-2"]);
+    expect([...partitioned.aboveEditor, ...partitioned.belowEditor]).toHaveLength(entries.length);
   });
 });
 

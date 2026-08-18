@@ -132,9 +132,7 @@ export function SidebarLayout({
   workspacePaneHeightRef.current = workspacePaneHeight;
   const splitEnabled = !workspacesCollapsed;
   const workspaceMaxHeight =
-    splitHeight > 0
-      ? clampWorkspacePaneHeight(Number.POSITIVE_INFINITY, splitHeight)
-      : undefined;
+    splitHeight > 0 ? clampWorkspacePaneHeight(Number.POSITIVE_INFINITY, splitHeight) : undefined;
 
   function toggleSessionsCollapsed() {
     setSessionsCollapsed((current) => {
@@ -323,9 +321,7 @@ export function SidebarLayout({
                   workspacePaneRef.current?.offsetHeight ??
                   SIDEBAR_WORKSPACE_PANE_MIN;
                 persistWorkspacePaneHeight(
-                  applyWorkspacePaneHeight(
-                    current + (event.key === "ArrowDown" ? 16 : -16),
-                  ),
+                  applyWorkspacePaneHeight(current + (event.key === "ArrowDown" ? 16 : -16)),
                 );
               }}
             >
