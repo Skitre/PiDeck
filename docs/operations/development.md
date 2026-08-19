@@ -71,12 +71,18 @@ release scripts derive and validate the installed SDK family from that manifest.
 ## SDK patch (pnpm patch)
 
 `patches/@earendil-works__pi-coding-agent@0.82.1.patch` gives
-`DefaultPackageManager` a `setOperationSignal()` hook and passes that signal to
-both child-process paths, so an aborted package operation actually kills the
-npm or git child instead of leaving it running and holding the graph lock.
-Upstream has no such hook. `setOperationSignal` is declared as a **required**
-member of the `PackageManager` interface, which makes a silently skipped
+`DefaultPackageManager` a `setOperationSignal()` hook and an optional `env`
+constructor option. The signal is passed to both child-process paths so an
+aborted package operation actually kills the npm or git child instead of
+leaving it running and holding the graph lock. The `env` option is the
+explicit PiDeck internal runtime environment (bundled Node/Git/npm PATH plus
+copied user proxy/home/certificate variables). Upstream has neither hook.
+`setOperationSignal` is declared as a **required** member of the
+`PackageManager` interface, which makes a silently skipped
 `pm.setOperationSignal?.(...)` a compile error rather than a no-op.
+`DefaultResourceLoader` forwards the same optional `env` into the private
+`DefaultPackageManager` it constructs, so implicit resource loading uses the
+internal runtime too.
 
 Both asynchronous command paths capture diagnostics and settle through the
 SDK's `waitForChildProcess()`. That waiter observes process exit plus a short
@@ -95,11 +101,18 @@ changes and added a `preserveExtensionCache` reload option. Both are gone in
 re-imports extension modules. Re-evaluate the patch on every SDK upgrade;
 consider proposing the cancellation hook upstream.
 
-The patch deliberately stops at `DefaultPackageManager`.
-`DefaultResourceLoader` builds its own private package manager that PiDeck
-cannot reach, so a reload can neither be cancelled nor bounded. Rather than
-patching a second class, PiDeck removes the reason to cancel: see
-"Implicit resource loading" below.
+The same patch also gives Windows Agent Bash a last-resort absolute
+`PIDECK_BUNDLED_BASH` (or `…/git/bin/bash.exe` derived from
+`PIDECK_BUNDLED_GIT`) after user `shellPath` and system Git Bash/PATH
+lookup fail, and makes `killProcessTree()` spawn
+`%SystemRoot%\System32\taskkill.exe` with an `error` fallback so a user
+PATH that omits System32 cannot terminate the Host.
+
+The cancellation patch still cannot reach the private package manager's
+in-flight children. Implicit resource loading therefore stays wrapped in
+`withoutImplicitPackageInstall()` so those children are not started: see
+"Implicit resource loading" below. The `env` option is independent of
+cancellation — it only selects which Node/Git/npm the child would resolve.
 
 ## Implicit resource loading
 
@@ -220,19 +233,19 @@ A→B→A acceptance runs in `workspace-package.integration.test.ts`.
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| `pnpm typecheck` | Typecheck protocol, pi-host, desktop |
-| `pnpm test` | Unit + host integration tests |
-| `pnpm build` | Build all JS packages |
-| `pnpm verify:quick` | Docs + typecheck + unit/Host integration tests for local iteration |
-| `pnpm verify:p0` | Pull-request P0 gate: quick + production frontend build + Rust tests |
-| `pnpm package:release` | Build a native Windows x64 NSIS or macOS DMG development candidate |
-| `pnpm dev:host` | Run Pi Host (JSONL on stdio) |
-| `pnpm spike:sidecar` | M0 Extension load spike |
-| `pnpm dev:desktop` | Vite UI only |
-| `pnpm --filter @pideck/desktop tauri:dev` | Full desktop |
-| `pnpm dev:fast` | Reuse a compiled debug binary for faster Windows iteration (Windows only) |
+| Command                                   | Purpose                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------- |
+| `pnpm typecheck`                          | Typecheck protocol, pi-host, desktop                                      |
+| `pnpm test`                               | Unit + host integration tests                                             |
+| `pnpm build`                              | Build all JS packages                                                     |
+| `pnpm verify:quick`                       | Docs + typecheck + unit/Host integration tests for local iteration        |
+| `pnpm verify:p0`                          | Pull-request P0 gate: quick + production frontend build + Rust tests      |
+| `pnpm package:release`                    | Build a native Windows x64 NSIS or macOS DMG development candidate        |
+| `pnpm dev:host`                           | Run Pi Host (JSONL on stdio)                                              |
+| `pnpm spike:sidecar`                      | M0 Extension load spike                                                   |
+| `pnpm dev:desktop`                        | Vite UI only                                                              |
+| `pnpm --filter @pideck/desktop tauri:dev` | Full desktop                                                              |
+| `pnpm dev:fast`                           | Reuse a compiled debug binary for faster Windows iteration (Windows only) |
 
 The weekly/manual `Extension compatibility latest audit` workflow checks the current
 npm release of the representative v2 questionnaire package. It runs outside the
@@ -279,11 +292,11 @@ Use the equivalent `export PI_CODING_AGENT_DIR=...` syntax on macOS.
 
 ## Common issues
 
-| Symptom | Check |
-|---|---|
-| Spike fails on Extension load | Node ≥22.19, SDK matches the Host manifest, fixture path exists |
-| Host fatal on start | `agentDir` writable; inspect stderr JSON logs |
-| `flush stdin: 管道正在被关闭` / pipe closed | Fixed: Windows must not pass `\\?\` paths to Node. Rebuild Tauri (`tauri:dev` again) after pulling. Also run `pnpm build` first. |
-| Reveal/open path fails | Confirm the target still exists and the platform file manager is available. PiDeck uses Explorer on Windows, Finder (`open -R`) on macOS, and `xdg-open` on Linux. |
-| STALE_REVISION everywhere | UI must update identity from each response |
-| Tauri can't find host | Build `packages/pi-host` so `dist/main.js` exists |
+| Symptom                                     | Check                                                                                                                                                              |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Spike fails on Extension load               | Node ≥22.19, SDK matches the Host manifest, fixture path exists                                                                                                    |
+| Host fatal on start                         | `agentDir` writable; inspect stderr JSON logs                                                                                                                      |
+| `flush stdin: 管道正在被关闭` / pipe closed | Fixed: Windows must not pass `\\?\` paths to Node. Rebuild Tauri (`tauri:dev` again) after pulling. Also run `pnpm build` first.                                   |
+| Reveal/open path fails                      | Confirm the target still exists and the platform file manager is available. PiDeck uses Explorer on Windows, Finder (`open -R`) on macOS, and `xdg-open` on Linux. |
+| STALE_REVISION everywhere                   | UI must update identity from each response                                                                                                                         |
+| Tauri can't find host                       | Build `packages/pi-host` so `dist/main.js` exists                                                                                                                  |

@@ -5,15 +5,17 @@ mod tests {
     #[cfg(windows)]
     use crate::pi_host::WindowsHostJob;
     use crate::pi_host::{
-        build_shutdown_line, drain_complete_lines, extract_host_instance_id, finish_monitor_task,
-        is_current_child_generation, node_executable_name, node_runtime_candidates,
-        push_stderr_tail, read_bounded_lossy_line, read_bounded_utf8_line, should_auto_restart,
-        strip_verbatim_prefix, write_host_stdin, AutoRestartEpoch, HostChildSession,
-        APP_EXIT_HOST_SHUTDOWN_GRACE, HOST_SHUTDOWN_GRACE, MAX_HOST_STDOUT_LINE_BYTES,
+        build_shutdown_line, bundled_bash_from_git, drain_complete_lines, extract_host_instance_id,
+        finish_monitor_task, host_child_explicit_env, is_current_child_generation,
+        node_executable_name, node_runtime_candidates, push_stderr_tail, read_bounded_lossy_line,
+        read_bounded_utf8_line, resolve_node_from_dirs, resolve_portable_git_from_dirs,
+        should_auto_restart, strip_verbatim_prefix, write_host_stdin, AutoRestartEpoch,
+        HostChildSession, APP_EXIT_HOST_SHUTDOWN_GRACE, HOST_SHUTDOWN_GRACE,
+        MAX_HOST_STDOUT_LINE_BYTES, PIDECK_BUNDLED_BASH, PIDECK_BUNDLED_GIT,
     };
     #[cfg(unix)]
     use crate::pi_host::{is_executable_file, unix_child_exited_without_reaping};
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
@@ -207,11 +209,10 @@ rl.on('line', (line) => {
     }
 
     #[test]
-    fn stripped_runtime_dir_yields_cmd_compatible_controlled_path() {
+    fn stripped_bundled_git_executable_is_cmd_compatible() {
         // resource_dir on Windows is derived from a canonicalized (\\?\) exe
-        // path. The bundled node/git dirs land on the Host's controlled PATH,
-        // where cmd.exe resolves npm.cmd — cmd cannot handle \\?\ paths, so a
-        // verbatim entry breaks every npm install in the packaged app.
+        // path. PIDECK_BUNDLED_GIT and later internal PATH entries must stay
+        // cmd.exe-compatible — cmd cannot handle \\?\ paths.
         let node = strip_verbatim_prefix(PathBuf::from(
             r"\\?\C:\Users\Admin\AppData\Local\PiDeck\resources\node\node.exe",
         ));
@@ -221,10 +222,195 @@ rl.on('line', (line) => {
         );
         let node_dir = node.parent().expect("node dir");
         assert!(!node_dir.to_string_lossy().starts_with(r"\\?\"));
-        let git_cmd = strip_verbatim_prefix(PathBuf::from(
-            r"\\?\C:\Users\Admin\AppData\Local\PiDeck\resources\git\cmd",
+        let git_exe = strip_verbatim_prefix(PathBuf::from(
+            r"\\?\C:\Users\Admin\AppData\Local\PiDeck\resources\git\cmd\git.exe",
         ));
-        assert!(!git_cmd.to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(
+            git_exe,
+            PathBuf::from(r"C:\Users\Admin\AppData\Local\PiDeck\resources\git\cmd\git.exe"),
+        );
+        assert!(!git_exe.to_string_lossy().starts_with(r"\\?\"));
+    }
+
+    #[test]
+    fn host_child_explicit_env_omits_path_and_passes_bundled_git() {
+        let agent = PathBuf::from(r"C:\Users\Admin\AppData\Roaming\PiDeck\agent");
+        let cache = PathBuf::from(r"C:\Users\Admin\AppData\Local\PiDeck\cache\pi-host");
+        let node_modules = PathBuf::from(r"C:\Program Files\PiDeck 中文\node_modules");
+        let git = PathBuf::from(r"C:\Program Files\PiDeck 中文\git\cmd\git.exe");
+        let bash = PathBuf::from(r"C:\Program Files\PiDeck 中文\git\bin\bash.exe");
+        let env =
+            host_child_explicit_env(&agent, &cache, Some(&node_modules), Some(&git), Some(&bash));
+        let keys: Vec<String> = env
+            .iter()
+            .map(|(key, _)| key.to_string_lossy().into_owned())
+            .collect();
+        assert!(!keys.iter().any(|key| key.eq_ignore_ascii_case("PATH")));
+        assert!(keys.contains(&"PI_CODING_AGENT_DIR".to_string()));
+        assert!(keys.contains(&"PIDECK_HOST_CACHE_DIR".to_string()));
+        assert!(keys.contains(&"NODE_PATH".to_string()));
+        assert!(keys.contains(&PIDECK_BUNDLED_GIT.to_string()));
+        assert!(keys.contains(&PIDECK_BUNDLED_BASH.to_string()));
+        let git_value = env
+            .iter()
+            .find(|(key, _)| key == PIDECK_BUNDLED_GIT)
+            .map(|(_, value)| value.to_string_lossy().into_owned())
+            .expect("bundled git");
+        assert_eq!(git_value, git.to_string_lossy());
+        assert!(git_value.contains("PiDeck 中文"));
+        assert!(git_value.contains("Program Files"));
+        let bash_value = env
+            .iter()
+            .find(|(key, _)| key == PIDECK_BUNDLED_BASH)
+            .map(|(_, value)| value.to_string_lossy().into_owned())
+            .expect("bundled bash");
+        assert_eq!(bash_value, bash.to_string_lossy());
+        assert!(bash_value.contains("PiDeck 中文"));
+    }
+
+    #[test]
+    fn host_child_explicit_env_omits_bundled_git_when_absent() {
+        let env = host_child_explicit_env(
+            Path::new("/tmp/agent"),
+            Path::new("/tmp/cache"),
+            None,
+            None,
+            None,
+        );
+        assert!(env.iter().all(|(key, _)| key != PIDECK_BUNDLED_GIT
+            && key != PIDECK_BUNDLED_BASH
+            && !key.eq_ignore_ascii_case("PATH")));
+    }
+
+    fn runtime_fixture_root(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "pideck-host-runtime-{}-{}",
+            label,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("runtime fixture root");
+        root
+    }
+
+    fn write_executable_fixture(path: &std::path::Path) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("fixture parent");
+        }
+        std::fs::write(path, b"fixture").expect("write fixture");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+                .expect("make fixture executable");
+        }
+    }
+
+    #[test]
+    fn release_missing_bundled_node_is_fatal() {
+        let empty = runtime_fixture_root("empty-node");
+        let error = resolve_node_from_dirs(Some(&empty), Some(&empty), false)
+            .expect_err("release must require bundled Node");
+        assert!(error.contains("bundled Node not found"));
+        let _ = std::fs::remove_dir_all(empty);
+    }
+
+    #[test]
+    fn debug_missing_bundled_node_falls_back() {
+        let empty = runtime_fixture_root("debug-node");
+        let resolved = resolve_node_from_dirs(Some(&empty), Some(&empty), true)
+            .expect("debug may fall back to PATH node");
+        assert!(!resolved.as_os_str().is_empty());
+        let _ = std::fs::remove_dir_all(empty);
+    }
+
+    #[test]
+    fn resolve_node_strips_verbatim_and_accepts_spaces_and_non_ascii() {
+        let root = runtime_fixture_root("node-unicode");
+        let resource = root.join("Program Files").join("PiDeck 中文");
+        write_executable_fixture(&resource.join("node").join(node_executable_name()));
+        let resolved = resolve_node_from_dirs(Some(&resource), None, false).expect("bundled node");
+        assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
+        assert!(resolved.ends_with(node_executable_name()));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn debug_missing_bundled_git_falls_back_to_none() {
+        let empty = runtime_fixture_root("debug-git");
+        let resolved = resolve_portable_git_from_dirs(Some(&empty), Some(&empty), true)
+            .expect("debug git fallback");
+        assert!(resolved.is_none());
+        let _ = std::fs::remove_dir_all(empty);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn release_missing_bundled_git_is_fatal_on_windows() {
+        let empty = runtime_fixture_root("empty-git");
+        let error = resolve_portable_git_from_dirs(Some(&empty), Some(&empty), false)
+            .expect_err("release Windows must require bundled Git");
+        assert!(error.contains("bundled Portable Git not found"));
+        let _ = std::fs::remove_dir_all(empty);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_has_no_bundled_portable_git() {
+        let empty = runtime_fixture_root("unix-git");
+        assert_eq!(
+            resolve_portable_git_from_dirs(Some(&empty), Some(&empty), false).expect("unix git"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(empty);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolve_portable_git_returns_stripped_git_exe() {
+        let root = runtime_fixture_root("git-unicode");
+        let resource = root.join("Program Files").join("PiDeck 中文");
+        let git_exe = resource.join("git").join("cmd").join("git.exe");
+        write_executable_fixture(&git_exe);
+        let resolved = resolve_portable_git_from_dirs(Some(&resource), None, false)
+            .expect("bundled git")
+            .expect("git.exe path");
+        assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(
+            resolved.file_name().and_then(|name| name.to_str()),
+            Some("git.exe")
+        );
+        assert!(resolved.to_string_lossy().contains("PiDeck 中文"));
+        assert!(resolved.to_string_lossy().contains("Program Files"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bundled_bash_from_git_returns_stripped_bash_exe() {
+        let root = runtime_fixture_root("bash-unicode");
+        let resource = root.join("Program Files").join("PiDeck 中文");
+        let git_exe = resource.join("git").join("cmd").join("git.exe");
+        let bash_exe = resource.join("git").join("bin").join("bash.exe");
+        write_executable_fixture(&git_exe);
+        write_executable_fixture(&bash_exe);
+        let resolved = bundled_bash_from_git(&git_exe).expect("bundled bash");
+        assert!(!resolved.to_string_lossy().starts_with(r"\\?\"));
+        assert_eq!(
+            resolved.file_name().and_then(|name| name.to_str()),
+            Some("bash.exe")
+        );
+        assert!(resolved.to_string_lossy().contains("PiDeck 中文"));
+        assert!(resolved.to_string_lossy().contains("Program Files"));
+        assert_eq!(resolved, strip_verbatim_prefix(bash_exe));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bundled_bash_from_git_is_absent_when_bash_is_missing() {
+        let root = runtime_fixture_root("bash-missing");
+        let git_exe = root.join("git").join("cmd").join("git.exe");
+        write_executable_fixture(&git_exe);
+        assert_eq!(bundled_bash_from_git(&git_exe), None);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

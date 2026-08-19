@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep, win32 } from "node:path";
+import { terminateWindowsProcessTree } from "./windows-process.js";
 import {
   MAX_GIT_DIFF_LINES,
   MAX_GIT_DIFF_OUTPUT_BYTES,
@@ -47,6 +48,7 @@ type GitCommandOptions = {
   stdin?: string;
   optionalLocks?: boolean;
   truncateStdout?: boolean;
+  env?: NodeJS.ProcessEnv;
 };
 
 type WithoutRevision<T> = T extends unknown ? Omit<T, "revision"> : never;
@@ -70,17 +72,8 @@ function terminateProcessTree(child: ChildProcessWithoutNullStreams): void {
   const pid = child.pid;
   if (!pid) return;
   if (process.platform === "win32") {
-    try {
-      spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-        stdio: "ignore",
-        windowsHide: true,
-        shell: false,
-      }).unref();
-      return;
-    } catch {
-      child.kill();
-      return;
-    }
+    terminateWindowsProcessTree(child);
+    return;
   }
   try {
     process.kill(-pid, "SIGKILL");
@@ -91,7 +84,10 @@ function terminateProcessTree(child: ChildProcessWithoutNullStreams): void {
 
 function boundedText(chunks: Buffer[], limit: number): string {
   const source = Buffer.concat(chunks);
-  return source.subarray(0, limit).toString("utf8").replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+  return source
+    .subarray(0, limit)
+    .toString("utf8")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 async function runGitCommand(
@@ -107,7 +103,7 @@ async function runGitCommand(
         windowsHide: true,
         detached: process.platform !== "win32",
         env: {
-          ...process.env,
+          ...(options.env ?? process.env),
           GIT_TERMINAL_PROMPT: "0",
           GIT_PAGER: "cat",
           PAGER: "cat",
@@ -229,7 +225,11 @@ function decodeUtf8(buffer: Buffer): { text: string; supported: boolean } {
     return { text: new TextDecoder("utf-8", { fatal: true }).decode(buffer), supported: true };
   } catch {
     const text = [...buffer]
-      .map((byte) => (byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : `\\x${byte.toString(16).padStart(2, "0")}`))
+      .map((byte) =>
+        byte >= 0x20 && byte <= 0x7e
+          ? String.fromCharCode(byte)
+          : `\\x${byte.toString(16).padStart(2, "0")}`,
+      )
       .join("");
     return { text, supported: false };
   }
@@ -366,7 +366,8 @@ export function parseGitStatusPorcelain(output: Buffer): ParsedGitStatus {
     }
     if (parts[0] === "u" && parts.length >= 11) {
       const path = parts.slice(10).join(" ");
-      if (!decoded.supported) warnings.push("A conflicted path is not valid UTF-8 and is read-only");
+      if (!decoded.supported)
+        warnings.push("A conflicted path is not valid UTF-8 and is read-only");
       files.push({
         path,
         staged: "conflicted",
@@ -460,21 +461,23 @@ export function parseUnifiedGitDiffHunks(patch: string): ParsedGitDiffHunk[] {
       if (line.startsWith("+")) additions += 1;
       else if (line.startsWith("-")) deletions += 1;
     }
-    return [{
-      id: createHash("sha256")
-        .update(String(ordinal))
-        .update("\0")
-        .update(hunkPatch)
-        .digest("hex"),
-      header,
-      oldStart: Number(match[1]),
-      oldLines: match[2] === undefined ? 1 : Number(match[2]),
-      newStart: Number(match[3]),
-      newLines: match[4] === undefined ? 1 : Number(match[4]),
-      additions,
-      deletions,
-      patch: hunkPatch,
-    }];
+    return [
+      {
+        id: createHash("sha256")
+          .update(String(ordinal))
+          .update("\0")
+          .update(hunkPatch)
+          .digest("hex"),
+        header,
+        oldStart: Number(match[1]),
+        oldLines: match[2] === undefined ? 1 : Number(match[2]),
+        newStart: Number(match[3]),
+        newLines: match[4] === undefined ? 1 : Number(match[4]),
+        additions,
+        deletions,
+        patch: hunkPatch,
+      },
+    ];
   });
 }
 
@@ -487,7 +490,14 @@ export class GitService {
   private watchGeneration = 0;
   private watchAbortController: AbortController | null = null;
 
-  constructor(private readonly executable = "git") {}
+  constructor(
+    private readonly executable = "git",
+    private readonly env: NodeJS.ProcessEnv = process.env,
+  ) {}
+
+  private runGit(options: GitCommandOptions): Promise<GitCommandResult> {
+    return runGitCommand(this.executable, { ...options, env: this.env });
+  }
 
   async getStatus(workspace: string, signal?: AbortSignal): Promise<GitStatusSnapshot> {
     const key = process.platform === "win32" ? win32.normalize(workspace).toLowerCase() : workspace;
@@ -495,7 +505,7 @@ export class GitService {
 
     let candidate: GitStatusCandidate;
     try {
-      const rootResult = await runGitCommand(this.executable, {
+      const rootResult = await this.runGit({
         cwd: workspace,
         args: ["rev-parse", "--show-toplevel"],
         timeoutMs: GIT_READ_TIMEOUT_MS,
@@ -511,7 +521,7 @@ export class GitService {
       } else {
         const rootText = rootResult.stdout.toString("utf8").replace(/[\r\n]+$/, "");
         const repositoryRoot = await realpath(rootText);
-        const statusResult = await runGitCommand(this.executable, {
+        const statusResult = await this.runGit({
           cwd: repositoryRoot,
           args: [
             "-c",
@@ -553,7 +563,10 @@ export class GitService {
         throw error;
       }
       if (error instanceof GitServiceError && error.code === "GIT_UNAVAILABLE") {
-        candidate = { state: "unavailable", message: safeGitMessage(error.message, "Git is unavailable") };
+        candidate = {
+          state: "unavailable",
+          message: safeGitMessage(error.message, "Git is unavailable"),
+        };
       } else {
         candidate = {
           state: "error",
@@ -577,18 +590,49 @@ export class GitService {
   ): Promise<GitDiffSnapshot> {
     const status = this.requireReady(await this.getStatus(workspace, signal));
     if (status.revision !== expectedRevision) {
-      throw new GitServiceError("STALE_REVISION", "Git status changed before diff was loaded", true);
+      throw new GitServiceError(
+        "STALE_REVISION",
+        "Git status changed before diff was loaded",
+        true,
+      );
     }
     const change = this.requireChange(status, path, area);
     this.validatePath(status.repositoryRoot, change.path);
 
     const args =
       area === "staged"
-        ? ["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", change.path]
+        ? [
+            "diff",
+            "--cached",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-color",
+            "--unified=3",
+            "--",
+            change.path,
+          ]
         : change.unstaged === "untracked"
-          ? ["diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", "/dev/null", change.path]
-          : ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", "--", change.path];
-    const result = await runGitCommand(this.executable, {
+          ? [
+              "diff",
+              "--no-index",
+              "--no-ext-diff",
+              "--no-textconv",
+              "--no-color",
+              "--unified=3",
+              "--",
+              "/dev/null",
+              change.path,
+            ]
+          : [
+              "diff",
+              "--no-ext-diff",
+              "--no-textconv",
+              "--no-color",
+              "--unified=3",
+              "--",
+              change.path,
+            ];
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args,
       timeoutMs: GIT_READ_TIMEOUT_MS,
@@ -612,7 +656,9 @@ export class GitService {
       patch = lines.slice(0, MAX_GIT_DIFF_LINES).join("\n");
       truncated = true;
     }
-    const binary = /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/.test(patch) || patch.includes("\u0000");
+    const binary =
+      /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/.test(patch) ||
+      patch.includes("\u0000");
     const hunkUnsafe =
       binary ||
       truncated ||
@@ -639,9 +685,10 @@ export class GitService {
       binary,
       truncated,
       contentGeneration: createHash("sha256").update(patch).digest("hex"),
-      hunks: hunkOperations.length === 0
-        ? []
-        : parseUnifiedGitDiffHunks(patch).map(({ patch: _patch, ...hunk }) => hunk),
+      hunks:
+        hunkOperations.length === 0
+          ? []
+          : parseUnifiedGitDiffHunks(patch).map(({ patch: _patch, ...hunk }) => hunk),
       hunkOperations,
     };
   }
@@ -660,11 +707,18 @@ export class GitService {
       (area === "unstaged" && operation === "unstage") ||
       (area === "staged" && operation !== "unstage")
     ) {
-      throw new GitServiceError("GIT_OPERATION_FAILED", "The hunk operation does not match its diff area");
+      throw new GitServiceError(
+        "GIT_OPERATION_FAILED",
+        "The hunk operation does not match its diff area",
+      );
     }
     const status = this.requireReady(await this.getStatus(workspace, signal));
     if (status.revision !== expectedRevision) {
-      throw new GitServiceError("STALE_REVISION", "Git status changed before the hunk operation", true);
+      throw new GitServiceError(
+        "STALE_REVISION",
+        "Git status changed before the hunk operation",
+        true,
+      );
     }
     const change = this.requireChange(status, path, area);
     if (
@@ -683,21 +737,29 @@ export class GitService {
     }
     const diff = await this.getDiff(workspace, path, area, expectedRevision, signal);
     if (diff.contentGeneration !== expectedContentGeneration) {
-      throw new GitServiceError("STALE_REVISION", "The selected diff changed before the hunk operation", true);
+      throw new GitServiceError(
+        "STALE_REVISION",
+        "The selected diff changed before the hunk operation",
+        true,
+      );
     }
     if (diff.binary || diff.truncated) {
-      throw new GitServiceError("GIT_OPERATION_FAILED", "Binary or truncated diffs cannot be changed by hunk");
+      throw new GitServiceError(
+        "GIT_OPERATION_FAILED",
+        "Binary or truncated diffs cannot be changed by hunk",
+      );
     }
     const hunk = parseUnifiedGitDiffHunks(diff.patch).find((candidate) => candidate.id === hunkId);
     if (!hunk) {
       throw new GitServiceError("STALE_REVISION", "The selected diff hunk no longer exists", true);
     }
-    const args = operation === "stage"
-      ? ["apply", "--cached", "--recount", "--whitespace=nowarn", "-"]
-      : operation === "unstage"
-        ? ["apply", "--cached", "--reverse", "--recount", "--whitespace=nowarn", "-"]
-        : ["apply", "--reverse", "--recount", "--whitespace=nowarn", "-"];
-    const result = await runGitCommand(this.executable, {
+    const args =
+      operation === "stage"
+        ? ["apply", "--cached", "--recount", "--whitespace=nowarn", "-"]
+        : operation === "unstage"
+          ? ["apply", "--cached", "--reverse", "--recount", "--whitespace=nowarn", "-"]
+          : ["apply", "--reverse", "--recount", "--whitespace=nowarn", "-"];
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args,
       timeoutMs: GIT_MUTATION_TIMEOUT_MS,
@@ -709,7 +771,10 @@ export class GitService {
     if (result.exitCode !== 0) {
       throw new GitServiceError(
         "GIT_OPERATION_FAILED",
-        safeGitMessage(result.stderr || result.stdout.toString("utf8"), "Git hunk operation failed"),
+        safeGitMessage(
+          result.stderr || result.stdout.toString("utf8"),
+          "Git hunk operation failed",
+        ),
       );
     }
     return { applied: true, ...(await this.refreshAfterMutation(workspace, signal)) };
@@ -774,7 +839,7 @@ export class GitService {
       );
     }
     this.validatePath(status.repositoryRoot, change.path);
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args: ["restore", "--worktree", "--", change.path],
       timeoutMs: GIT_MUTATION_TIMEOUT_MS,
@@ -802,12 +867,15 @@ export class GitService {
       throw new GitServiceError("STALE_REVISION", "Staged changes changed before commit", true);
     }
     if (status.files.some((file) => file.conflict)) {
-      throw new GitServiceError("GIT_OPERATION_FAILED", "Resolve merge conflicts before committing");
+      throw new GitServiceError(
+        "GIT_OPERATION_FAILED",
+        "Resolve merge conflicts before committing",
+      );
     }
     if (!status.files.some((file) => file.staged !== null)) {
       throw new GitServiceError("GIT_OPERATION_FAILED", "There are no staged changes to commit");
     }
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args: ["commit", "--file=-"],
       timeoutMs: GIT_COMMIT_TIMEOUT_MS,
@@ -824,7 +892,7 @@ export class GitService {
     }
     let commitSha: string | null = null;
     try {
-      const sha = await runGitCommand(this.executable, {
+      const sha = await this.runGit({
         cwd: status.repositoryRoot,
         args: ["rev-parse", "HEAD"],
         timeoutMs: GIT_READ_TIMEOUT_MS,
@@ -842,7 +910,7 @@ export class GitService {
 
   async listBranches(workspace: string, signal?: AbortSignal): Promise<GitBranchList> {
     const status = this.requireReady(await this.getStatus(workspace, signal));
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args: [
         "for-each-ref",
@@ -870,13 +938,15 @@ export class GitService {
       if (!name) return [];
       const ahead = /ahead (\d+)/.exec(tracking)?.[1];
       const behind = /behind (\d+)/.exec(tracking)?.[1];
-      return [{
-        name,
-        current: marker === "*",
-        upstream: upstreamText || null,
-        ahead: ahead ? Number(ahead) : 0,
-        behind: behind ? Number(behind) : 0,
-      }];
+      return [
+        {
+          name,
+          current: marker === "*",
+          upstream: upstreamText || null,
+          ahead: ahead ? Number(ahead) : 0,
+          behind: behind ? Number(behind) : 0,
+        },
+      ];
     });
     return {
       statusRevision: status.revision,
@@ -895,10 +965,14 @@ export class GitService {
   ): Promise<GitMutationResult> {
     const status = this.requireReady(await this.getStatus(workspace, signal));
     if (status.revision !== expectedRevision) {
-      throw new GitServiceError("STALE_REVISION", "Git status changed before branch creation", true);
+      throw new GitServiceError(
+        "STALE_REVISION",
+        "Git status changed before branch creation",
+        true,
+      );
     }
     await this.validateBranchName(status.repositoryRoot, name, signal);
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args: ["switch", "--create", name],
       timeoutMs: GIT_MUTATION_TIMEOUT_MS,
@@ -909,7 +983,10 @@ export class GitService {
     if (result.exitCode !== 0) {
       throw new GitServiceError(
         "GIT_OPERATION_FAILED",
-        safeGitMessage(result.stderr || result.stdout.toString("utf8"), "Unable to create Git branch"),
+        safeGitMessage(
+          result.stderr || result.stdout.toString("utf8"),
+          "Unable to create Git branch",
+        ),
       );
     }
     return { applied: true, ...(await this.refreshAfterMutation(workspace, signal)) };
@@ -923,17 +1000,27 @@ export class GitService {
   ): Promise<GitMutationResult> {
     const status = this.requireReady(await this.getStatus(workspace, signal));
     if (status.revision !== expectedRevision) {
-      throw new GitServiceError("STALE_REVISION", "Git status changed before branch switching", true);
+      throw new GitServiceError(
+        "STALE_REVISION",
+        "Git status changed before branch switching",
+        true,
+      );
     }
     await this.validateBranchName(status.repositoryRoot, name, signal);
     const branchList = await this.listBranches(workspace, signal);
     if (!branchList.branches.some((branch) => branch.name === name)) {
-      throw new GitServiceError("GIT_OPERATION_FAILED", "The selected local branch no longer exists");
+      throw new GitServiceError(
+        "GIT_OPERATION_FAILED",
+        "The selected local branch no longer exists",
+      );
     }
     if (status.branch === name && !status.detached) {
-      throw new GitServiceError("GIT_OPERATION_FAILED", "The selected branch is already checked out");
+      throw new GitServiceError(
+        "GIT_OPERATION_FAILED",
+        "The selected branch is already checked out",
+      );
     }
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args: ["switch", "--", name],
       timeoutMs: GIT_MUTATION_TIMEOUT_MS,
@@ -944,7 +1031,10 @@ export class GitService {
     if (result.exitCode !== 0) {
       throw new GitServiceError(
         "GIT_OPERATION_FAILED",
-        safeGitMessage(result.stderr || result.stdout.toString("utf8"), "Unable to switch Git branch"),
+        safeGitMessage(
+          result.stderr || result.stdout.toString("utf8"),
+          "Unable to switch Git branch",
+        ),
       );
     }
     return { applied: true, ...(await this.refreshAfterMutation(workspace, signal)) };
@@ -958,8 +1048,10 @@ export class GitService {
   ): Promise<GitHistoryResult> {
     const status = this.requireReady(await this.getStatus(workspace, signal));
     if (status.unborn) return { commits: [], nextCursor: null };
-    const revision = cursor ? await this.resolveCommit(status.repositoryRoot, cursor, signal) : "HEAD";
-    const result = await runGitCommand(this.executable, {
+    const revision = cursor
+      ? await this.resolveCommit(status.repositoryRoot, cursor, signal)
+      : "HEAD";
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args: [
         "log",
@@ -996,12 +1088,14 @@ export class GitService {
         authorName: fields[index + 3]!,
         authoredAt: fields[index + 4]!,
         subject: fields[index + 5]!,
-        refs: fields[index + 6]!.split(", ").map((ref) => ref.trim()).filter(Boolean),
+        refs: fields[index + 6]!.split(", ")
+          .map((ref) => ref.trim())
+          .filter(Boolean),
       });
     }
     const hasMore = commits.length > limit;
     const page = commits.slice(0, limit);
-    return { commits: page, nextCursor: hasMore ? page.at(-1)?.sha ?? null : null };
+    return { commits: page, nextCursor: hasMore ? (page.at(-1)?.sha ?? null) : null };
   }
 
   async getCommitDiff(
@@ -1014,7 +1108,7 @@ export class GitService {
       throw new GitServiceError("GIT_OPERATION_FAILED", "The repository has no commits");
     }
     const resolved = await this.resolveCommit(status.repositoryRoot, commitSha, signal);
-    const parentsResult = await runGitCommand(this.executable, {
+    const parentsResult = await this.runGit({
       cwd: status.repositoryRoot,
       args: ["rev-list", "--parents", "-n", "1", resolved],
       timeoutMs: GIT_READ_TIMEOUT_MS,
@@ -1027,9 +1121,28 @@ export class GitService {
     }
     const parentSha = parentsResult.stdout.toString("utf8").trim().split(/\s+/)[1] ?? null;
     const args = parentSha
-      ? ["diff", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", parentSha, resolved, "--"]
-      : ["show", "--format=", "--root", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3", resolved, "--"];
-    const result = await runGitCommand(this.executable, {
+      ? [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--no-color",
+          "--unified=3",
+          parentSha,
+          resolved,
+          "--",
+        ]
+      : [
+          "show",
+          "--format=",
+          "--root",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--no-color",
+          "--unified=3",
+          resolved,
+          "--",
+        ];
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args,
       timeoutMs: GIT_READ_TIMEOUT_MS,
@@ -1051,8 +1164,17 @@ export class GitService {
       patch = lines.slice(0, MAX_GIT_DIFF_LINES).join("\n");
       truncated = true;
     }
-    const binary = /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/.test(patch) || patch.includes("\u0000");
-    return { commitSha: resolved, parentSha, patch, ...countPatchChanges(patch), binary, truncated };
+    const binary =
+      /(^|\n)(Binary files .* differ|GIT binary patch)(\n|$)/.test(patch) ||
+      patch.includes("\u0000");
+    return {
+      commitSha: resolved,
+      parentSha,
+      patch,
+      ...countPatchChanges(patch),
+      binary,
+      truncated,
+    };
   }
 
   async setWatching(
@@ -1126,7 +1248,9 @@ export class GitService {
       throw new GitServiceError("STALE_REVISION", "Git status changed before the operation", true);
     }
     const change = this.requireChange(status, path, kind === "stage" ? "unstaged" : "staged");
-    const paths = [change.originalPath, change.path].filter((item): item is string => Boolean(item));
+    const paths = [change.originalPath, change.path].filter((item): item is string =>
+      Boolean(item),
+    );
     for (const candidate of paths) this.validatePath(status.repositoryRoot, candidate);
     const args =
       kind === "stage"
@@ -1134,7 +1258,7 @@ export class GitService {
         : status.unborn
           ? ["rm", "--cached", "-r", "--ignore-unmatch", "--", ...paths]
           : ["restore", "--staged", "--", ...paths];
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args,
       timeoutMs: GIT_MUTATION_TIMEOUT_MS,
@@ -1181,7 +1305,7 @@ export class GitService {
         : status.unborn
           ? ["rm", "--cached", "-r", "--ignore-unmatch", "--", "."]
           : ["restore", "--staged", "--", "."];
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: status.repositoryRoot,
       args,
       timeoutMs: GIT_MUTATION_TIMEOUT_MS,
@@ -1208,11 +1332,15 @@ export class GitService {
       : { snapshot, warning: "Git operation succeeded, but status could not be refreshed" };
   }
 
-  private requireReady(snapshot: GitStatusSnapshot): Extract<GitStatusSnapshot, { state: "ready" }> {
+  private requireReady(
+    snapshot: GitStatusSnapshot,
+  ): Extract<GitStatusSnapshot, { state: "ready" }> {
     if (snapshot.state === "ready") return snapshot;
     throw new GitServiceError(
       snapshot.state === "unavailable" ? "GIT_UNAVAILABLE" : "GIT_OPERATION_FAILED",
-      snapshot.state === "not_repository" ? "The workspace is not in a Git repository" : snapshot.message,
+      snapshot.state === "not_repository"
+        ? "The workspace is not in a Git repository"
+        : snapshot.message,
     );
   }
 
@@ -1226,7 +1354,10 @@ export class GitService {
       throw new GitServiceError("STALE_REVISION", "The selected Git change no longer exists", true);
     }
     if (!change.pathSupported) {
-      throw new GitServiceError("GIT_OPERATION_FAILED", "This path is not valid UTF-8 and is read-only");
+      throw new GitServiceError(
+        "GIT_OPERATION_FAILED",
+        "This path is not valid UTF-8 and is read-only",
+      );
     }
     return change;
   }
@@ -1250,7 +1381,7 @@ export class GitService {
     if (!name || name.includes("\u0000") || /[\u0000-\u001f\u007f]/.test(name)) {
       throw new GitServiceError("GIT_OPERATION_FAILED", "Invalid Git branch name");
     }
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: repositoryRoot,
       args: ["check-ref-format", "--branch", name],
       timeoutMs: GIT_READ_TIMEOUT_MS,
@@ -1274,7 +1405,7 @@ export class GitService {
     if (!/^[0-9a-f]{40,64}$/.test(commitSha)) {
       throw new GitServiceError("GIT_OPERATION_FAILED", "Invalid Git commit ID");
     }
-    const result = await runGitCommand(this.executable, {
+    const result = await this.runGit({
       cwd: repositoryRoot,
       args: ["rev-parse", "--verify", `${commitSha}^{commit}`],
       timeoutMs: GIT_READ_TIMEOUT_MS,

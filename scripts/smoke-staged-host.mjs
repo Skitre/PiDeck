@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   assertPiPackageTree,
   assertReleaseProductionManifest,
@@ -43,6 +43,7 @@ const nodePath =
   process.env.PIDECK_STAGED_NODE ?? join(resources, "node", runtimeTarget.stagedNodeExecutable);
 const hostEntry = process.env.PIDECK_STAGED_HOST_ENTRY ?? join(resources, "pi-host", "main.js");
 const portableGit = join(resources, "git", "cmd", "git.exe");
+const portableBash = join(resources, "git", "bin", "bash.exe");
 const gitExecutable =
   process.env.PIDECK_STAGED_GIT ??
   (process.platform === "win32" && existsSync(portableGit) ? portableGit : "git");
@@ -81,6 +82,7 @@ for (const name of ["auth.json", "models.json", "settings.json"]) {
 }
 if (process.platform === "win32") {
   assert(existsSync(portableGit), `Staged Portable Git is missing: ${portableGit}`);
+  assert(existsSync(portableBash), `Staged Portable Bash is missing: ${portableBash}`);
 }
 execFileSync(gitExecutable, ["init", workspaceDir], { stdio: "pipe" });
 writeFileSync(join(workspaceDir, "smoke.txt"), "staged host Git smoke\n", "utf8");
@@ -108,25 +110,33 @@ function assertStagedHostUnchanged() {
   );
 }
 
-const controlledPath = [dirname(nodePath)];
-if (existsSync(portableGit)) {
-  const gitRoot = dirname(dirname(portableGit));
-  controlledPath.push(dirname(portableGit), join(gitRoot, "bin"), join(gitRoot, "mingw64", "bin"));
+const pathMarker = join(tempRoot, "user-mise-marker");
+mkdirSync(pathMarker, { recursive: true });
+const hostPath = [pathMarker];
+if (process.platform === "win32") {
+  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? "C:\\Windows";
+  hostPath.push(join(systemRoot, "System32"));
+} else {
+  for (const systemDir of ["/usr/bin", "/bin"]) {
+    if (existsSync(systemDir)) hostPath.push(systemDir);
+  }
 }
-if (process.platform === "win32" && process.env.SystemRoot) {
-  controlledPath.push(join(process.env.SystemRoot, "System32"));
-} else if (process.env.PATH) {
-  controlledPath.push(process.env.PATH);
+
+const hostEnv = {
+  ...process.env,
+  PI_CODING_AGENT_DIR: agentDir,
+  PIDECK_HOST_CACHE_DIR: hostCacheDir,
+  PATH: hostPath.join(delimiter),
+  PIDECK_SMOKE_PATH_MARKER: pathMarker,
+};
+if (process.platform === "win32") {
+  hostEnv.PIDECK_BUNDLED_GIT = gitExecutable;
+  hostEnv.PIDECK_BUNDLED_BASH = portableBash;
 }
 
 const child = spawn(nodePath, [hostEntry], {
   cwd: dirname(hostEntry),
-  env: {
-    ...process.env,
-    PI_CODING_AGENT_DIR: agentDir,
-    PIDECK_HOST_CACHE_DIR: hostCacheDir,
-    PATH: controlledPath.join(delimiter),
-  },
+  env: hostEnv,
   stdio: ["pipe", "pipe", "pipe"],
   windowsHide: true,
 });
@@ -203,6 +213,88 @@ function nextMessage(deadline) {
       }, remaining),
     };
     messageWaiters.push(waiter);
+  });
+}
+
+function probeAgentBash(cachedHostRoot) {
+  const shellModule = join(
+    cachedHostRoot,
+    "node_modules",
+    "@earendil-works",
+    "pi-coding-agent",
+    "dist",
+    "utils",
+    "shell.js",
+  );
+  assert(existsSync(shellModule), `cached SDK shell module is missing: ${shellModule}`);
+  const gitRoot = dirname(dirname(portableGit));
+  const forbidden = [
+    dirname(nodePath),
+    dirname(portableGit),
+    join(gitRoot, "bin"),
+    join(gitRoot, "mingw64", "bin"),
+  ];
+  const script = `
+import { spawnSync } from "node:child_process";
+const { getShellConfig, getShellEnv } = await import(${JSON.stringify(pathToFileURL(shellModule).href)});
+const env = getShellEnv();
+const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+const pathValue = env[pathKey] ?? "";
+const marker = process.env.PIDECK_SMOKE_PATH_MARKER;
+if (!marker || !pathValue.includes(marker)) {
+  throw new Error("Agent Bash env missing user PATH marker");
+}
+const forbidden = ${JSON.stringify(forbidden)};
+for (const entry of forbidden) {
+  if (entry && pathValue.toLowerCase().includes(String(entry).toLowerCase())) {
+    throw new Error("Agent Bash env includes bundled runtime PATH: " + entry);
+  }
+}
+if (process.platform === "win32") {
+  delete process.env.ProgramFiles;
+  delete process.env["ProgramFiles(x86)"];
+  process.env.PATH = marker;
+  const cfg = getShellConfig();
+  if (cfg.shell !== process.env.PIDECK_BUNDLED_BASH) {
+    throw new Error("expected bundled bash fallback, got " + cfg.shell);
+  }
+  const command = "printf '%s' PIDECK_BUNDLED_BASH_OK";
+  const result = spawnSync(
+    cfg.shell,
+    cfg.commandTransport === "stdin" ? cfg.args : [...cfg.args, command],
+    {
+      encoding: "utf8",
+      env,
+      timeout: 15_000,
+      windowsHide: true,
+      input: cfg.commandTransport === "stdin" ? command : undefined,
+    },
+  );
+  if (result.status !== 0 || !(result.stdout ?? "").includes("PIDECK_BUNDLED_BASH_OK")) {
+    throw new Error(
+      "bundled bash spawn failed: " + (result.stderr || String(result.error ?? "") || "no output"),
+    );
+  }
+} else {
+  const cfg = getShellConfig();
+  const command = "printf '%s' PIDECK_BUNDLED_BASH_OK";
+  const result = spawnSync(cfg.shell, [...cfg.args, command], {
+    encoding: "utf8",
+    env,
+    timeout: 15_000,
+  });
+  if (result.status !== 0 || !(result.stdout ?? "").includes("PIDECK_BUNDLED_BASH_OK")) {
+    throw new Error(
+      "bash spawn failed: " + (result.stderr || String(result.error ?? "") || "no output"),
+    );
+  }
+}
+`;
+  execFileSync(nodePath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+    env: hostEnv,
+    timeout: 30_000,
+    windowsHide: true,
   });
 }
 
@@ -309,6 +401,7 @@ try {
     ),
     "git.getStatus did not report the smoke file",
   );
+  probeAgentBash(cachedHostRoot);
 
   const shutdown = await request("system.shutdown", context, null, deadline);
   assert(shutdown.ok === true, `system.shutdown failed: ${JSON.stringify(shutdown.error)}`);
@@ -324,6 +417,7 @@ try {
       sdkVersion: readyStatus.sdkVersion,
       nodeVersion: readyStatus.nodeVersion,
       gitStatus: gitStatus.result.state,
+      bashProbe: "ok",
       rehydrateWatermark: rehydrate.result.watermark,
       exitCode: exited.code,
     }),

@@ -33,8 +33,7 @@ const commandCache = new Map<string, string | undefined>();
 type TemplatePart = { type: "literal"; value: string } | { type: "env"; name: string };
 
 type ConfigReference =
-  | { type: "command"; config: string }
-  | { type: "template"; parts: TemplatePart[] };
+  { type: "command"; config: string } | { type: "template"; parts: TemplatePart[] };
 
 function appendLiteral(parts: TemplatePart[], value: string): void {
   if (!value) return;
@@ -144,8 +143,10 @@ function findWindowsBash(): ShellConfig | undefined {
       if (first && existsSync(first)) return bashShellConfig(first);
     }
   } catch {
-    // Fall through to the default shell.
+    // Fall through to the bundled shell.
   }
+  const bundled = process.env.PIDECK_BUNDLED_BASH;
+  if (bundled && existsSync(bundled)) return bashShellConfig(bundled);
   return undefined;
 }
 
@@ -154,14 +155,18 @@ function executeWithBash(command: string): { executed: boolean; value: string | 
   const config = findWindowsBash();
   if (!config) return { executed: false, value: undefined };
   try {
-    const result = spawnSync(config.shell, config.commandViaStdin ? config.args : [...config.args, command], {
-      encoding: "utf-8",
-      input: config.commandViaStdin ? command : undefined,
-      timeout: COMMAND_TIMEOUT_MS,
-      stdio: [config.commandViaStdin ? "pipe" : "ignore", "pipe", "ignore"],
-      shell: false,
-      windowsHide: true,
-    });
+    const result = spawnSync(
+      config.shell,
+      config.commandViaStdin ? config.args : [...config.args, command],
+      {
+        encoding: "utf-8",
+        input: config.commandViaStdin ? command : undefined,
+        timeout: COMMAND_TIMEOUT_MS,
+        stdio: [config.commandViaStdin ? "pipe" : "ignore", "pipe", "ignore"],
+        shell: false,
+        windowsHide: true,
+      },
+    );
     if (result.error) {
       const code = (result.error as NodeJS.ErrnoException).code;
       return { executed: code !== "ENOENT", value: undefined };

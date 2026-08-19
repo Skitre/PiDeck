@@ -32,20 +32,19 @@ test("derives the release manifest from every Host production dependency", () =>
   const dependencies = deriveReleaseProductionDependencies(evidence, {
     "@pideck/protocol": protocolVersion,
   });
-  assert.deepEqual(Object.keys(dependencies), Object.keys(evidence.hostManifest.productionDependencies));
-  assertReleaseProductionManifest(
-    { dependencies },
-    evidence,
-    { "@pideck/protocol": protocolVersion },
+  assert.deepEqual(
+    Object.keys(dependencies),
+    Object.keys(evidence.hostManifest.productionDependencies),
   );
+  assertReleaseProductionManifest({ dependencies }, evidence, {
+    "@pideck/protocol": protocolVersion,
+  });
 });
 
 test("probes Node-safe runtime entries for every Host production dependency", () => {
   const evidence = loadReleaseSdkEvidence(root);
   const dependencyNames = Object.keys(evidence.hostManifest.productionDependencies);
-  const specifiers = releaseRuntimeImportSpecifiers(
-    evidence.hostManifest.productionDependencies,
-  );
+  const specifiers = releaseRuntimeImportSpecifiers(evidence.hostManifest.productionDependencies);
 
   assert.equal(specifiers.length, dependencyNames.length);
   assert.deepEqual(
@@ -55,6 +54,17 @@ test("probes Node-safe runtime entries for every Host production dependency", ()
     ),
   );
   assert.ok(!specifiers.includes("pdfjs-dist"));
+});
+
+test("requires bundled bash.exe in the Portable Git runtime contract", () => {
+  const runtimeLock = JSON.parse(
+    readFileSync(join(root, "scripts/release-runtime.lock.json"), "utf8"),
+  );
+  assert.deepEqual(runtimeLock.git.portable.expectedFiles, [
+    "cmd/git.exe",
+    "bin/git.exe",
+    "bin/bash.exe",
+  ]);
 });
 
 test("rejects drifted runtime-lock and staged evidence", () => {
@@ -67,7 +77,10 @@ test("rejects drifted runtime-lock and staged evidence", () => {
     readFileSync(join(root, "scripts/release-runtime.lock.json"), "utf8"),
   );
   runtimeLock.pnpmLock.sha256 = "0".repeat(64);
-  assert.throws(() => loadReleaseSdkEvidence(root, runtimeLock), /pnpm-lock\.yaml SHA-256 mismatch/);
+  assert.throws(
+    () => loadReleaseSdkEvidence(root, runtimeLock),
+    /pnpm-lock\.yaml SHA-256 mismatch/,
+  );
 
   const patchLock = JSON.parse(
     readFileSync(join(root, "scripts/release-runtime.lock.json"), "utf8"),

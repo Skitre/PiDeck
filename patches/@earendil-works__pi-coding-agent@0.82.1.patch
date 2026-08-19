@@ -1,5 +1,5 @@
 diff --git a/dist/core/agent-session.d.ts b/dist/core/agent-session.d.ts
-index b7a48336ddf4c0bcbf9609a91aba1a260635a19d..33e87d431da02543ec14d87a29c69258f90c51e7 100644
+index b7a48336ddf4c0bcbf9609a91aba1a260635a19d..d3ae1d7aba9d87e2a2f9b7d88c1d8998f66fbf6d 100644
 --- a/dist/core/agent-session.d.ts
 +++ b/dist/core/agent-session.d.ts
 @@ -16,7 +16,7 @@ import type { Agent, AgentEvent, AgentMessage, AgentState, AgentTool, ThinkingLe
@@ -32,7 +32,7 @@ index b7a48336ddf4c0bcbf9609a91aba1a260635a19d..33e87d431da02543ec14d87a29c69258
       * Cycle to next/previous model.
       * Uses scoped models (from --models flag) if available, otherwise all available models.
 diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
-index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..a2e850a435ca7f5730606c60c04b0ab9a294dda2 100644
+index c99a78f31ce2d58973ab1809bd72deb8a1f4135b..8ae0c25283aa731a79807180497515b905fe383c 100644
 --- a/dist/core/agent-session.js
 +++ b/dist/core/agent-session.js
 @@ -72,6 +72,19 @@ function estimateMessagesTokens(messages) {
@@ -387,7 +387,7 @@ index 1e9f7134dbd02635f83e65295915fa6d8c8e8676..77d603976740a37139982aadfc071ba7
  }
  /**
 diff --git a/dist/core/package-manager.d.ts b/dist/core/package-manager.d.ts
-index ec83cef50cab5316d6dace51c9229f677aa46713..e585410ec05d2948ed3a01970049f06b6a5f4037 100644
+index ec83cef50cab5316d6dace51c9229f677aa46713..9e77988954eb1aebe9a43e1e787b8ff35870e103 100644
 --- a/dist/core/package-manager.d.ts
 +++ b/dist/core/package-manager.d.ts
 @@ -50,7 +50,9 @@ export interface PackageManager {
@@ -401,7 +401,7 @@ index ec83cef50cab5316d6dace51c9229f677aa46713..e585410ec05d2948ed3a01970049f06b
      listConfiguredPackages(): ConfiguredPackage[];
      resolveExtensionSources(sources: string[], options?: {
          local?: boolean;
-@@ -63,6 +65,12 @@ export interface PackageManager {
+@@ -63,12 +65,20 @@ export interface PackageManager {
          local?: boolean;
      }): boolean;
      setProgressCallback(callback: ProgressCallback | undefined): void;
@@ -414,18 +414,27 @@ index ec83cef50cab5316d6dace51c9229f677aa46713..e585410ec05d2948ed3a01970049f06b
      getInstalledPath(source: string, scope: "user" | "project"): string | undefined;
  }
  interface PackageManagerOptions {
-@@ -79,8 +87,10 @@ export declare class DefaultPackageManager implements PackageManager {
+     cwd: string;
+     agentDir: string;
+     settingsManager: SettingsManager;
++    /** PiDeck patch: optional internal child env for bundled Node/Git/npm. */
++    env?: NodeJS.ProcessEnv;
+ }
+ type SourceScope = "user" | "project" | "temporary";
+ export declare function getExtensionTempFolder(agentDir: string): string;
+@@ -79,8 +89,11 @@ export declare class DefaultPackageManager implements PackageManager {
      private globalNpmRoot;
      private globalNpmRootCommandKey;
      private progressCallback;
 +    private operationSignal;
++    private env;
      constructor(options: PackageManagerOptions);
      setProgressCallback(callback: ProgressCallback | undefined): void;
 +    setOperationSignal(signal: AbortSignal | undefined): void;
      addSourceToSettings(source: string, options?: {
          local?: boolean;
      }): boolean;
-@@ -108,7 +118,9 @@ export declare class DefaultPackageManager implements PackageManager {
+@@ -108,7 +121,9 @@ export declare class DefaultPackageManager implements PackageManager {
      removeAndPersist(source: string, options?: {
          local?: boolean;
      }): Promise<boolean>;
@@ -437,7 +446,7 @@ index ec83cef50cab5316d6dace51c9229f677aa46713..e585410ec05d2948ed3a01970049f06b
      private shouldUpdateNpmSource;
      private updateNpmBatch;
 diff --git a/dist/core/package-manager.js b/dist/core/package-manager.js
-index 4770478ac4c17dac0e2062917d551000aac8af27..45763415eb544c78310717014a2c7cfbfd35a796 100644
+index 4770478ac4c17dac0e2062917d551000aac8af27..f10304fcd353d607cc5989b7feae545ed8c017fc 100644
 --- a/dist/core/package-manager.js
 +++ b/dist/core/package-manager.js
 @@ -26,10 +26,9 @@ import ignore from "ignore";
@@ -452,15 +461,18 @@ index 4770478ac4c17dac0e2062917d551000aac8af27..45763415eb544c78310717014a2c7cfb
  const NETWORK_TIMEOUT_MS = 10000;
  const UPDATE_CHECK_CONCURRENCY = 4;
  const GIT_UPDATE_CONCURRENCY = 4;
-@@ -603,6 +602,7 @@ export class DefaultPackageManager {
+@@ -603,14 +602,23 @@ export class DefaultPackageManager {
      globalNpmRoot;
      globalNpmRootCommandKey;
      progressCallback;
 +    operationSignal;
++    env;
      constructor(options) {
          this.cwd = resolvePath(options.cwd);
          this.agentDir = resolvePath(options.agentDir);
-@@ -611,6 +611,12 @@ export class DefaultPackageManager {
+         this.settingsManager = options.settingsManager;
++        this.env = options.env;
+     }
      setProgressCallback(callback) {
          this.progressCallback = callback;
      }
@@ -473,7 +485,7 @@ index 4770478ac4c17dac0e2062917d551000aac8af27..45763415eb544c78310717014a2c7cfb
      addSourceToSettings(source, options) {
          const scope = options?.local ? "project" : "user";
          const currentSettings = scope === "project" ? this.settingsManager.getProjectSettings() : this.settingsManager.getGlobalSettings();
-@@ -807,13 +813,15 @@ export class DefaultPackageManager {
+@@ -807,13 +815,15 @@ export class DefaultPackageManager {
          await this.remove(source, options);
          return this.removeSourceFromSettings(source, options);
      }
@@ -490,7 +502,7 @@ index 4770478ac4c17dac0e2062917d551000aac8af27..45763415eb544c78310717014a2c7cfb
              const sourceStr = typeof pkg === "string" ? pkg : pkg.source;
              if (identity && this.getPackageIdentity(sourceStr, "user") !== identity)
                  continue;
-@@ -821,6 +829,7 @@ export class DefaultPackageManager {
+@@ -821,6 +831,7 @@ export class DefaultPackageManager {
              updateSources.push({ source: sourceStr, scope: "user" });
          }
          for (const pkg of projectSettings.packages ?? []) {
@@ -498,8 +510,17 @@ index 4770478ac4c17dac0e2062917d551000aac8af27..45763415eb544c78310717014a2c7cfb
              const sourceStr = typeof pkg === "string" ? pkg : pkg.source;
              if (identity && this.getPackageIdentity(sourceStr, "project") !== identity)
                  continue;
-@@ -2053,8 +2062,9 @@ export class DefaultPackageManager {
-         const env = getEnv();
+@@ -2049,78 +2060,85 @@ export class DefaultPackageManager {
+             themes: mapToResolved(accumulator.themes),
+         };
+     }
++    childEnv(extra) {
++        const baseEnv = this.env ?? getEnv();
++        return extra ? { ...baseEnv, ...extra } : baseEnv;
++    }
+     spawnCommand(command, args, options) {
+-        const env = getEnv();
++        const env = this.childEnv();
          return spawnProcess(command, args, {
              cwd: options?.cwd,
 -            stdio: isStdoutTakenOver() ? ["ignore", 2, 2] : "inherit",
@@ -509,7 +530,10 @@ index 4770478ac4c17dac0e2062917d551000aac8af27..45763415eb544c78310717014a2c7cfb
          });
      }
      spawnCaptureCommand(command, args, options) {
-@@ -2064,62 +2074,65 @@ export class DefaultPackageManager {
+-        const baseEnv = getEnv();
+-        const env = options?.env ? { ...baseEnv, ...options.env } : baseEnv;
++        const env = this.childEnv(options?.env);
+         return spawnProcess(command, args, {
              cwd: options?.cwd,
              stdio: ["ignore", "pipe", "pipe"],
              env,
@@ -617,13 +641,40 @@ index 4770478ac4c17dac0e2062917d551000aac8af27..45763415eb544c78310717014a2c7cfb
 +        throw new Error(`${command} ${args.join(" ")} failed with ${exitStatus}${output ? `: ${output}` : ""}`);
      }
      runCommandSync(command, args) {
+-        const env = getEnv();
 +        // PiDeck patch: spawnSync cannot be interrupted, so an in-flight sync
 +        // child still runs to completion. Refusing to start a new one after
 +        // abort is the only cancellation this path can honour.
 +        this.operationSignal?.throwIfAborted();
-         const env = getEnv();
++        const env = this.childEnv();
          const result = spawnProcessSync(command, args, {
              stdio: ["ignore", "pipe", "pipe"],
+             encoding: "utf-8",
+diff --git a/dist/core/resource-loader.d.ts b/dist/core/resource-loader.d.ts
+index e1b4bfd0a6ab0ae1eeef2b64afe8dfbe478118db..0ebc6645f64d94ab69bd979df992bb45080c14d2 100644
+--- a/dist/core/resource-loader.d.ts
++++ b/dist/core/resource-loader.d.ts
+@@ -110,6 +110,8 @@ export interface DefaultResourceLoaderOptions {
+     };
+     systemPromptOverride?: (base: string | undefined) => string | undefined;
+     appendSystemPromptOverride?: (base: string[]) => string[];
++    /** PiDeck patch: forwarded to the private DefaultPackageManager. */
++    env?: NodeJS.ProcessEnv;
+ }
+ export declare class DefaultResourceLoader implements ResourceLoader {
+     private cwd;
+diff --git a/dist/core/resource-loader.js b/dist/core/resource-loader.js
+index 5973072babc951efb362198f189caf0d93f42b6b..02c9f927d58d36adf6c45f3647ef11ab4ed5863d 100644
+--- a/dist/core/resource-loader.js
++++ b/dist/core/resource-loader.js
+@@ -125,6 +125,7 @@ export class DefaultResourceLoader {
+             cwd: this.cwd,
+             agentDir: this.agentDir,
+             settingsManager: this.settingsManager,
++            env: options.env,
+         });
+         this.additionalExtensionPaths = options.additionalExtensionPaths ?? [];
+         this.additionalSkillPaths = options.additionalSkillPaths ?? [];
 diff --git a/dist/core/sdk.d.ts b/dist/core/sdk.d.ts
 index 7778619c78a5abcfbcb0ddefff6559c67519cd7b..de508c589f17b7b9383e46883bf0859db6fc9a35 100644
 --- a/dist/core/sdk.d.ts
@@ -679,3 +730,91 @@ index e91e38f8bedfabb6e67305f9739277d1ebacde22..68745dcb5cdd88b4c382ad29d2ba953b
  export { createExtensionRuntime, defineTool, discoverAndLoadExtensions, ExtensionRunner, isBashToolResult, isEditToolResult, isFindToolResult, isGrepToolResult, isLsToolResult, isReadToolResult, isToolCallEventType, isWriteToolResult, wrapRegisteredTool, wrapRegisteredTools, } from "./core/extensions/index.ts";
  export type { ReadonlyFooterDataProvider } from "./core/footer-data-provider.ts";
  export { convertToLlm } from "./core/messages.ts";
+diff --git a/dist/utils/shell.js b/dist/utils/shell.js
+index 68e7e516ca147649a56e236e406a1a4a008069af..a8ddebd4c56d36a5137bf3cb6f5c09e2e05fd815 100644
+--- a/dist/utils/shell.js
++++ b/dist/utils/shell.js
+@@ -1,7 +1,27 @@
+ import { existsSync } from "node:fs";
+-import { delimiter } from "node:path";
++import { delimiter, dirname, join } from "node:path";
+ import { spawn, spawnSync } from "child_process";
+ import { getBinDir } from "../config.js";
++function bundledBashFallback() {
++    const bash = process.env.PIDECK_BUNDLED_BASH;
++    if (bash && existsSync(bash)) {
++        return bash;
++    }
++    const git = process.env.PIDECK_BUNDLED_GIT;
++    if (!git) {
++        return null;
++    }
++    const cmdDir = dirname(git);
++    if (cmdDir.split(/[\\/]/).pop()?.toLowerCase() !== "cmd") {
++        return null;
++    }
++    const candidate = join(dirname(cmdDir), "bin", "bash.exe");
++    return existsSync(candidate) ? candidate : null;
++}
++function windowsTaskkillExecutable() {
++    const root = process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows";
++    return join(root, "System32", "taskkill.exe");
++}
+ /**
+  * Find bash executable on PATH (cross-platform)
+  */
+@@ -53,7 +73,8 @@ function findBashOnPath() {
+  * Resolution order:
+  * 1. User-specified shellPath
+  * 2. On Windows: Git Bash in known locations, then bash on PATH
+- * 3. On Unix: /bin/bash, then bash on PATH, then fallback to sh
++ * 3. On Windows: PiDeck bundled bash (PIDECK_BUNDLED_BASH / Portable Git)
++ * 4. On Unix: /bin/bash, then bash on PATH, then fallback to sh
+  */
+ export function getShellConfig(customShellPath) {
+     // 1. Check user-specified shell path
+@@ -84,6 +105,10 @@ export function getShellConfig(customShellPath) {
+         if (bashOnPath) {
+             return getBashShellConfig(bashOnPath);
+         }
++        const bundledBash = bundledBashFallback();
++        if (bundledBash) {
++            return getBashShellConfig(bundledBash);
++        }
+         throw new Error(`No bash shell found. Options:\n` +
+             `  1. Install Git for Windows: https://git-scm.com/download/win\n` +
+             `  2. Add your bash to PATH (Cygwin, MSYS2, etc.)\n` +
+@@ -171,16 +196,30 @@ export function killTrackedDetachedChildren() {
+  */
+ export function killProcessTree(pid) {
+     if (process.platform === "win32") {
+-        // Use taskkill on Windows to kill process tree
++        // Use absolute taskkill so a user PATH without System32 cannot
++        // turn ENOENT into an unhandled spawn error that kills the Host.
+         try {
+-            spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
++            const killer = spawn(windowsTaskkillExecutable(), ["/F", "/T", "/PID", String(pid)], {
+                 stdio: "ignore",
+                 detached: true,
+                 windowsHide: true,
+             });
++            killer.once("error", () => {
++                try {
++                    process.kill(pid);
++                }
++                catch {
++                    // Process already dead
++                }
++            });
+         }
+         catch {
+-            // Ignore errors if taskkill fails
++            try {
++                process.kill(pid);
++            }
++            catch {
++                // Ignore errors if taskkill fails
++            }
+         }
+     }
+     else {

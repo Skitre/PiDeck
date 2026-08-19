@@ -15,6 +15,7 @@ import type {
   PackageSnapshot,
   ResourceRecord,
 } from "@pideck/protocol";
+import { getInternalRuntime } from "./internal-runtime.js";
 import {
   matchesResourcePattern,
   resourceTypeToSettingsKey,
@@ -545,6 +546,7 @@ export async function buildPackageSnapshot(args: {
       cwd: args.cwd,
       agentDir: args.agentDir,
       settingsManager: globalSettingsManager,
+      env: getInternalRuntime().env,
     });
     globalProjection = { manager, resolved: await manager.resolve(async () => "skip") };
   }

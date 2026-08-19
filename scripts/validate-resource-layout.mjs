@@ -52,7 +52,16 @@ need(
 need(join(res, "node/RUNTIME.json"), "node/RUNTIME.json missing");
 need(join(res, "git/RUNTIME.json"), "git/RUNTIME.json missing");
 if (runtimeTarget.git.strategy === "bundled-portable") {
-  need(join(res, "git/cmd/git.exe"), "git/cmd/git.exe missing — controlled Portable Git required");
+  const portableGitFiles = runtimeTarget.git.portable?.expectedFiles ?? [];
+  if (portableGitFiles.length === 0) {
+    errors.push("release-runtime lock portable Git expectedFiles is empty");
+  }
+  for (const file of portableGitFiles) {
+    need(
+      join(res, "git", ...file.split("/")),
+      `git/${file} missing — controlled Portable Git required`,
+    );
+  }
 }
 need(join(res, "pi-host/main.js"), "pi-host/main.js missing");
 need(join(res, "pi-host/package.json"), "pi-host/package.json missing");

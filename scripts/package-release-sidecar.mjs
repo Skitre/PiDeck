@@ -184,6 +184,17 @@ if (
     `staged Git archive hash mismatch: RUNTIME ${gitRuntimeMeta.archiveSha256} vs lock ${runtimeTarget.git.portable.sha256}`,
   );
 }
+if (runtimeTarget.git.strategy === "bundled-portable") {
+  const portableGitFiles = runtimeTarget.git.portable?.expectedFiles ?? [];
+  if (portableGitFiles.length === 0) {
+    die("release-runtime lock portable Git expectedFiles is empty");
+  }
+  for (const expected of portableGitFiles) {
+    if (!existsSync(join(gitDir, ...expected.split("/")))) {
+      die(`staged Portable Git missing expected file: ${expected}`);
+    }
+  }
+}
 const gitProbeExecutable =
   runtimeTarget.git.strategy === "bundled-portable" ? join(gitDir, "cmd", "git.exe") : "git";
 const gitProbe = spawnSync(gitProbeExecutable, ["--version"], {

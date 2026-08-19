@@ -43,6 +43,7 @@ import { AttachmentStore } from "./attachment-store.js";
 import { createAttachmentHandlers } from "./attachment-controller.js";
 import { createGitHandlers } from "./git-controller.js";
 import { GitService } from "./git-service.js";
+import { getInternalRuntime } from "./internal-runtime.js";
 
 function resolveAgentDir(): string {
   const envDir = process.env.PI_CODING_AGENT_DIR;
@@ -253,7 +254,8 @@ async function main(): Promise<void> {
   // the middle of an agent turn) are attributed to the active workspace.
   providerOwnership.setFallbackOwnerSource(() => graphFactory.getGraph()?.providerOwner ?? null);
   const workspaceFiles = new WorkspaceFileService();
-  const gitService = new GitService();
+  const runtime = getInternalRuntime();
+  const gitService = new GitService(runtime.gitExecutable ?? "git", runtime.env);
 
   const handlers = {
     ...createWorkspaceHandlers(graphFactory, workspaceFiles, gitService),

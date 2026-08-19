@@ -1,4 +1,5 @@
 use crate::desktop_settings::{DesktopSettings, DesktopSettingsStore};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -884,83 +885,27 @@ impl PiHostManager {
     }
 
     fn resolve_node(app: &AppHandle) -> Result<PathBuf, String> {
-        // Release: only bundled runtime under resource_dir / next to exe — no PATH/global.
-        // Tauri's resource_dir derives from a canonicalized exe path, which on
-        // Windows is a \\?\ verbatim path. node.exe itself launches fine with
-        // it, but the runtime directory also feeds the Host's controlled PATH,
-        // where cmd.exe (npm.cmd and any batch shim) cannot resolve \\?\ paths
-        // — npm installs then fail with "The system cannot find the path
-        // specified". Always hand out stripped paths.
-        if let Ok(res_dir) = app.path().resource_dir() {
-            for candidate in node_runtime_candidates(&res_dir) {
-                if is_executable_file(&candidate) {
-                    return Ok(strip_verbatim_prefix(candidate));
-                }
-            }
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                for candidate in node_runtime_candidates(dir) {
-                    if is_executable_file(&candidate) {
-                        return Ok(strip_verbatim_prefix(candidate));
-                    }
-                }
-            }
-        }
-
-        // Dev only: PATH / monorepo tooling
-        #[cfg(debug_assertions)]
-        {
-            if let Ok(path) = which_node() {
-                return Ok(path);
-            }
-            Ok(PathBuf::from(if cfg!(windows) {
-                "node.exe"
-            } else {
-                "node"
-            }))
-        }
-
-        #[cfg(not(debug_assertions))]
-        {
-            Err(
-                "Release build: bundled Node not found under resource_dir. Re-run package:sidecar:with-node / prepare:runtime."
-                    .into(),
-            )
-        }
+        let resource_dir = app.path().resource_dir().ok();
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
+        resolve_node_from_dirs(
+            resource_dir.as_deref(),
+            exe_dir.as_deref(),
+            cfg!(debug_assertions),
+        )
     }
 
-    #[cfg(not(windows))]
-    fn resolve_portable_git(_app: &AppHandle) -> Result<Option<PathBuf>, String> {
-        Ok(None)
-    }
-
-    #[cfg(windows)]
     fn resolve_portable_git(app: &AppHandle) -> Result<Option<PathBuf>, String> {
-        let mut candidates = Vec::new();
-        if let Ok(res_dir) = app.path().resource_dir() {
-            candidates.push(res_dir.join("git").join("cmd"));
-            candidates.push(res_dir.join("resources").join("git").join("cmd"));
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                candidates.push(dir.join("git").join("cmd"));
-                candidates.push(dir.join("resources").join("git").join("cmd"));
-            }
-        }
-        for candidate in candidates {
-            if candidate.join("git.exe").exists() {
-                // Same \\?\ concern as resolve_node: these directories go on
-                // the Host's controlled PATH, which cmd.exe must understand.
-                return Ok(Some(strip_verbatim_prefix(candidate)));
-            }
-        }
-
-        if cfg!(debug_assertions) {
-            Ok(None)
-        } else {
-            Err("Release build: bundled Portable Git not found under resource_dir. Re-run prepare:runtime.".into())
-        }
+        let resource_dir = app.path().resource_dir().ok();
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
+        resolve_portable_git_from_dirs(
+            resource_dir.as_deref(),
+            exe_dir.as_deref(),
+            cfg!(debug_assertions),
+        )
     }
 
     fn resolve_host_entry(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1017,7 +962,7 @@ impl PiHostManager {
         }
 
         let node = Self::resolve_node(&self.app)?;
-        let portable_git_cmd = Self::resolve_portable_git(&self.app)?;
+        let portable_git = Self::resolve_portable_git(&self.app)?;
         let entry = Self::resolve_host_entry(&self.app)?;
         let agent_dir = self.agent_dir.clone();
         let host_cache_dir = strip_verbatim_prefix(
@@ -1081,44 +1026,23 @@ impl PiHostManager {
                 cmd.arg(format!("--initial-session={}", session.display()));
             }
         }
-        cmd.env("PI_CODING_AGENT_DIR", &agent_dir);
-        cmd.env("PIDECK_HOST_CACHE_DIR", &host_cache_dir);
-
-        let mut controlled_path = Vec::<PathBuf>::new();
-        if let Some(node_dir) = node.parent() {
-            controlled_path.push(node_dir.to_path_buf());
-        }
-        if let Some(git_cmd) = portable_git_cmd.as_ref() {
-            controlled_path.push(git_cmd.clone());
-            if let Some(git_root) = git_cmd.parent() {
-                controlled_path.push(git_root.join("bin"));
-                controlled_path.push(git_root.join("mingw64").join("bin"));
-            }
-        }
-        if let Ok(system_root) = std::env::var("SystemRoot") {
-            controlled_path.push(PathBuf::from(system_root).join("System32"));
-        }
-        #[cfg(not(windows))]
-        if let Some(existing) = std::env::var_os("PATH") {
-            controlled_path.extend(std::env::split_paths(&existing));
-        }
-        #[cfg(all(windows, debug_assertions))]
-        if portable_git_cmd.is_none() {
-            if let Some(existing) = std::env::var_os("PATH") {
-                controlled_path.extend(std::env::split_paths(&existing));
-            }
-        }
-        let controlled_path = std::env::join_paths(controlled_path)
-            .map_err(|e| format!("build controlled Host PATH: {e}"))?;
-        cmd.env("PATH", controlled_path);
-
-        // Help Node resolve monorepo deps when running dist from packages/pi-host
-        if let Some(host_pkg) = entry.parent().and_then(|p| p.parent()) {
-            // packages/pi-host/dist -> packages/pi-host
-            let nm = host_pkg.join("node_modules");
-            if nm.exists() {
-                cmd.env("NODE_PATH", nm);
-            }
+        // Host inherits the desktop user PATH. Bundled Git/Bash are private
+        // descriptors for internal children and Agent Bash fallback, not a
+        // PATH override.
+        let node_modules = entry
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|host_pkg| host_pkg.join("node_modules"));
+        let node_path = node_modules.as_deref().filter(|path| path.exists());
+        let bundled_bash = portable_git.as_deref().and_then(bundled_bash_from_git);
+        for (key, value) in host_child_explicit_env(
+            &agent_dir,
+            &host_cache_dir,
+            node_path,
+            portable_git.as_deref(),
+            bundled_bash.as_deref(),
+        ) {
+            cmd.env(key, value);
         }
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1802,6 +1726,166 @@ pub(crate) fn node_runtime_candidates(base: &Path) -> [PathBuf; 2] {
         base.join("node").join(executable),
         base.join("resources").join("node").join(executable),
     ]
+}
+
+pub(crate) const PIDECK_BUNDLED_GIT: &str = "PIDECK_BUNDLED_GIT";
+pub(crate) const PIDECK_BUNDLED_BASH: &str = "PIDECK_BUNDLED_BASH";
+
+/// Env vars explicitly set on the Host child. PATH is omitted so the process
+/// inherits the desktop user's PATH. Bundled Git/Bash are private descriptors
+/// for internal children and Agent Bash fallback, not user-facing PATH entries.
+pub(crate) fn host_child_explicit_env(
+    agent_dir: &Path,
+    host_cache_dir: &Path,
+    node_path: Option<&Path>,
+    bundled_git: Option<&Path>,
+    bundled_bash: Option<&Path>,
+) -> Vec<(OsString, OsString)> {
+    let mut env = vec![
+        (
+            OsString::from("PI_CODING_AGENT_DIR"),
+            agent_dir.as_os_str().to_os_string(),
+        ),
+        (
+            OsString::from("PIDECK_HOST_CACHE_DIR"),
+            host_cache_dir.as_os_str().to_os_string(),
+        ),
+    ];
+    if let Some(node_path) = node_path {
+        env.push((
+            OsString::from("NODE_PATH"),
+            node_path.as_os_str().to_os_string(),
+        ));
+    }
+    if let Some(git) = bundled_git {
+        env.push((
+            OsString::from(PIDECK_BUNDLED_GIT),
+            git.as_os_str().to_os_string(),
+        ));
+    }
+    if let Some(bash) = bundled_bash {
+        env.push((
+            OsString::from(PIDECK_BUNDLED_BASH),
+            bash.as_os_str().to_os_string(),
+        ));
+    }
+    env
+}
+
+/// Portable Git layout: `<root>/cmd/git.exe` → `<root>/bin/bash.exe`.
+/// The result is stripped of `\\?\` so later SDK spawn sites can use it.
+pub(crate) fn bundled_bash_from_git(git_exe: &Path) -> Option<PathBuf> {
+    let cmd_dir = git_exe.parent()?;
+    let cmd_name = cmd_dir.file_name()?.to_str()?;
+    if !cmd_name.eq_ignore_ascii_case("cmd") {
+        return None;
+    }
+    let bash = cmd_dir.parent()?.join("bin").join("bash.exe");
+    if bash.is_file() {
+        Some(strip_verbatim_prefix(bash))
+    } else {
+        None
+    }
+}
+
+/// Release: only bundled runtime under resource_dir / next to exe — no PATH/global.
+/// Tauri's resource_dir derives from a canonicalized exe path, which on
+/// Windows is a \\?\ verbatim path. node.exe itself launches fine with it, but
+/// npm.cmd and other cmd.exe shims cannot resolve \\?\ paths. Always hand out
+/// stripped paths for anything that later becomes an internal runtime PATH entry.
+pub(crate) fn resolve_node_from_dirs(
+    resource_dir: Option<&Path>,
+    exe_dir: Option<&Path>,
+    debug: bool,
+) -> Result<PathBuf, String> {
+    if let Some(res_dir) = resource_dir {
+        for candidate in node_runtime_candidates(res_dir) {
+            if is_executable_file(&candidate) {
+                return Ok(strip_verbatim_prefix(candidate));
+            }
+        }
+    }
+    if let Some(dir) = exe_dir {
+        for candidate in node_runtime_candidates(dir) {
+            if is_executable_file(&candidate) {
+                return Ok(strip_verbatim_prefix(candidate));
+            }
+        }
+    }
+
+    if debug {
+        if let Ok(path) = which_node() {
+            return Ok(path);
+        }
+        return Ok(PathBuf::from(if cfg!(windows) {
+            "node.exe"
+        } else {
+            "node"
+        }));
+    }
+
+    Err(
+        "Release build: bundled Node not found under resource_dir. Re-run package:sidecar:with-node / prepare:runtime."
+            .into(),
+    )
+}
+
+#[cfg(windows)]
+fn portable_git_candidates(resource_dir: Option<&Path>, exe_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(res_dir) = resource_dir {
+        candidates.push(res_dir.join("git").join("cmd").join("git.exe"));
+        candidates.push(
+            res_dir
+                .join("resources")
+                .join("git")
+                .join("cmd")
+                .join("git.exe"),
+        );
+    }
+    if let Some(dir) = exe_dir {
+        candidates.push(dir.join("git").join("cmd").join("git.exe"));
+        candidates.push(
+            dir.join("resources")
+                .join("git")
+                .join("cmd")
+                .join("git.exe"),
+        );
+    }
+    candidates
+}
+
+/// Windows release requires bundled Portable Git. The value is the git.exe
+/// absolute path (stripped of \\?\\) so Host-internal children can use it
+/// without putting Git on the user-facing Host PATH.
+pub(crate) fn resolve_portable_git_from_dirs(
+    resource_dir: Option<&Path>,
+    exe_dir: Option<&Path>,
+    debug: bool,
+) -> Result<Option<PathBuf>, String> {
+    #[cfg(not(windows))]
+    {
+        let _ = (resource_dir, exe_dir, debug);
+        return Ok(None);
+    }
+
+    #[cfg(windows)]
+    {
+        for candidate in portable_git_candidates(resource_dir, exe_dir) {
+            if candidate.exists() {
+                return Ok(Some(strip_verbatim_prefix(candidate)));
+            }
+        }
+
+        if debug {
+            Ok(None)
+        } else {
+            Err(
+                "Release build: bundled Portable Git not found under resource_dir. Re-run prepare:runtime."
+                    .into(),
+            )
+        }
+    }
 }
 
 pub(crate) fn is_executable_file(path: &Path) -> bool {

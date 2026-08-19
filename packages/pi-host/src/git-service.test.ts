@@ -3,16 +3,14 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  GitService,
-  parseGitStatusPorcelain,
-  parseUnifiedGitDiffHunks,
-} from "./git-service.js";
+import { GitService, parseGitStatusPorcelain, parseUnifiedGitDiffHunks } from "./git-service.js";
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 function git(cwd: string, ...args: string[]): string {
@@ -100,7 +98,11 @@ describe("parseGitStatusPorcelain", () => {
   });
 
   it("marks non-UTF-8 paths read-only without losing the status record", () => {
-    const output = Buffer.concat([Buffer.from("? bad-"), Buffer.from([0xff]), Buffer.from(".txt\0")]);
+    const output = Buffer.concat([
+      Buffer.from("? bad-"),
+      Buffer.from([0xff]),
+      Buffer.from(".txt\0"),
+    ]);
     const parsed = parseGitStatusPorcelain(output);
     expect(parsed.files).toHaveLength(1);
     expect(parsed.files[0]).toMatchObject({ unstaged: "untracked", pathSupported: false });
@@ -243,11 +245,7 @@ describe("GitService", () => {
     await writeFile(join(workspace, "tracked.txt"), "changed\n", "utf8");
     const initial = await service.getStatus(workspace);
     if (initial.state !== "ready") throw new Error("expected ready status");
-    const staged = await service.stage(
-      workspace,
-      "packages/app/tracked.txt",
-      initial.revision,
-    );
+    const staged = await service.stage(workspace, "packages/app/tracked.txt", initial.revision);
     if (!staged.snapshot || staged.snapshot.state !== "ready") throw new Error("expected status");
     const unstaged = await service.unstage(
       workspace,
@@ -276,17 +274,31 @@ describe("GitService", () => {
     if (initial.state !== "ready") throw new Error("expected ready status");
     const staged = await service.stageAll(workspace, initial.revision);
     if (!staged.snapshot || staged.snapshot.state !== "ready") throw new Error("expected status");
-    expect(staged.snapshot.files).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: "packages/app/tracked.txt", staged: "modified", unstaged: null }),
-      expect.objectContaining({ path: "packages/app/new.txt", staged: "added", unstaged: null }),
-    ]));
+    expect(staged.snapshot.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "packages/app/tracked.txt",
+          staged: "modified",
+          unstaged: null,
+        }),
+        expect.objectContaining({ path: "packages/app/new.txt", staged: "added", unstaged: null }),
+      ]),
+    );
 
     const unstaged = await service.unstageAll(workspace, staged.snapshot.revision);
     expect(unstaged.snapshot).toMatchObject({
       state: "ready",
       files: expect.arrayContaining([
-        expect.objectContaining({ path: "packages/app/tracked.txt", staged: null, unstaged: "modified" }),
-        expect.objectContaining({ path: "packages/app/new.txt", staged: null, unstaged: "untracked" }),
+        expect.objectContaining({
+          path: "packages/app/tracked.txt",
+          staged: null,
+          unstaged: "modified",
+        }),
+        expect.objectContaining({
+          path: "packages/app/new.txt",
+          staged: null,
+          unstaged: "untracked",
+        }),
       ]),
     });
     await expect(readFile(join(workspace, "tracked.txt"), "utf8")).resolves.toBe("changed\n");
@@ -380,12 +392,7 @@ describe("GitService", () => {
     expect(git(root, "show", `:${path}`)).toContain("changed near top");
     expect(git(root, "show", `:${path}`)).toContain("line 22");
 
-    const remaining = await service.getDiff(
-      workspace,
-      path,
-      "unstaged",
-      staged.snapshot.revision,
-    );
+    const remaining = await service.getDiff(workspace, path, "unstaged", staged.snapshot.revision);
     expect(remaining.hunks).toHaveLength(1);
     const discarded = await service.mutateHunk(
       workspace,
@@ -482,17 +489,22 @@ describe("GitService", () => {
     if (!created.snapshot || created.snapshot.state !== "ready") throw new Error("expected status");
     expect(created.snapshot.branch).toBe("feature/history");
     const branches = await service.listBranches(workspace);
-    expect(branches.branches).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: "feature/history", current: true }),
-      expect.objectContaining({ name: initial.branch, current: false }),
-    ]));
+    expect(branches.branches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "feature/history", current: true }),
+        expect.objectContaining({ name: initial.branch, current: false }),
+      ]),
+    );
 
     await writeFile(join(workspace, "history.txt"), "history change\n", "utf8");
     git(root, "add", ".");
     git(root, "commit", "-m", "history change");
     const history = await service.listHistory(workspace, 1);
     expect(history.commits).toHaveLength(1);
-    expect(history.commits[0]).toMatchObject({ subject: "history change", authorName: "PiDeck Test" });
+    expect(history.commits[0]).toMatchObject({
+      subject: "history change",
+      authorName: "PiDeck Test",
+    });
     expect(history.nextCursor).toBe(history.commits[0]?.sha);
     const older = await service.listHistory(workspace, 10, history.nextCursor!);
     expect(older.commits[0]?.subject).toBe("initial");
@@ -508,5 +520,61 @@ describe("GitService", () => {
     if (latest.state !== "ready") throw new Error("expected ready status");
     const switched = await service.switchBranch(workspace, initial.branch!, latest.revision);
     expect(switched.snapshot).toMatchObject({ state: "ready", branch: initial.branch });
+  });
+
+  it("uses the explicit executable and isolated env when user PATH has no Git", async () => {
+    const { root } = await createRepository();
+    const gitExecutable = execFileSync(process.platform === "win32" ? "where" : "which", ["git"], {
+      encoding: "utf8",
+    })
+      .trim()
+      .split(/\r?\n/)[0];
+    expect(gitExecutable).toBeTruthy();
+    const isolatedPath =
+      process.platform === "win32"
+        ? join(process.env.SystemRoot ?? "C:\\Windows", "System32")
+        : "/usr/bin";
+    const service = new GitService(gitExecutable, {
+      ...process.env,
+      PATH: isolatedPath,
+      HTTP_PROXY: "http://git-proxy.test:8080",
+    });
+    await expect(service.getStatus(root)).resolves.toMatchObject({ state: "ready" });
+  });
+
+  it("does not crash the Host when Git is cancelled with a PATH that omits System32", async () => {
+    const { root } = await createRepository();
+    const gitExecutable = execFileSync(process.platform === "win32" ? "where" : "which", ["git"], {
+      encoding: "utf8",
+    })
+      .trim()
+      .split(/\r?\n/)[0];
+    const isolatedPath = join(root, "no-system32");
+    const previousPath = process.env.PATH;
+    process.env.PATH = isolatedPath;
+    try {
+      const service = new GitService(gitExecutable, {
+        ...process.env,
+        PATH: isolatedPath,
+        Path: undefined,
+      });
+      const controller = new AbortController();
+      controller.abort();
+      await expect(service.getStatus(root, controller.signal)).resolves.toMatchObject({
+        state: "error",
+        message: "Git command was cancelled",
+      });
+    } finally {
+      process.env.PATH = previousPath;
+    }
+  });
+
+  it("does not fall back to user PATH Git when the executable is missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "pideck-explicit-git-"));
+    temporaryDirectories.push(root);
+    const status = await new GitService(join(root, "missing-git"), {
+      ...process.env,
+    }).getStatus(root);
+    expect(status.state).toBe("unavailable");
   });
 });

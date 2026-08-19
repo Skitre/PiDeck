@@ -20,10 +20,13 @@ function criticalReleaseResourcePaths(runtimeTarget) {
     "git/RUNTIME.json",
   ];
   if (runtimeTarget.platform === "win32") {
+    const portableGitFiles = runtimeTarget.git?.portable?.expectedFiles ?? [];
+    if (portableGitFiles.length === 0) {
+      throw new Error("release-runtime lock portable Git expectedFiles is empty");
+    }
     platformResources.push(
       "node/node_modules/npm/package.json",
-      "git/cmd/git.exe",
-      "git/bin/git.exe",
+      ...portableGitFiles.map((file) => `git/${file}`),
     );
   } else {
     platformResources.push("node/lib/node_modules/npm/package.json");

@@ -41,7 +41,16 @@ export class UserResourceCache {
   private reloadCount = 0;
   private readonly bindings = new WeakMap<DefaultResourceLoader, ExtensionHolder>();
 
-  constructor(private readonly agentDir: string) {}
+  constructor(
+    private readonly agentDir: string,
+    private readonly env?: NodeJS.ProcessEnv,
+  ) {}
+
+  private loaderOptions<T extends { cwd: string; agentDir: string }>(
+    options: T,
+  ): T & { env?: NodeJS.ProcessEnv } {
+    return this.env ? { ...options, env: this.env } : options;
+  }
 
   get fullReloadCount(): number {
     return this.reloadCount;
@@ -131,17 +140,19 @@ export class UserResourceCache {
     });
     // Keep loader cwd on agentDir so reload() does not change the SDK's
     // cwd-keyed factory cache. Workspace AGENTS.md is injected explicitly.
-    const loader = new DefaultResourceLoader({
-      cwd: this.agentDir,
-      agentDir: this.agentDir,
-      settingsManager: args.settingsManager,
-      noExtensions: true,
-      extensionsOverride: () => holder.current,
-      skillsOverride: () => this.requireSnapshot().skills,
-      promptsOverride: () => this.requireSnapshot().prompts,
-      themesOverride: () => this.requireSnapshot().themes,
-      agentsFilesOverride: () => ({ agentsFiles }),
-    });
+    const loader = new DefaultResourceLoader(
+      this.loaderOptions({
+        cwd: this.agentDir,
+        agentDir: this.agentDir,
+        settingsManager: args.settingsManager,
+        noExtensions: true,
+        extensionsOverride: () => holder.current,
+        skillsOverride: () => this.requireSnapshot().skills,
+        promptsOverride: () => this.requireSnapshot().prompts,
+        themesOverride: () => this.requireSnapshot().themes,
+        agentsFilesOverride: () => ({ agentsFiles }),
+      }),
+    );
     this.bindings.set(loader, holder);
     const startedAt = Date.now();
     await withoutImplicitPackageInstall(() => loader.reload());
@@ -163,16 +174,18 @@ export class UserResourceCache {
     const settingsManager = SettingsManager.create(this.agentDir, this.agentDir, {
       projectTrusted: false,
     });
-    const loader = new DefaultResourceLoader({
-      cwd: this.agentDir,
-      agentDir: this.agentDir,
-      settingsManager,
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-    });
+    const loader = new DefaultResourceLoader(
+      this.loaderOptions({
+        cwd: this.agentDir,
+        agentDir: this.agentDir,
+        settingsManager,
+        noExtensions: true,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+      }),
+    );
     await withoutImplicitPackageInstall(async () => {
       await loader.reload();
       await loader.reload();
@@ -187,15 +200,17 @@ export class UserResourceCache {
     const settingsManager = SettingsManager.create(this.agentDir, this.agentDir, {
       projectTrusted: false,
     });
-    const loader = new DefaultResourceLoader({
-      cwd: this.agentDir,
-      agentDir: this.agentDir,
-      settingsManager,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
-    });
+    const loader = new DefaultResourceLoader(
+      this.loaderOptions({
+        cwd: this.agentDir,
+        agentDir: this.agentDir,
+        settingsManager,
+        noSkills: true,
+        noPromptTemplates: true,
+        noThemes: true,
+        noContextFiles: true,
+      }),
+    );
     const startedAt = Date.now();
     await withoutImplicitPackageInstall(() => loader.reload());
     const extensions = loader.getExtensions();
@@ -227,12 +242,14 @@ export class UserResourceCache {
     // Warm skills/prompts/themes only. Running Extension factories here would
     // create a runtime that no AgentSession owns and that never receives
     // session_shutdown.
-    const loader = new DefaultResourceLoader({
-      cwd: this.agentDir,
-      agentDir: this.agentDir,
-      settingsManager,
-      noExtensions: true,
-    });
+    const loader = new DefaultResourceLoader(
+      this.loaderOptions({
+        cwd: this.agentDir,
+        agentDir: this.agentDir,
+        settingsManager,
+        noExtensions: true,
+      }),
+    );
     await withoutImplicitPackageInstall(() => loader.reload());
     this.reloadCount += 1;
     const extensions = loader.getExtensions();

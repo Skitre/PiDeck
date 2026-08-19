@@ -58,17 +58,17 @@
       "archive": "PortableGit-2.55.0.3-64-bit.7z.exe",
       "url": "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.3/PortableGit-2.55.0.3-64-bit.7z.exe",
       "sha256": "ab00566336b5472120f9a52d34f2e79c5406535792acb0548001ffd0bd090e5d",
-      "expectedFiles": ["cmd/git.exe", "bin/git.exe"]
+      "expectedFiles": ["cmd/git.exe", "bin/git.exe", "bin/bash.exe"]
     }
   },
   "pnpmLock": {
     "path": "pnpm-lock.yaml",
-    "sha256": "71409636393f8f971285655738e9f566cd60bcf1897db8648628f92029caa5af"
+    "sha256": "709c9c712ffe664030df2287e49c0966cc37de7eeb2a3f266f045b8b482b5b8f"
   },
   "hostProductionDeps": {
     "strategy": "pnpm-deploy-from-frozen-lockfile",
     "manifest": "packages/pi-host/package.json",
-    "sdkPatchSha256": "378081010c1b607169416fe3896c35c5354aa2fb647f167cdda6b30917fdede7",
+    "sdkPatchSha256": "86e521ac5e3319f92d7f44e57f3a6c1f834ea915872ce1c2b7995991a32d69d6",
     "forbidUnlockedNpmInstall": true,
     "forbidGlobalNpmFallback": true,
     "forbidProcessExecPathAsRuntime": true

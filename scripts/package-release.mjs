@@ -193,6 +193,7 @@ function validatePackagedRuntime(releaseDir, expectedResourceManifest) {
     [join(resourceDir, "node", "node.exe"), "node/node.exe"],
     [join(resourceDir, "node", "npm.cmd"), "node/npm.cmd"],
     [join(resourceDir, "git", "cmd", "git.exe"), "git/cmd/git.exe"],
+    [join(resourceDir, "git", "bin", "bash.exe"), "git/bin/bash.exe"],
   ]) {
     if (!existsSync(path)) errors.push(`packaged runtime missing ${label}`);
   }

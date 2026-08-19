@@ -41,6 +41,7 @@ import {
   setActiveSessionName,
   setSessionRuntimeName,
 } from "./session-lifecycle.js";
+import { getInternalRuntime } from "./internal-runtime.js";
 import { UserResourceCache } from "./user-resource-cache.js";
 
 export class WorkspaceGraphFactory {
@@ -55,7 +56,8 @@ export class WorkspaceGraphFactory {
   private readonly workspaceLifecycle: WorkspaceLifecycle;
 
   constructor(deps: GraphFactoryDeps) {
-    this.userResourceCache = deps.userResourceCache ?? new UserResourceCache(deps.agentDir);
+    this.userResourceCache =
+      deps.userResourceCache ?? new UserResourceCache(deps.agentDir, getInternalRuntime().env);
     this.deps = { ...deps, userResourceCache: this.userResourceCache };
     this.sessionRuntimeCache = new SessionRuntimeCache({
       getGraph: () => this.graph,
