@@ -38,7 +38,11 @@ import { ExtensionProviderOwnership } from "./extension-provider-ownership.js";
 import { refreshModelsLocal } from "./model-runtime-refresh.js";
 import { ensureMigrationBackup, MIGRATION_ID } from "./migration-backup.js";
 import { migrateLegacyPideckData } from "./pideck-data.js";
-import { applyHostNetworkSettings, ensureGlobalSettingsFile } from "./network-bootstrap.js";
+import {
+  applyHostNetworkSettings,
+  ensureGlobalSettingsFile,
+  ensureModelsJsonFile,
+} from "./network-bootstrap.js";
 import { AttachmentStore } from "./attachment-store.js";
 import { createAttachmentHandlers } from "./attachment-controller.js";
 import { createGitHandlers } from "./git-controller.js";
@@ -153,9 +157,10 @@ async function main(): Promise<void> {
   mkdirSync(agentDir, { recursive: true });
 
   // Synchronous, before any network activity: proxy/idle-timeout from global
-  // settings (never applied by the SDK on the library path) and a guaranteed
-  // settings file for the desktop "Open settings.json" affordance.
+  // settings (never applied by the SDK on the library path) and guaranteed
+  // files for the desktop "Open settings.json" / "Open models.json" reveals.
   ensureGlobalSettingsFile(agentDir);
+  ensureModelsJsonFile(agentDir);
   applyHostNetworkSettings(agentDir);
 
   logger.info("Starting Pi Host", {

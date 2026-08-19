@@ -261,8 +261,9 @@ function GeneralSettings() {
               </div>
               <p className="text-right text-[11px] leading-4 text-muted">
                 {t(
-                  decisionPresentationOptions.find((option) => option.value === decisionPresentation)
-                    ?.description ?? "generalExtensionDecisionDesc",
+                  decisionPresentationOptions.find(
+                    (option) => option.value === decisionPresentation,
+                  )?.description ?? "generalExtensionDecisionDesc",
                 )}
               </p>
               <span className="sr-only" role="status" aria-live="polite">

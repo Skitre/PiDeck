@@ -903,7 +903,11 @@ export function ProvidersSettings() {
                       disabled={saving || fetching || testing}
                       onClick={() => void persistDraft()}
                     >
-                      {saving ? <RefreshCw className="animate-spin" size={14} /> : <Save size={14} />}
+                      {saving ? (
+                        <RefreshCw className="animate-spin" size={14} />
+                      ) : (
+                        <Save size={14} />
+                      )}
                       {t("commonSave")}
                     </button>
                   </div>

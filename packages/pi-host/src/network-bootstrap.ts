@@ -24,22 +24,39 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function ensureJsonFile(path: string, contents: string, label: string): void {
+  if (existsSync(path)) return;
+  try {
+    writeFileSync(path, contents, "utf-8");
+  } catch (error) {
+    logger.warn(`Could not create ${label}`, {
+      path,
+      error: errorMessage(error),
+    });
+  }
+}
+
 /**
  * Create an empty global settings file when none exists so the desktop
  * "Open settings.json" reveal (which rejects non-existent paths) works on
  * fresh installs. Never throws: a read-only agent dir must not kill the Host.
  */
 export function ensureGlobalSettingsFile(agentDir: string): void {
-  const settingsPath = join(agentDir, "settings.json");
-  if (existsSync(settingsPath)) return;
-  try {
-    writeFileSync(settingsPath, "{}\n", "utf-8");
-  } catch (error) {
-    logger.warn("Could not create global settings file", {
-      path: settingsPath,
-      error: errorMessage(error),
-    });
-  }
+  ensureJsonFile(join(agentDir, "settings.json"), "{}\n", "global settings file");
+}
+
+/**
+ * Create a schema-valid empty models.json when none exists so the desktop
+ * "Open models.json" reveal works on fresh installs. `{}` is invalid for the
+ * SDK schema (providers is required); a missing file is treated as empty, so
+ * the stub must keep that meaning. Never throws.
+ */
+export function ensureModelsJsonFile(agentDir: string): void {
+  ensureJsonFile(
+    join(agentDir, "models.json"),
+    `${JSON.stringify({ providers: {} })}\n`,
+    "models.json",
+  );
 }
 
 /** Origin only — a proxy URL may embed credentials that must never be logged. */
@@ -87,10 +104,7 @@ function withUndiciErrorListener<T>(dispatcher: T): T {
   return dispatcher;
 }
 
-function createUndiciClient(
-  origin: string | URL,
-  options?: undici.Client.Options,
-): undici.Client {
+function createUndiciClient(origin: string | URL, options?: undici.Client.Options): undici.Client {
   return withUndiciErrorListener(new undici.Client(origin, options));
 }
 

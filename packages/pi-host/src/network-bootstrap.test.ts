@@ -63,6 +63,18 @@ describe("network-bootstrap", () => {
     expect(readFileSync(settingsPath, "utf-8")).toBe('{"defaultModel":"keep-me"}');
   });
 
+  it("creates a schema-valid models.json when missing and never overwrites an existing one", async () => {
+    const { ensureModelsJsonFile } = await load();
+    const modelsPath = join(dir, "models.json");
+
+    ensureModelsJsonFile(dir);
+    expect(readFileSync(modelsPath, "utf-8")).toBe('{"providers":{}}\n');
+
+    writeFileSync(modelsPath, '{"providers":{"keep":{}}}', "utf-8");
+    ensureModelsJsonFile(dir);
+    expect(readFileSync(modelsPath, "utf-8")).toBe('{"providers":{"keep":{}}}');
+  });
+
   it("applies httpProxy from settings to the environment when unset", async () => {
     writeSettings('{"httpProxy":"http://127.0.0.1:7890"}');
     const { applyHostNetworkSettings, logger } = await load();

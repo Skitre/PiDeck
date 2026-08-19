@@ -3,11 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  HostStatusSnapshot,
-  ProviderModelConfig,
-  ProviderSnapshot,
-} from "@pideck/protocol";
+import type { HostStatusSnapshot, ProviderModelConfig, ProviderSnapshot } from "@pideck/protocol";
 import { hostClient } from "../../lib/bridge/host-client";
 import { useAppStore } from "../../lib/stores/app-store";
 import { ProvidersSettings } from "./ProvidersSettings";
@@ -263,9 +259,7 @@ describe("ProvidersSettings dirty tracking", () => {
     expect(useAppStore.getState().providersDirty).toBe(true);
 
     await user.click(screen.getByRole("button", { name: /Provider B/ }));
-    expect(
-      screen.getByRole("heading", { name: "Discard unsaved changes?" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Discard unsaved changes?" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByLabelText(/Display name/)).toHaveValue("Provider AX");
@@ -296,22 +290,16 @@ describe("ProvidersSettings key-removal safety", () => {
     const spy = await renderLoaded();
 
     await user.click(screen.getByRole("button", { name: "Remove stored key" }));
-    expect(
-      screen.getByText("Stored key will be removed when you save"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Stored key will be removed when you save")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save & test" }));
-    await waitFor(() =>
-      expect(callsFor(spy, "provider.checkConnection")).toHaveLength(1),
-    );
+    await waitFor(() => expect(callsFor(spy, "provider.checkConnection")).toHaveLength(1));
 
     const saveCalls = callsFor(spy, "provider.save");
     expect(saveCalls).toHaveLength(1);
     expect(saveCalls[0][2]).not.toHaveProperty("clearApiKey");
     // The removal stays armed for the explicit Save.
-    expect(
-      screen.getByText("Stored key will be removed when you save"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Stored key will be removed when you save")).toBeInTheDocument();
   });
 
   it("explicit Save commits the stored-key removal", async () => {
@@ -347,9 +335,7 @@ describe("ProvidersSettings model catalog refresh coordination", () => {
     );
     const revisionBefore = useAppStore.getState().providerConfigRevision;
 
-    await user.click(
-      screen.getByTitle("Save the Provider and fetch its model list"),
-    );
+    await user.click(screen.getByTitle("Save the Provider and fetch its model list"));
     await waitFor(() => expect(callsFor(spy, "provider.fetchModels")).toHaveLength(1));
 
     expect(useAppStore.getState().providerConfigRevision).toBe(revisionBefore);
@@ -370,15 +356,11 @@ describe("ProvidersSettings model catalog refresh coordination", () => {
     const pendingTest = new Promise((resolve) => {
       resolveTest = resolve;
     });
-    const spy = await renderLoaded(
-      mockRequests({ "provider.checkConnection": () => pendingTest }),
-    );
+    const spy = await renderLoaded(mockRequests({ "provider.checkConnection": () => pendingTest }));
     const revisionBefore = useAppStore.getState().providerConfigRevision;
 
     await user.click(screen.getByRole("button", { name: "Save & test" }));
-    await waitFor(() =>
-      expect(callsFor(spy, "provider.checkConnection")).toHaveLength(1),
-    );
+    await waitFor(() => expect(callsFor(spy, "provider.checkConnection")).toHaveLength(1));
 
     expect(useAppStore.getState().providerConfigRevision).toBe(revisionBefore);
     resolveTest(
@@ -469,13 +451,9 @@ describe("ProvidersSettings in-flight guards", () => {
     const pendingFetch = new Promise((resolve) => {
       resolveFetch = resolve;
     });
-    await renderLoaded(
-      mockRequests({ "provider.fetchModels": () => pendingFetch }),
-    );
+    await renderLoaded(mockRequests({ "provider.fetchModels": () => pendingFetch }));
 
-    await user.click(
-      screen.getByTitle("Save the Provider and fetch its model list"),
-    );
+    await user.click(screen.getByTitle("Save the Provider and fetch its model list"));
     // The implicit save re-baselines, so switching is unguarded and immediate.
     await user.click(screen.getByRole("button", { name: /Provider B/ }));
     await screen.findByDisplayValue("Provider B");
@@ -494,8 +472,7 @@ describe("ProvidersSettings in-flight guards", () => {
       }),
     );
     await waitFor(() =>
-      expect(screen.queryByTitle("Save the Provider and fetch its model list"))
-        .toBeEnabled(),
+      expect(screen.queryByTitle("Save the Provider and fetch its model list")).toBeEnabled(),
     );
 
     expect(screen.queryByText("From A")).not.toBeInTheDocument();
@@ -509,8 +486,7 @@ describe("ProvidersSettings in-flight guards", () => {
     const provider = { ...providerA(), models: [model(), second] };
     await renderLoaded(
       mockRequests({
-        "provider.list": () =>
-          envelope("provider.list", { providers: [provider, providerB()] }),
+        "provider.list": () => envelope("provider.list", { providers: [provider, providerB()] }),
         "provider.save": () => envelope("provider.save", { provider }),
         "provider.fetchModels": () =>
           envelope("provider.fetchModels", {
@@ -523,14 +499,10 @@ describe("ProvidersSettings in-flight guards", () => {
       }),
     );
 
-    await user.click(
-      screen.getByTitle("Save the Provider and fetch its model list"),
-    );
+    await user.click(screen.getByTitle("Save the Provider and fetch its model list"));
     await waitFor(() =>
       expect(
-        useAppStore
-          .getState()
-          .notifications.some((item) => item.message === "Found 2 models"),
+        useAppStore.getState().notifications.some((item) => item.message === "Found 2 models"),
       ).toBe(true),
     );
 
@@ -548,9 +520,7 @@ describe("ProvidersSettings in-flight guards", () => {
       .getState()
       .setHost({ ...host(), hostInstanceId: "99999999-9999-4999-8999-999999999999" });
 
-    await waitFor(() =>
-      expect(screen.getByLabelText(/Display name/)).toHaveValue("Provider AX"),
-    );
+    await waitFor(() => expect(screen.getByLabelText(/Display name/)).toHaveValue("Provider AX"));
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
 });
@@ -602,8 +572,7 @@ describe("ProvidersSettings delete confirmation", () => {
   it("confirms with the saved Provider name, not the edited draft name", async () => {
     const user = userEvent.setup();
     const spy = mockRequests({
-      "provider.remove": () =>
-        envelope("provider.remove", { providerId: "prov-a" }),
+      "provider.remove": () => envelope("provider.remove", { providerId: "prov-a" }),
     });
     await renderLoaded(spy);
 
