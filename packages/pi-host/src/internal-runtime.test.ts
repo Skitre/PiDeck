@@ -17,7 +17,31 @@ function pathEntries(pathValue: string | undefined): string[] {
 }
 
 describe("createInternalRuntime", () => {
+  it("keeps user env distinct and does not put the user PATH on the internal PATH", () => {
+    const originalPath = process.env.PATH;
+    const originalProxy = process.env.HTTP_PROXY;
+    const userMarker = join("/opt", "pideck-user-marker");
+    const nodeExecutable = join("/bundled", "node", "bin", "node");
+    const runtime = createInternalRuntime({
+      nodeExecutable,
+      gitExecutable: null,
+      sourceEnv: {
+        PATH: userMarker,
+        HTTP_PROXY: "http://proxy.example:8080",
+      },
+    });
+    expect(runtime.env).not.toBe(process.env);
+    expect(runtime.nodeExecutable).toBe(nodeExecutable);
+    expect(runtime.gitExecutable).toBeUndefined();
+    expect(pathEntries(runtime.env.PATH)[0]).toBe(dirname(nodeExecutable));
+    expect(runtime.env.PATH).not.toContain("pideck-user-marker");
+    expect(runtime.env.HTTP_PROXY).toBe("http://proxy.example:8080");
+    expect(process.env.PATH).toBe(originalPath);
+    expect(process.env.HTTP_PROXY).toBe(originalProxy);
+  });
+
   it("keeps user env and internal env as distinct objects and does not mutate process.env", () => {
+    if (process.platform !== "win32") return;
     const originalPath = process.env.PATH;
     const originalProxy = process.env.HTTP_PROXY;
     const source = {
@@ -77,6 +101,7 @@ describe("createInternalRuntime", () => {
   });
 
   it("does not append the user PATH and filters private bundled-git metadata", () => {
+    if (process.platform !== "win32") return;
     const userMarker = join("C:", "user-tools", "pideck-user-marker");
     const runtime = createInternalRuntime({
       nodeExecutable: join("D:", "runtime", "node.exe"),

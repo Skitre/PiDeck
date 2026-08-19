@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import { terminateWindowsProcessTree, windowsTaskkillExecutable } from "./windows-process.js";
 
@@ -10,7 +10,7 @@ describe("windows process helpers", () => {
         SystemRoot: "D:\\Windows",
         PATH: join("C:", "no-system32"),
       }),
-    ).toBe(join("D:", "Windows", "System32", "taskkill.exe"));
+    ).toBe(win32.join("D:\\Windows", "System32", "taskkill.exe"));
   });
 
   it("does not throw when the child has no pid", () => {

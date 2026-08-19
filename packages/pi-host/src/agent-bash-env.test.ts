@@ -76,6 +76,7 @@ describe("Agent Bash environment", () => {
   });
 
   it("uses bundled bash.exe as an absolute fallback when no system Git Bash exists", async () => {
+    if (process.platform !== "win32") return;
     agentDir = mkdtempSync(join(tmpdir(), "pideck-bash-fallback-"));
     mkdirSync(join(agentDir, "bin"), { recursive: true });
     const bundledBash = join(agentDir, "git", "bin", "bash.exe");

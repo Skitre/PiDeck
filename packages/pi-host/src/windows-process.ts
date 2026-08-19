@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { join } from "node:path";
+import { win32 } from "node:path";
 
 export function windowsTaskkillExecutable(source: NodeJS.ProcessEnv = process.env): string {
   const root = source.SystemRoot ?? source.SYSTEMROOT ?? "C:\\Windows";
-  return join(root, "System32", "taskkill.exe");
+  return win32.join(root, "System32", "taskkill.exe");
 }
 
 export function terminateWindowsProcessTree(
