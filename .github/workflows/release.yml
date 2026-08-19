@@ -116,7 +116,19 @@ jobs:
           commit="$(git rev-parse HEAD)"
           echo "commit=${commit}" >> "$GITHUB_OUTPUT"
           echo "Verified source commit ${commit} for tag ${RELEASE_TAG}"
-      - run: pnpm verify:p0
+      - name: Verify Windows source gate
+        if: runner.os == 'Windows'
+        run: pnpm verify:p0
+      - name: Verify macOS JavaScript source
+        if: runner.os == 'macOS'
+        run: pnpm verify:quick && pnpm build
+      - name: Restore files generated during verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --porcelain || true
+          git restore --worktree --source=HEAD -- .
+          git status --porcelain || true
       - name: Package from the verified source commit
         env:
           PIDECK_VERIFIED_SOURCE_COMMIT: ${{ steps.source.outputs.commit }}

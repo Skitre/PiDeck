@@ -20,7 +20,7 @@
     "prepare:runtime": "node scripts/prepare-release-runtime.mjs",
     "validate:resources": "node scripts/validate-resource-layout.mjs",
     "smoke:staged-host": "node scripts/smoke-staged-host.mjs",
-    "verify:release-metadata": "node --test scripts/release-sdk-evidence.test.mjs scripts/generate-update-manifest.test.mjs scripts/portable-node-modules.test.mjs scripts/pi-host-bootstrap-runtime.test.mjs",
+    "verify:release-metadata": "node --test scripts/release-sdk-evidence.test.mjs scripts/generate-update-manifest.test.mjs scripts/portable-node-modules.test.mjs scripts/pi-host-bootstrap-runtime.test.mjs scripts/verified-source-build.test.mjs",
     "verify:docs": "node scripts/verify-doc-links.mjs",
     "verify:fixtures": "node scripts/scan-pi-agent-fixtures.mjs",
     "test:rust": "node scripts/prepare-rust-test-resources.mjs && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target-dir apps/desktop/src-tauri/target/verify-rust",
