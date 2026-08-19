@@ -108,7 +108,7 @@ export function bundledBashFromGit(gitExecutable: string): string | undefined {
   return join(dirname(containingDir), "bin", "bash.exe");
 }
 
-export function resolveBundledBashExecutable(
+function resolveBundledBashExecutable(
   source: NodeJS.ProcessEnv = process.env,
   gitExecutable?: string,
 ): string | undefined {
