@@ -8,8 +8,8 @@ import {
   commitActiveSessionState,
   SESSION_DISPOSAL_STEP_TIMEOUT_MS,
   SessionRuntimeCache,
-  TEST_IDLE_SHUTDOWN_HOLD_ENV,
   type ActiveSessionState,
+  type SessionRuntimeCacheContext,
 } from "./session-runtime-cache.js";
 import type { WorkspaceGraph } from "./workspace-graph-types.js";
 
@@ -47,12 +47,21 @@ function graphFrom(state: ActiveSessionState): WorkspaceGraph {
   } as WorkspaceGraph;
 }
 
-function disposalCache(): SessionRuntimeCache {
+function disposalCache(extra: Partial<SessionRuntimeCacheContext> = {}): SessionRuntimeCache {
   return new SessionRuntimeCache({
     getGraph: () => null,
     getServer: () => null,
     sessionPathsEqual: () => false,
+    ...extra,
   });
+}
+
+function deferredGate(): { promise: Promise<void>; release: () => void } {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
 }
 
 function disposalSession(
@@ -78,28 +87,38 @@ function disposalSession(
 
 afterEach(() => {
   vi.useRealTimers();
-  delete process.env[TEST_IDLE_SHUTDOWN_HOLD_ENV];
+  delete process.env.PIDECK_TEST_HOLD_IDLE_SHUTDOWN;
 });
 
 describe("session disposal bounds", () => {
-  it("holds idle dispose until the test gate file is removed", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "pideck-idle-hold-"));
-    const holdPath = join(directory, "hold");
-    writeFileSync(holdPath, "hold\n");
-    process.env[TEST_IDLE_SHUTDOWN_HOLD_ENV] = holdPath;
-    const cache = disposalCache();
+  it("holds idle dispose until the injected gate resolves", async () => {
+    const gate = deferredGate();
+    const cache = disposalCache({
+      beforeDisposeAgentSession: () => gate.promise,
+    });
     const { session, emit, dispose } = disposalSession();
     let settled = false;
     const pending = cache.disposeAgentSessionOnly(session).then(() => {
       settled = true;
     });
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await Promise.resolve();
+    await Promise.resolve();
     expect(settled).toBe(false);
     expect(emit).not.toHaveBeenCalled();
     expect(dispose).not.toHaveBeenCalled();
-    rmSync(holdPath, { force: true });
+    gate.release();
     await pending;
     expect(settled).toBe(true);
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+  it("ignores PIDECK_TEST_HOLD_IDLE_SHUTDOWN without an injected gate", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pideck-idle-hold-env-"));
+    const holdPath = join(directory, "hold");
+    writeFileSync(holdPath, "hold\n");
+    process.env.PIDECK_TEST_HOLD_IDLE_SHUTDOWN = holdPath;
+    const cache = disposalCache();
+    const { session, dispose } = disposalSession();
+    await cache.disposeAgentSessionOnly(session);
     expect(dispose).toHaveBeenCalledOnce();
     rmSync(directory, { recursive: true, force: true });
   });
@@ -114,7 +133,6 @@ describe("session disposal bounds", () => {
     void cache.disposeAgentSessionOnly(session).then(() => {
       settled = true;
     });
-    await Promise.resolve();
     await Promise.resolve();
     expect(emit).toHaveBeenCalledOnce();
 

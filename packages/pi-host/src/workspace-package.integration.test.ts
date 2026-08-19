@@ -20,7 +20,8 @@ import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const hostEntry = join(__dirname, "main.ts");
+/** Test-only entry: production `main.ts` does not install the idle-shutdown hold. */
+const hostEntry = join(__dirname, "idle-shutdown-hold.test.harness.ts");
 const fixturePkg = join(__dirname, "../../../test-fixtures/pi-packages/full-package");
 const peerConflictPkg = join(__dirname, "../../../test-fixtures/pi-packages/peer-conflict-package");
 

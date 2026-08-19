@@ -23,6 +23,7 @@
     },
     "packages/pi-host": {
       "ignoreBinaries": ["where"],
+      "ignore": ["src/idle-shutdown-hold.test.harness.ts"],
       "entry": ["src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
     }
