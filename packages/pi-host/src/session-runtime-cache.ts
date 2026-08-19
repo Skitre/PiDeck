@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
@@ -25,6 +26,22 @@ import type { BackgroundSessionRuntime, WorkspaceGraph } from "./workspace-graph
 
 export const SESSION_DISPOSAL_STEP_TIMEOUT_MS = 15_000;
 export const MAX_LIVE_SESSIONS = 5;
+export const TEST_IDLE_SHUTDOWN_HOLD_ENV = "PIDECK_TEST_HOLD_IDLE_SHUTDOWN";
+const TEST_IDLE_SHUTDOWN_HOLD_TIMEOUT_MS = 30_000;
+const TEST_IDLE_SHUTDOWN_HOLD_POLL_MS = 25;
+
+async function waitForTestIdleShutdownHold(): Promise<void> {
+  const holdPath = process.env[TEST_IDLE_SHUTDOWN_HOLD_ENV]?.trim();
+  if (!holdPath || !existsSync(holdPath)) return;
+  const deadline = Date.now() + TEST_IDLE_SHUTDOWN_HOLD_TIMEOUT_MS;
+  while (existsSync(holdPath)) {
+    if (Date.now() >= deadline) {
+      logger.warn("test idle-shutdown hold timed out", { holdPath });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, TEST_IDLE_SHUTDOWN_HOLD_POLL_MS));
+  }
+}
 
 type DisposalStepResult =
   { status: "completed" } | { status: "failed"; error: unknown } | { status: "timed_out" };
@@ -385,6 +402,7 @@ export class SessionRuntimeCache {
   }
 
   async disposeAgentSessionOnly(session: AgentSession): Promise<void> {
+    await waitForTestIdleShutdownHold();
     if (this.disposedSessions.has(session)) return;
     this.disposedSessions.add(session);
     try {

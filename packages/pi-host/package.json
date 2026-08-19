@@ -1,6 +1,6 @@
 {
   "name": "@pideck/pi-host",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "main": "./dist/main.js",
@@ -34,7 +34,7 @@
     "pdfjs-dist": "6.2.108",
     "proper-lockfile": "4.1.2",
     "turndown": "7.2.4",
-    "undici": "8.5.0",
+    "undici": "8.9.0",
     "yauzl": "3.4.0"
   },
   "devDependencies": {

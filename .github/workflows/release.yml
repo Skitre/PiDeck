@@ -33,7 +33,7 @@ jobs:
             label: macOS Intel
             runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 75
+    timeout-minutes: 90
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -108,8 +108,39 @@ jobs:
           echo "APPLE_PASSWORD=$APPLE_PASSWORD" >> "$GITHUB_ENV"
           echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm verify:quick
-      - run: pnpm package:release
+      - name: Record verified source commit
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+          echo "Verified source commit ${commit} for tag ${RELEASE_TAG}"
+      - run: pnpm verify:p0
+      - name: Package from the verified source commit
+        env:
+          PIDECK_VERIFIED_SOURCE_COMMIT: ${{ steps.source.outputs.commit }}
+        run: pnpm package:release
+      - name: Confirm package manifest source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse HEAD)"
+          manifest="apps/desktop/src-tauri/target/release-staging/PACKAGE_RELEASE.json"
+          COMMIT="$commit" MANIFEST="$manifest" node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const commit = process.env.COMMIT;
+            const manifest = JSON.parse(readFileSync(process.env.MANIFEST, "utf8"));
+            if (manifest.sourceCommit !== commit) {
+              console.error(`sourceCommit ${manifest.sourceCommit} !== ${commit}`);
+              process.exit(1);
+            }
+            if (manifest.reusedSourceBuildCommit !== commit) {
+              console.error(`reusedSourceBuildCommit ${manifest.reusedSourceBuildCommit} !== ${commit}`);
+              process.exit(1);
+            }
+            console.log(`PACKAGE_RELEASE.json records source commit ${commit}`);
+          '
       - name: Stage accepted platform assets
         shell: bash
         run: node scripts/generate-update-manifest.mjs --stage-platform --tag "$RELEASE_TAG"

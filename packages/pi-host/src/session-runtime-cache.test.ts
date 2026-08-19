@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -5,6 +8,7 @@ import {
   commitActiveSessionState,
   SESSION_DISPOSAL_STEP_TIMEOUT_MS,
   SessionRuntimeCache,
+  TEST_IDLE_SHUTDOWN_HOLD_ENV,
   type ActiveSessionState,
 } from "./session-runtime-cache.js";
 import type { WorkspaceGraph } from "./workspace-graph-types.js";
@@ -74,9 +78,31 @@ function disposalSession(
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env[TEST_IDLE_SHUTDOWN_HOLD_ENV];
 });
 
 describe("session disposal bounds", () => {
+  it("holds idle dispose until the test gate file is removed", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pideck-idle-hold-"));
+    const holdPath = join(directory, "hold");
+    writeFileSync(holdPath, "hold\n");
+    process.env[TEST_IDLE_SHUTDOWN_HOLD_ENV] = holdPath;
+    const cache = disposalCache();
+    const { session, emit, dispose } = disposalSession();
+    let settled = false;
+    const pending = cache.disposeAgentSessionOnly(session).then(() => {
+      settled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(settled).toBe(false);
+    expect(emit).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
+    rmSync(holdPath, { force: true });
+    await pending;
+    expect(settled).toBe(true);
+    expect(dispose).toHaveBeenCalledOnce();
+    rmSync(directory, { recursive: true, force: true });
+  });
   it("continues through abort and dispose when session_shutdown never settles", async () => {
     vi.useFakeTimers();
     const cache = disposalCache();
@@ -88,6 +114,7 @@ describe("session disposal bounds", () => {
     void cache.disposeAgentSessionOnly(session).then(() => {
       settled = true;
     });
+    await Promise.resolve();
     await Promise.resolve();
     expect(emit).toHaveBeenCalledOnce();
 

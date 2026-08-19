@@ -121,7 +121,10 @@ test("maps every supported runtime target to the matching updater platform", () 
   assert.equal(updaterPlatformKey("darwin", "arm64"), "darwin-aarch64");
   assert.equal(resolveReleaseRuntimeTarget(lock, "darwin", "x64").stagedNpmExecutable, "npm");
   assert.equal(updaterPlatformKey("darwin", "x64"), "darwin-x86_64");
-  assert.throws(() => releaseRuntimeTargetKey("linux", "x64"), /unsupported release runtime target/);
+  assert.throws(
+    () => releaseRuntimeTargetKey("linux", "x64"),
+    /unsupported release runtime target/,
+  );
 });
 
 test("probes Windows npm through staged Node instead of spawning npm.cmd", () => {
@@ -147,6 +150,18 @@ test("refuses mismatched tags, duplicate platforms, and empty signatures", () =>
     () => buildUpdateManifest({ ...base, tag: "v0.2.0", artifacts: [artifact] }),
     /does not match the packaged app version/,
   );
+  assert.throws(
+    () => buildUpdateManifest({ ...base, tag: "v0.2.0", version: "0.2.1", artifacts: [artifact] }),
+    /does not match the packaged app version/,
+  );
+  const accepted = buildUpdateManifest({
+    ...base,
+    tag: "v0.2.1",
+    version: "0.2.1",
+    artifacts: [artifact],
+  });
+  assert.equal(accepted.version, "0.2.1");
+  assert.match(accepted.platforms["windows-x86_64"].url, /releases\/download\/v0\.2\.1\//);
   assert.throws(
     () => buildUpdateManifest({ ...base, artifacts: [artifact, artifact] }),
     /duplicate updater platform/,
@@ -231,7 +246,10 @@ test("aggregates isolated platform artifacts without overwriting assets", () => 
       "0.1.1",
     );
     for (const fixture of fixtures) {
-      assert.equal(readFileSync(join(output, fixture.primaryName), "utf8"), `primary:${fixture.updaterPlatform}`);
+      assert.equal(
+        readFileSync(join(output, fixture.primaryName), "utf8"),
+        `primary:${fixture.updaterPlatform}`,
+      );
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

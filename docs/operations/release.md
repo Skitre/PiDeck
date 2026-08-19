@@ -89,13 +89,15 @@ and one GitHub Draft Release. The Apple credential set is all-or-nothing:
 
 ## Tracked Draft-Release Workflow
 
-`.github/workflows/release.yml` runs `pnpm verify:quick` and
-`pnpm package:release` independently on each platform, stages the updater
-artifacts, and creates or updates a GitHub **Draft Release**. This automation
-produces development candidates; it does not publish a supported release and
-does not replace the installed-app smoke, signature verification, or human
-acceptance requirements below. The exact source revision must also have passed
-the broader `pnpm verify:p0` source gate.
+`.github/workflows/release.yml` checks out the release tag, runs
+`pnpm verify:p0` on that exact revision, then runs `pnpm package:release`
+with `PIDECK_VERIFIED_SOURCE_COMMIT` set to the same `git rev-parse HEAD`.
+`package:release` fails closed if the checkout is dirty, the commit does not
+match, or the verify:p0 JavaScript build outputs are missing. The resulting
+`PACKAGE_RELEASE.json` records `sourceCommit` and `reusedSourceBuildCommit`.
+This automation produces development candidates; it does not publish a
+supported release and does not replace the installed-app smoke, signature
+verification, or human acceptance requirements below.
 
 ## Public Release Requirements
 

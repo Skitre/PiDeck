@@ -1,7 +1,7 @@
 {
   "name": "pideck",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A desktop interface for Pi Coding Agent",
   "packageManager": "pnpm@9.15.0",
   "engines": {
@@ -47,6 +47,12 @@
     "yaml": "2.9.0"
   },
   "pnpm": {
+    "overrides": {
+      "brace-expansion": "5.0.9",
+      "undici@8": "8.9.0",
+      "mermaid": "11.16.1",
+      "dompurify": "3.4.13"
+    },
     "patchedDependencies": {
       "@earendil-works/pi-coding-agent@0.82.1": "patches/@earendil-works__pi-coding-agent@0.82.1.patch"
     }

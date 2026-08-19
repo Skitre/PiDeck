@@ -36,6 +36,7 @@ class HostProcess {
         ...process.env,
         PI_CODING_AGENT_DIR: agentDir,
         PIDECK_TEST_FAUX: "1",
+        PIDECK_TEST_HOLD_IDLE_SHUTDOWN: join(agentDir, ".pideck-hold-idle-shutdown"),
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -1158,6 +1159,7 @@ describe("package + workspace integration", () => {
 
   it("publishes the target snapshot before previous idle shutdown settles", async () => {
     const project = emptyProject(root, "session-open-slow-shutdown");
+    const holdPath = join(agentDir, ".pideck-hold-idle-shutdown");
     const status = await host.request("system.getStatus", { expectedHostInstanceId: hostId }, null);
     const selected = await host.request(
       "workspace.setCurrent",
@@ -1189,33 +1191,39 @@ describe("package + workspace integration", () => {
       }) + "\n",
     );
 
-    const snapshotPromise = host.waitForEvent(
-      "session.snapshot",
-      5_000,
-      (message) => message.sessionId === targetSessionId,
-    );
-    const openPromise = host.request(
-      "session.open",
-      {
-        expectedHostInstanceId: hostId,
-        expectedWorkspaceId: workspace.id,
-        expectedWorkspaceRevision: workspace.revision,
-        expectedSessionId: selected.sessionId,
-        expectedSessionRevision: selected.sessionRevision,
-      },
-      { sessionPath: targetSessionPath },
-      60_000,
-    );
-    const earlySnapshot = await Promise.race([
-      snapshotPromise.then((event) => ({ event })),
-      new Promise<null>((resolveEarly) => setTimeout(() => resolveEarly(null), 500)),
-    ]);
-    const opened = await openPromise;
-    const snapshot = earlySnapshot?.event ?? (await snapshotPromise);
-
-    expect(opened.ok).toBe(true);
-    expect(snapshot.sessionId).toBe(targetSessionId);
-    expect(earlySnapshot).not.toBeNull();
+    writeFileSync(holdPath, "hold\n");
+    let openSettled = false;
+    try {
+      const snapshotPromise = host.waitForEvent(
+        "session.snapshot",
+        5_000,
+        (message) => message.sessionId === targetSessionId,
+      );
+      const openPromise = host
+        .request(
+          "session.open",
+          {
+            expectedHostInstanceId: hostId,
+            expectedWorkspaceId: workspace.id,
+            expectedWorkspaceRevision: workspace.revision,
+            expectedSessionId: selected.sessionId,
+            expectedSessionRevision: selected.sessionRevision,
+          },
+          { sessionPath: targetSessionPath },
+          60_000,
+        )
+        .finally(() => {
+          openSettled = true;
+        });
+      const snapshot = await snapshotPromise;
+      expect(openSettled).toBe(false);
+      expect(snapshot.sessionId).toBe(targetSessionId);
+      rmSync(holdPath, { force: true });
+      const opened = await openPromise;
+      expect(opened.ok).toBe(true);
+    } finally {
+      rmSync(holdPath, { force: true });
+    }
   }, 90_000);
 
   it("refreshes live Extension resources after install, update, and remove", async () => {

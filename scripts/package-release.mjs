@@ -20,6 +20,7 @@ import {
 import { createHash } from "node:crypto";
 import { inspectWindowsInstaller } from "./windows-installer-integrity.mjs";
 import { writeReleaseResourceManifest } from "./release-resource-manifest.mjs";
+import { currentSourceCommit, verifiedSourceBuildCommit } from "./verified-source-build.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 if (process.platform === "darwin") {
@@ -50,37 +51,6 @@ function run(cmd, args) {
     });
     process.exit(r.status ?? 1);
   }
-}
-
-function verifiedSourceBuildCommit() {
-  const expected = process.env.PIDECK_VERIFIED_SOURCE_COMMIT?.trim();
-  if (!expected) return null;
-  const head = spawnSync("git", ["rev-parse", "HEAD"], {
-    cwd: root,
-    shell: false,
-    encoding: "utf8",
-  });
-  const status = spawnSync("git", ["status", "--porcelain"], {
-    cwd: root,
-    shell: false,
-    encoding: "utf8",
-  });
-  const requiredBuildOutputs = [
-    join(root, "packages", "protocol", "dist", "index.js"),
-    join(root, "packages", "pi-host", "dist", "main.js"),
-  ];
-  if (
-    head.status !== 0 ||
-    head.stdout.trim() !== expected ||
-    status.status !== 0 ||
-    status.stdout.trim() !== "" ||
-    !requiredBuildOutputs.every(existsSync)
-  ) {
-    throw new Error(
-      "PIDECK_VERIFIED_SOURCE_COMMIT does not match a clean HEAD with required build outputs",
-    );
-  }
-  return expected;
 }
 
 function timedStage(label, operation) {
@@ -139,6 +109,7 @@ function writeManifest(obj) {
     primaryInstallerSha256: obj.primaryInstallerSha256 ?? null,
     residualRisk: obj.residualRisk ?? null,
     ...obj,
+    sourceCommit: obj.sourceCommit ?? currentSourceCommit(),
   };
   writeFileSync(join(outDir, "PACKAGE_RELEASE.json"), JSON.stringify(body, null, 2));
   const art = join(root, "artifacts", "p0", "release-latest");
