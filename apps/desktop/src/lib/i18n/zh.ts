@@ -11,7 +11,7 @@ export const zh: Record<MessageKey, string> = {
   commonUnavailable: "不可用",
   commonAuto: "自动",
   commonCustom: "自定义",
-  commonSystem: "跟随系统",
+  commonSystem: "系统",
   commonDismiss: "关闭",
 
   // Commands and context menus
@@ -247,6 +247,8 @@ export const zh: Record<MessageKey, string> = {
 
   // Providers
   providersSubtitle: "模型接入点、凭据与聊天模型列表",
+  providersOpenModelsFile: "打开 models.json",
+  providersOpenModelsFileFailed: "无法打开 models.json",
   providersSearch: "搜索模型服务",
   providersAdd: "添加模型服务",
   providersLoading: "正在加载…",

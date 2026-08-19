@@ -626,6 +626,30 @@ export function ProvidersSettings() {
     syncModels(catalog.map((model) => (model.id === id ? { ...model, ...patch } : model)));
   }
 
+  async function openModelsFile() {
+    if (!host?.agentDir) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("desktop_open_path", { path: `${host.agentDir}/models.json` });
+    } catch (err) {
+      pushNotification(
+        err instanceof Error ? err.message : t("providersOpenModelsFileFailed"),
+        "error",
+      );
+    }
+  }
+
+  const openModelsFileButton = (
+    <button
+      type="button"
+      className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-surface-overlay disabled:opacity-50"
+      disabled={!host?.agentDir}
+      onClick={() => void openModelsFile()}
+    >
+      {t("providersOpenModelsFile")}
+    </button>
+  );
+
   function updateHeader(oldKey: string, nextKey: string, value: string) {
     if (!draft) return;
     const headers = { ...draft.headers };
@@ -799,7 +823,8 @@ export function ProvidersSettings() {
         {oauthOpen ? (
           <ProviderLoginPage onClose={() => setOauthOpen(false)} />
         ) : !draft ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted">
+          <div className="relative flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted">
+            <div className="absolute right-6 top-6">{openModelsFileButton}</div>
             {loading && providers.length === 0 ? (
               <span role="status" className="flex items-center gap-2">
                 <RefreshCw className="animate-spin motion-reduce:animate-none" size={15} />
@@ -849,41 +874,44 @@ export function ProvidersSettings() {
                     {draft.originalId ?? t("providersCustom")}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col items-end gap-1">
+                  <div className="flex items-center gap-2">
+                    {openModelsFileButton}
+                    <button
+                      type="button"
+                      className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-surface-overlay disabled:opacity-50"
+                      disabled={saving || fetching || testing || draft.models.length === 0}
+                      title={t("providersSaveAndTestTitle")}
+                      onClick={() => void testConnection()}
+                    >
+                      <Activity className={testing ? "animate-pulse" : ""} size={14} />
+                      {testing ? t("providersTesting") : t("providersSaveAndTest")}
+                    </button>
+                    {draft.originalId && (
+                      <button
+                        type="button"
+                        className="flex h-8 items-center gap-1.5 rounded-md border border-danger/40 px-2.5 text-xs text-danger hover:bg-danger/10 disabled:opacity-50"
+                        disabled={saving || fetching || testing}
+                        onClick={() => setConfirmDelete(true)}
+                      >
+                        <Trash2 size={14} /> {t("commonDelete")}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="flex h-8 items-center gap-1.5 rounded-md bg-accent px-3 text-xs text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
+                      disabled={saving || fetching || testing}
+                      onClick={() => void persistDraft()}
+                    >
+                      {saving ? <RefreshCw className="animate-spin" size={14} /> : <Save size={14} />}
+                      {t("commonSave")}
+                    </button>
+                  </div>
                   {dirty && (
                     <span className="flex items-center gap-1 text-[11px] text-warning">
                       <AlertTriangle size={12} /> {t("providersUnsaved")}
                     </span>
                   )}
-                  <button
-                    type="button"
-                    className="flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs hover:bg-surface-overlay disabled:opacity-50"
-                    disabled={saving || fetching || testing || draft.models.length === 0}
-                    title={t("providersSaveAndTestTitle")}
-                    onClick={() => void testConnection()}
-                  >
-                    <Activity className={testing ? "animate-pulse" : ""} size={14} />
-                    {testing ? t("providersTesting") : t("providersSaveAndTest")}
-                  </button>
-                  {draft.originalId && (
-                    <button
-                      type="button"
-                      className="flex h-8 items-center gap-1.5 rounded-md border border-danger/40 px-2.5 text-xs text-danger hover:bg-danger/10 disabled:opacity-50"
-                      disabled={saving || fetching || testing}
-                      onClick={() => setConfirmDelete(true)}
-                    >
-                      <Trash2 size={14} /> {t("commonDelete")}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="flex h-8 items-center gap-1.5 rounded-md bg-accent px-3 text-xs text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
-                    disabled={saving || fetching || testing}
-                    onClick={() => void persistDraft()}
-                  >
-                    {saving ? <RefreshCw className="animate-spin" size={14} /> : <Save size={14} />}
-                    {t("commonSave")}
-                  </button>
                 </div>
               </header>
 

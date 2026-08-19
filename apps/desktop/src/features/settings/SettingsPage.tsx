@@ -142,14 +142,14 @@ function GeneralSettings() {
     description: MessageKey;
   }> = [
     {
-      value: "legacy-modal",
-      label: "generalExtensionDecisionLegacy",
-      description: "generalExtensionDecisionLegacyDesc",
-    },
-    {
       value: "auto",
       label: "generalExtensionDecisionAuto",
       description: "generalExtensionDecisionAutoDesc",
+    },
+    {
+      value: "legacy-modal",
+      label: "generalExtensionDecisionLegacy",
+      description: "generalExtensionDecisionLegacyDesc",
     },
     {
       value: "inline-first",
@@ -229,54 +229,42 @@ function GeneralSettings() {
               {t("generalExtensionDecisionGroup")}
             </h2>
             <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
-              <div>
-                <p className="text-sm">{t("generalExtensionDecision")}</p>
-                <p id="extension-decision-presentation-help" className="text-xs text-muted">
-                  {t("generalExtensionDecisionDesc")}
-                </p>
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor="extension-decision-presentation" className="min-w-0 text-sm">
+                  <span className="block">{t("generalExtensionDecision")}</span>
+                  <span
+                    id="extension-decision-presentation-help"
+                    className="block text-xs text-muted"
+                  >
+                    {t("generalExtensionDecisionDesc")}
+                  </span>
+                </label>
+                <select
+                  id="extension-decision-presentation"
+                  className="h-8 min-w-44 max-w-72 rounded-md border border-border bg-surface px-2 text-xs"
+                  aria-label={t("generalExtensionDecision")}
+                  aria-describedby="extension-decision-presentation-help"
+                  value={decisionPresentation}
+                  disabled={decisionPresentationSaving}
+                  onChange={(event) =>
+                    void patchExtensionDecisionPresentation(
+                      event.target.value as ExtensionDecisionPresentation,
+                    )
+                  }
+                >
+                  {decisionPresentationOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {t(option.label)}
+                    </option>
+                  ))}
+                </select>
               </div>
-              <fieldset
-                data-ui="segmented"
-                className="grid overflow-hidden rounded-md border border-border sm:grid-cols-3"
-                aria-describedby="extension-decision-presentation-help"
-                disabled={decisionPresentationSaving}
-              >
-                <legend className="sr-only">{t("generalExtensionDecision")}</legend>
-                {decisionPresentationOptions.map((option, index) => {
-                  const selected = decisionPresentation === option.value;
-                  return (
-                    <label
-                      key={option.value}
-                      data-ui="segmented-item"
-                      data-state={selected ? "active" : "inactive"}
-                      className={`relative flex min-h-20 flex-col gap-1 px-3 py-2.5 transition-colors ${
-                        index > 0 ? "border-t border-border sm:border-l sm:border-t-0" : ""
-                      } ${decisionPresentationSaving ? "cursor-wait opacity-60" : "cursor-pointer"} ${
-                        selected
-                          ? "bg-selection text-selection-foreground"
-                          : "text-muted hover:bg-surface-overlay/60 hover:text-foreground"
-                      }`}
-                    >
-                      <input
-                        className="peer sr-only"
-                        type="radio"
-                        name="extension-decision-presentation"
-                        value={option.value}
-                        checked={selected}
-                        onChange={() => void patchExtensionDecisionPresentation(option.value)}
-                      />
-                      <span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 ring-2 ring-inset ring-focus opacity-0 peer-focus-visible:opacity-100"
-                      />
-                      <span className="text-xs font-medium">{t(option.label)}</span>
-                      <span className="text-[11px] leading-4 text-muted">
-                        {t(option.description)}
-                      </span>
-                    </label>
-                  );
-                })}
-              </fieldset>
+              <p className="text-right text-[11px] leading-4 text-muted">
+                {t(
+                  decisionPresentationOptions.find((option) => option.value === decisionPresentation)
+                    ?.description ?? "generalExtensionDecisionDesc",
+                )}
+              </p>
               <span className="sr-only" role="status" aria-live="polite">
                 {decisionPresentationSaving ? t("generalExtensionDecisionSaving") : ""}
               </span>

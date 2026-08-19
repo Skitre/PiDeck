@@ -12,6 +12,15 @@ import { hostClient } from "../../lib/bridge/host-client";
 import { useAppStore } from "../../lib/stores/app-store";
 import { ProvidersSettings } from "./ProvidersSettings";
 
+const tauriMocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => tauriMocks.invoke(...(args as [])),
+  isTauri: () => true,
+}));
+
 const HOST_ID = "11111111-1111-4111-8111-111111111111";
 const WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
 
@@ -155,6 +164,8 @@ async function renderLoaded(spy = mockRequests()) {
 }
 
 beforeEach(() => {
+  tauriMocks.invoke.mockReset();
+  tauriMocks.invoke.mockResolvedValue(undefined);
   useAppStore.getState().setHost(host());
   useAppStore.getState().clearNotifications();
   useAppStore.getState().setProvidersDirty(false);
@@ -561,6 +572,29 @@ describe("ProvidersSettings inline validation", () => {
     await user.clear(baseUrl);
     await user.type(baseUrl, "https://fixed.example.com/v1");
     expect(screen.queryByText("Must be an http(s) URL")).not.toBeInTheDocument();
+  });
+});
+
+describe("ProvidersSettings models.json", () => {
+  it("reveals models.json via the desktop_open_path command", async () => {
+    const user = userEvent.setup();
+    await renderLoaded();
+
+    await user.click(screen.getByRole("button", { name: "Open models.json" }));
+
+    await waitFor(() =>
+      expect(tauriMocks.invoke).toHaveBeenCalledWith("desktop_open_path", {
+        path: "/agent/models.json",
+      }),
+    );
+  });
+
+  it("disables the open button while the Host is not connected", () => {
+    useAppStore.getState().setHost(null);
+    mockRequests();
+    render(<ProvidersSettings />);
+
+    expect(screen.getByRole("button", { name: "Open models.json" })).toBeDisabled();
   });
 });
 

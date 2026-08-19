@@ -260,6 +260,8 @@ export const en = {
 
   // Providers
   providersSubtitle: "Model endpoints, credentials, and the chat model list",
+  providersOpenModelsFile: "Open models.json",
+  providersOpenModelsFileFailed: "Couldn't open models.json",
   providersSearch: "Search Providers",
   providersAdd: "Add Provider",
   providersLoading: "Loading Providers...",

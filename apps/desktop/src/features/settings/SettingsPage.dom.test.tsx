@@ -138,8 +138,8 @@ describe("SettingsPage navigation guard", () => {
       "inactive",
     );
     expect(screen.getByRole("group", { name: "Theme style" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Color mode")).toBeInTheDocument();
-    expect(screen.getByLabelText(/Language/)).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Color mode" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Language" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Interface density" })).toBeInTheDocument();
     expect(screen.getByRole("spinbutton", { name: "Conversation width" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Conversation font size" })).toBeInTheDocument();
@@ -203,7 +203,11 @@ describe("SettingsPage navigation guard", () => {
     expect(apple).toHaveAttribute("data-state", "active");
     expect(vercel).toHaveAttribute("data-state", "inactive");
 
-    await user.selectOptions(screen.getByLabelText("Color mode"), "light");
+    await user.click(
+      within(screen.getByRole("group", { name: "Color mode" })).getByRole("button", {
+        name: "Light",
+      }),
+    );
     await waitFor(() => expect(useAppStore.getState().desktopSettings?.theme).toBe("light"));
     expect(useAppStore.getState().desktopSettings?.themeFamily).toBe("apple");
     expect(document.documentElement).toHaveClass("light");
@@ -268,13 +272,17 @@ describe("SettingsPage navigation guard", () => {
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
   });
 
-  it("switches the interface to Chinese from the Appearance language select", async () => {
+  it("switches the interface to Chinese from the Appearance language control", async () => {
     const user = userEvent.setup();
     render(<SettingsPage initialSection="appearance" />);
 
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText(/Language/), "zh");
+    await user.click(
+      within(screen.getByRole("group", { name: "Language" })).getByRole("button", {
+        name: "中文",
+      }),
+    );
 
     expect(screen.getByRole("button", { name: "通用" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "外观" })).toBeInTheDocument();
@@ -331,14 +339,10 @@ describe("SettingsPage navigation guard", () => {
     } as never);
     render(<SettingsPage initialSection="general" />);
 
-    const group = screen.getByRole("group", {
-      name: "Extension prompt presentation",
-    });
-    const legacy = within(group).getByRole("radio", { name: /^Legacy modal/ });
-    const automatic = within(group).getByRole("radio", { name: /^Automatic/ });
-    expect(legacy).toBeChecked();
+    const select = screen.getByLabelText("Extension prompt presentation");
+    expect(select).toHaveValue("legacy-modal");
 
-    await user.click(automatic);
+    await user.selectOptions(select, "auto");
     await waitFor(() =>
       expect(useAppStore.getState().desktopSettings?.extensionDecisionPresentation).toBe("auto"),
     );
@@ -348,9 +352,9 @@ describe("SettingsPage navigation guard", () => {
       { expectedHostInstanceId: CONNECTED_HOST.hostInstanceId },
       { extensionDecisionPresentation: "auto" },
     );
-    expect(automatic).toBeChecked();
+    expect(select).toHaveValue("auto");
 
-    await user.click(legacy);
+    await user.selectOptions(select, "legacy-modal");
     await waitFor(() =>
       expect(useAppStore.getState().desktopSettings?.extensionDecisionPresentation).toBe(
         "legacy-modal",
@@ -362,7 +366,7 @@ describe("SettingsPage navigation guard", () => {
       { expectedHostInstanceId: CONNECTED_HOST.hostInstanceId },
       { extensionDecisionPresentation: "legacy-modal" },
     );
-    expect(legacy).toBeChecked();
+    expect(select).toHaveValue("legacy-modal");
   });
 
   it("keeps the previous setting and reports a rejected desktop patch", async () => {
@@ -379,7 +383,11 @@ describe("SettingsPage navigation guard", () => {
     });
     render(<SettingsPage initialSection="appearance" />);
 
-    await user.selectOptions(screen.getByLabelText("Color mode"), "light");
+    await user.click(
+      within(screen.getByRole("group", { name: "Color mode" })).getByRole("button", {
+        name: "Light",
+      }),
+    );
 
     await waitFor(() =>
       expect(tauriMocks.invoke).toHaveBeenCalledWith("desktop_settings_patch", {

@@ -1,6 +1,11 @@
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
-import type { DesktopInterfaceDensity, DesktopThemeFamily } from "@pideck/protocol";
+import type {
+  DesktopInterfaceDensity,
+  DesktopLanguage,
+  DesktopTheme,
+  DesktopThemeFamily,
+} from "@pideck/protocol";
 import { Minus, Plus } from "lucide-react";
 import { SectionHeader } from "../../components/SectionHeader";
 import {
@@ -26,6 +31,47 @@ import {
   MIN_CONVERSATION_CONTENT_WIDTH,
   resolveConversationContentWidth,
 } from "../chat/conversation-layout";
+
+function SegmentedControl<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div
+      data-ui="segmented"
+      className="interface-density-control grid w-full min-w-48 shrink-0 grid-cols-3 overflow-hidden rounded-md border border-border bg-surface"
+      role="group"
+      aria-label={label}
+    >
+      {options.map((option, index) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          data-ui="segmented-item"
+          data-state={value === option.value ? "active" : "inactive"}
+          className={`h-full min-w-16 px-2 text-xs transition-colors ${
+            index > 0 ? "border-l border-border" : ""
+          } ${
+            value === option.value
+              ? "bg-selection font-medium text-selection-foreground"
+              : "text-muted hover:bg-surface-overlay/70 hover:text-foreground"
+          }`}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function FontSizeStepper({
   label,
@@ -136,6 +182,22 @@ export function AppearanceSettings() {
     }
   }
 
+  const colorModeOptions: Array<{
+    value: DesktopTheme;
+    label: string;
+  }> = [
+    { value: "system", label: t("commonSystem") },
+    { value: "light", label: t("generalThemeLight") },
+    { value: "dark", label: t("generalThemeDark") },
+  ];
+  const languageOptions: Array<{
+    value: DesktopLanguage;
+    label: string;
+  }> = [
+    { value: "system", label: t("commonSystem") },
+    { value: "en", label: "Eng" },
+    { value: "zh", label: "中文" },
+  ];
   const densityOptions: Array<{
     value: DesktopInterfaceDensity;
     label: string;
@@ -212,78 +274,37 @@ export function AppearanceSettings() {
                 </div>
               </div>
 
-              <label className="flex items-center justify-between gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                 <span className="min-w-0">
                   <span className="block text-sm">{t("appearanceColorMode")}</span>
                   <span className="block text-xs text-muted">{t("appearanceColorModeDesc")}</span>
                 </span>
-                <select
-                  className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-xs"
-                  aria-label={t("appearanceColorMode")}
+                <SegmentedControl
+                  label={t("appearanceColorMode")}
                   value={desktopSettings?.theme ?? "system"}
-                  onChange={(event) =>
-                    void patchDesktop({
-                      theme: event.target.value as "light" | "dark" | "system",
-                    })
-                  }
-                >
-                  <option value="system">{t("commonSystem")}</option>
-                  <option value="light">{t("generalThemeLight")}</option>
-                  <option value="dark">{t("generalThemeDark")}</option>
-                </select>
-              </label>
-
-              <label className="flex items-center justify-between gap-4">
+                  options={colorModeOptions}
+                  onChange={(theme) => void patchDesktop({ theme })}
+                />
                 <span className="min-w-0">
                   <span className="block text-sm">{t("generalLanguage")}</span>
                   <span className="block text-xs text-muted">{t("generalLanguageDesc")}</span>
                 </span>
-                <select
-                  className="h-8 w-24 rounded-md border border-border bg-surface px-2 text-xs"
+                <SegmentedControl
+                  label={t("generalLanguage")}
                   value={desktopSettings?.language ?? "system"}
-                  onChange={(event) =>
-                    void patchDesktop({
-                      language: event.target.value as "system" | "en" | "zh",
-                    })
-                  }
-                >
-                  <option value="system">{t("commonSystem")}</option>
-                  <option value="en">English</option>
-                  <option value="zh">中文</option>
-                </select>
-              </label>
-
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                  options={languageOptions}
+                  onChange={(language) => void patchDesktop({ language })}
+                />
                 <span className="min-w-0">
                   <span className="block text-sm">{t("appearanceDensity")}</span>
                   <span className="block text-xs text-muted">{t("appearanceDensityDesc")}</span>
                 </span>
-                <div
-                  data-ui="segmented"
-                  className="interface-density-control grid shrink-0 grid-cols-3 overflow-hidden rounded-md border border-border bg-surface"
-                  role="group"
-                  aria-label={t("appearanceDensity")}
-                >
-                  {densityOptions.map((option, index) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      aria-pressed={interfaceDensity === option.value}
-                      data-ui="segmented-item"
-                      data-state={interfaceDensity === option.value ? "active" : "inactive"}
-                      className={`h-full min-w-16 px-2 text-xs transition-colors ${
-                        index > 0 ? "border-l border-border" : ""
-                      } ${
-                        interfaceDensity === option.value
-                          ? "bg-selection font-medium text-selection-foreground"
-                          : "text-muted hover:bg-surface-overlay/70 hover:text-foreground"
-                      }`}
-                      onClick={() => void patchDesktop({ interfaceDensity: option.value })}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
+                <SegmentedControl
+                  label={t("appearanceDensity")}
+                  value={interfaceDensity}
+                  options={densityOptions}
+                  onChange={(next) => void patchDesktop({ interfaceDensity: next })}
+                />
               </div>
             </div>
           </section>
