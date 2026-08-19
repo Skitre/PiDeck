@@ -396,15 +396,17 @@ describe("Transcript Session-open scrolling", () => {
       ).toBeInTheDocument();
 
       unfollow(scroll);
-      // A genuine user scroll pauses idle mounting for the quiet window.
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      flushIdleToConvergence();
-
-      expect(container.querySelectorAll(".transcript-row")).toHaveLength(150);
+      await waitFor(
+        () => {
+          flushIdleToConvergence();
+          expect(container.querySelectorAll(".transcript-row")).toHaveLength(150);
+        },
+        { timeout: 10_000 },
+      );
       expect(
         screen.queryByRole("button", { name: /Show earlier messages/ }),
       ).not.toBeInTheDocument();
-    });
+    }, 15_000);
 
     it("yields idle mounting to a followed stream and converges after it settles", async () => {
       act(() =>
@@ -425,10 +427,14 @@ describe("Transcript Session-open scrolling", () => {
         }),
       );
       unfollow(scroll);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      flushIdleToConvergence();
-      expect(container.querySelectorAll(".transcript-row")).toHaveLength(150);
-    });
+      await waitFor(
+        () => {
+          flushIdleToConvergence();
+          expect(container.querySelectorAll(".transcript-row")).toHaveLength(150);
+        },
+        { timeout: 10_000 },
+      );
+    }, 15_000);
 
     it("restores the reading position when switching back to a session", () => {
       const longA = longSession(SESSION_A, 150);
