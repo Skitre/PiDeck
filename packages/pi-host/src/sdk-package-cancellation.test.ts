@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DefaultPackageManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { resetInternalRuntimeForTests } from "./internal-runtime.js";
 
 let root: string | undefined;
 
@@ -33,6 +34,7 @@ async function removeTree(dir: string): Promise<void> {
 afterEach(async () => {
   if (root) await removeTree(root);
   root = undefined;
+  resetInternalRuntimeForTests();
   delete process.env.PI_OFFLINE;
   delete process.env.PIDECK_TEST_NPM_STDERR;
 });
@@ -294,6 +296,7 @@ describe("PiDeck package-manager cancellation patch", () => {
   it("includes npm stderr when an install command fails", async () => {
     const marker = "registry request failed: certificate rejected";
     process.env.PIDECK_TEST_NPM_STDERR = marker;
+    resetInternalRuntimeForTests();
     const { manager } = createManager([
       process.execPath,
       "-e",

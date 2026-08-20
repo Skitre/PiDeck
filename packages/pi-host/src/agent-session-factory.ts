@@ -8,6 +8,7 @@ import {
   type SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai/compat";
+import { PIDECK_NO_MODEL } from "./no-model.js";
 import {
   ENABLED_PROVIDERS_KEY,
   isObject,
@@ -26,7 +27,7 @@ type HostAgentSessionOptions = Omit<
   settingsManager: SettingsManager;
 };
 
-type InitialModelOption = { model?: never } | { model: Model<Api> | null };
+type InitialModelOption = { model?: never } | { model: Model<Api> };
 
 async function resolveInitialModelOption(
   options: HostAgentSessionOptions,
@@ -67,14 +68,14 @@ async function resolveInitialModelOption(
       findEligible(sessionModel?.provider, sessionModel?.modelId) ??
       findEligible(defaultProvider, defaultModelId) ??
       eligible[0] ??
-      null,
+      PIDECK_NO_MODEL,
   };
 }
 
 /**
  * Construct every Host AgentSession through the PiDeck Provider/model policy.
  * Omitting the model option preserves SDK-native selection for legacy configs;
- * an explicit null prevents the SDK from resurrecting a disabled Provider.
+ * the no-model sentinel prevents the SDK from resurrecting a disabled Provider.
  */
 export async function createHostAgentSession(
   options: HostAgentSessionOptions,

@@ -1,10 +1,9 @@
 /**
  * Explicit model-refresh helpers.
  *
- * `ModelRegistry.refresh()` takes no options and resolves to `void`, so it can
- * neither declare whether network access is allowed, nor be cancelled, nor
- * report which providers failed. Routing every PiDeck refresh through
- * `refreshModelsLocal` makes the no-network guarantee auditable: startup,
+ * `ModelRegistry.refresh()` is a void facade over `ModelRuntime.refresh`.
+ * Routing every PiDeck refresh through `refreshModelsLocal` keeps the
+ * no-network guarantee auditable: startup,
  * provider list/save/remove/setEnabled, models.json reconciliation, and
  * session create/open must all use this helper.
  */

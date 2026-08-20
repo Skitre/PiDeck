@@ -1169,7 +1169,9 @@ describe("extension refresh rollback", () => {
     expect(graph.agentSession.extensionRunner).toBe(session.extensionRunner);
     expect(current.runtime).not.toBe(before.runtime);
     expect(() => current.runtime.assertActive()).not.toThrow();
-    expect(() => before.runtime.assertActive()).toThrow(/user-resource-refresh/);
+    expect(() => before.runtime.assertActive()).toThrow(
+      /user-resource-refresh|stale after session replacement or reload/,
+    );
     expect(graph.resourceReloadRequired).toBe(true);
   });
 });

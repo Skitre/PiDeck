@@ -35,7 +35,7 @@ function host(): HostStatusSnapshot {
     sessionId: null,
     sessionRevision: 0,
     packageRevision: 1,
-    sdkVersion: "0.82.1",
+    sdkVersion: "0.84.2",
     nodeVersion: "v24.18.0",
     agentDir: "/agent",
     phase: "ready",
@@ -224,9 +224,7 @@ describe("HostSettings", () => {
     expect(
       useAppStore
         .getState()
-        .notifications.some((item) =>
-          item.message.includes("restart Pi Host to apply"),
-        ),
+        .notifications.some((item) => item.message.includes("restart Pi Host to apply")),
     ).toBe(true);
   });
 });

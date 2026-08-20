@@ -8,13 +8,18 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
-import { createInternalRuntime } from "./internal-runtime.js";
+import {
+  createInternalRuntime,
+  resetInternalRuntimeForTests,
+  setInternalRuntimeForTests,
+} from "./internal-runtime.js";
 
 let root: string | undefined;
 
 afterEach(() => {
   if (root) rmSync(root, { recursive: true, force: true });
   root = undefined;
+  resetInternalRuntimeForTests();
   delete process.env.PI_OFFLINE;
 });
 
@@ -51,6 +56,7 @@ function createIsolatedRuntime(dumpFile: string) {
     },
   });
   runtime.env.PATH = [bin, runtime.env.PATH].join(delimiter);
+  setInternalRuntimeForTests(runtime);
   return {
     cwd: join(root, "workspace"),
     agentDir: join(root, "agent"),
@@ -76,7 +82,7 @@ describe("SDK package manager internal env", () => {
     mkdirSync(cwd, { recursive: true });
     mkdirSync(agentDir, { recursive: true });
     const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted: true });
-    const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager, env });
+    const manager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
     const internals = manager as unknown as SpawnInternals;
 
     await internals.runCommand("npm", ["install", "demo"]);
@@ -109,7 +115,6 @@ describe("SDK package manager internal env", () => {
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      env,
     });
     const packageManager = (loader as unknown as { packageManager: SpawnInternals }).packageManager;
     packageManager.runCommandSync("npm", ["list", "-g"]);

@@ -61,7 +61,7 @@ describe("HostClient hello configuration", () => {
       result: {
         protocolVersion: 1,
         ...RESPONSE_IDENTITY,
-        sdkVersion: "0.82.1",
+        sdkVersion: "0.84.2",
         nodeVersion: "v24.18.0",
         agentDir: "/agent",
         phase: "waitingForWorkspace",
@@ -107,7 +107,7 @@ describe("HostClient hello configuration", () => {
       result: {
         protocolVersion: 1,
         ...RESPONSE_IDENTITY,
-        sdkVersion: "0.82.1",
+        sdkVersion: "0.84.2",
         nodeVersion: "v24.18.0",
         agentDir: "/agent",
         phase: "waitingForWorkspace",

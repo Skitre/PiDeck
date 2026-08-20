@@ -166,6 +166,10 @@ export function getInternalRuntime(): InternalRuntime {
   return (cached ??= createInternalRuntime());
 }
 
+export function setInternalRuntimeForTests(runtime: InternalRuntime): void {
+  cached = runtime;
+}
+
 export function resetInternalRuntimeForTests(): void {
   cached = undefined;
 }

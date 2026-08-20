@@ -26,7 +26,7 @@ function host(): HostStatusSnapshot {
     sessionId: SESSION_ID,
     sessionRevision: 3,
     packageRevision: 1,
-    sdkVersion: "0.82.1",
+    sdkVersion: "0.84.2",
     nodeVersion: process.version,
     agentDir: "/agent",
     phase: "ready",
@@ -132,17 +132,11 @@ describe("SessionStatsModal", () => {
   });
 
   it("fetches and renders the stats when opened", async () => {
-    const request = vi
-      .spyOn(hostClient, "request")
-      .mockResolvedValue(statsEnvelope() as never);
+    const request = vi.spyOn(hostClient, "request").mockResolvedValue(statsEnvelope() as never);
     render(<SessionStatsModal open onClose={() => {}} />);
 
     await waitFor(() => expect(request).toHaveBeenCalledOnce());
-    expect(request).toHaveBeenCalledWith(
-      "session.getStats",
-      EXPECTED_CONTEXT,
-      null,
-    );
+    expect(request).toHaveBeenCalledWith("session.getStats", EXPECTED_CONTEXT, null);
     expect(await screen.findByText("My session")).toBeInTheDocument();
     expect(screen.getByText("Tool calls")).toBeInTheDocument();
     expect(screen.getByText("1.2k")).toBeInTheDocument();
@@ -164,9 +158,7 @@ describe("SessionStatsModal", () => {
   });
 
   it("does not fetch while closed and closes on Escape", async () => {
-    const request = vi
-      .spyOn(hostClient, "request")
-      .mockResolvedValue(statsEnvelope() as never);
+    const request = vi.spyOn(hostClient, "request").mockResolvedValue(statsEnvelope() as never);
     const onClose = vi.fn();
     const { rerender } = render(<SessionStatsModal open={false} onClose={onClose} />);
 

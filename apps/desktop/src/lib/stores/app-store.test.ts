@@ -19,7 +19,7 @@ function host(id: string): HostStatusSnapshot {
     sessionRevision: 0,
     packageRevision: 0,
     protocolVersion: 1,
-    sdkVersion: "0.82.1",
+    sdkVersion: "0.84.2",
     nodeVersion: "v22",
     agentDir: "/tmp",
     phase: "waitingForWorkspace",

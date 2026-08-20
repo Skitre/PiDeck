@@ -5,7 +5,9 @@ import {
   BUNDLED_GIT_ENV,
   bundledBashFromGit,
   createInternalRuntime,
+  getInternalRuntime,
   resetInternalRuntimeForTests,
+  setInternalRuntimeForTests,
 } from "./internal-runtime.js";
 
 afterEach(() => {
@@ -138,5 +140,15 @@ describe("createInternalRuntime", () => {
       );
     }
     expect(runtime.env.PATH).toContain(dirname(process.execPath));
+  });
+
+  it("lets tests replace the process-wide runtime", () => {
+    const runtime = createInternalRuntime({
+      nodeExecutable: join("/bundled", "node", "bin", "node"),
+      gitExecutable: null,
+      sourceEnv: { PATH: "/unused" },
+    });
+    setInternalRuntimeForTests(runtime);
+    expect(getInternalRuntime()).toBe(runtime);
   });
 });

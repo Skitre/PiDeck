@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AttachmentStore, AttachmentReadResult } from "./attachment-store.js";
 
@@ -17,9 +17,14 @@ export function createReadAttachmentTool(store: AttachmentStore): ToolDefinition
     ],
     parameters: Type.Object(
       {
-        attachmentId: Type.String({ format: "uuid", description: "Attachment ID from the user message" }),
+        attachmentId: Type.String({
+          format: "uuid",
+          description: "Attachment ID from the user message",
+        }),
         start: Type.Optional(Type.Integer({ minimum: 1, description: "1-based page or chunk" })),
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: "Units to read" })),
+        limit: Type.Optional(
+          Type.Integer({ minimum: 1, maximum: 10, description: "Units to read" }),
+        ),
       },
       { additionalProperties: false },
     ),

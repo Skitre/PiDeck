@@ -70,28 +70,21 @@ release scripts derive and validate the installed SDK family from that manifest.
 
 ## SDK patch (pnpm patch)
 
-`patches/@earendil-works__pi-coding-agent@0.82.1.patch` gives
-`DefaultPackageManager` a `setOperationSignal()` hook and an optional `env`
-constructor option. The signal is passed to both child-process paths so an
-aborted package operation actually kills the npm or git child instead of
-leaving it running and holding the graph lock. The `env` option is the
-explicit PiDeck internal runtime environment (bundled Node/Git/npm PATH plus
-copied user proxy/home/certificate variables). Upstream has neither hook.
-`setOperationSignal` is declared as a **required** member of the
-`PackageManager` interface, which makes a silently skipped
-`pm.setOperationSignal?.(...)` a compile error rather than a no-op.
-`DefaultResourceLoader` forwards the same optional `env` into the private
-`DefaultPackageManager` it constructs, so implicit resource loading uses the
-internal runtime too.
+`patches/@earendil-works__pi-coding-agent@0.84.2.patch` keeps invocation
+ownership on AgentSession / ExtensionRunner / wrapRegisteredTool, plus the
+Windows `shell.js` bundled-bash and absolute `taskkill` fallbacks. Package
+manager env, cancel, and scoped update live in the Host adapter
+(`installPackageManagerAdapter`), not in this dist patch.
 
 Both asynchronous command paths capture diagnostics and settle through the
-SDK's `waitForChildProcess()`. That waiter observes process exit plus a short
-stdio-idle grace, so a successful npm parent cannot leave package mutation
-pending merely because a detached Windows descendant inherited its pipes.
+Host-copied `waitForChildProcess()`. That waiter observes process exit plus a
+short stdio-idle grace, so a successful npm parent cannot leave package
+mutation pending merely because a detached Windows descendant inherited its
+pipes.
 
 The synchronous global-npm-root lookup cannot be interrupted — `spawnSync`
-takes no signal — so the patch only makes it refuse to start a new child once
-the operation is aborted. Every long-running operation (npm install, uninstall,
+takes no signal — so the adapter only refuses to start a new child once the
+operation is aborted. Every long-running operation (npm install, uninstall,
 view; git clone, checkout, fetch, reset, clean) is on the cancellable async
 path.
 
@@ -108,11 +101,11 @@ lookup fail, and makes `killProcessTree()` spawn
 `%SystemRoot%\System32\taskkill.exe` with an `error` fallback so a user
 PATH that omits System32 cannot terminate the Host.
 
-The cancellation patch still cannot reach the private package manager's
-in-flight children. Implicit resource loading therefore stays wrapped in
-`withoutImplicitPackageInstall()` so those children are not started: see
-"Implicit resource loading" below. The `env` option is independent of
-cancellation — it only selects which Node/Git/npm the child would resolve.
+The Host adapter still cannot reach a private package manager's in-flight
+children started before `setOperationSignal`. Implicit resource loading
+therefore stays wrapped in `withoutImplicitPackageInstall()` so those children
+are not started: see "Implicit resource loading" below. Internal env comes
+from `getInternalRuntime()`, not a constructor option.
 
 ## Implicit resource loading
 

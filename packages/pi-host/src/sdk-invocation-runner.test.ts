@@ -1,6 +1,12 @@
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  createAgentSession,
   createExtensionRuntime,
+  DefaultResourceLoader,
   ExtensionRunner,
+  SessionManager,
+  SettingsManager,
   wrapRegisteredTool,
   type Extension,
   type ExtensionInvocationMetadata,
@@ -9,15 +15,15 @@ import {
   type SourceInfo,
 } from "@earendil-works/pi-coding-agent";
 import type { HostEventName, HostIdentity } from "@pideck/protocol";
-import { describe, expect, it } from "vitest";
-import {
-  createExtensionUiContext,
-  respondExtensionUi,
-} from "./extension-ui-bridge.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { createExtensionUiContext, respondExtensionUi } from "./extension-ui-bridge.js";
 import {
   createExtensionInvocationRunner,
   getActiveExtensionInvocation,
 } from "./extension-invocation-context.js";
+import { PIDECK_NO_MODEL } from "./no-model.js";
+import { createTestModelServices } from "./test-helpers/model-runtime.js";
+import { createTempAgentLayout, type TempAgentLayout } from "./test-helpers/temp-agent.js";
 
 const EVENT_TYPES = [
   "session_start",
@@ -48,7 +54,9 @@ function extension(name: string, handler: () => void | Promise<void>): Extension
     path: sourceInfo(name).path,
     resolvedPath: sourceInfo(name).path,
     sourceInfo: sourceInfo(name),
-    handlers: new Map(EVENT_TYPES.map((eventType) => [eventType, [handler]])) as Extension["handlers"],
+    handlers: new Map(
+      EVENT_TYPES.map((eventType) => [eventType, [handler]]),
+    ) as Extension["handlers"],
     tools: new Map(),
     messageRenderers: new Map(),
     entryRenderers: new Map(),
@@ -116,7 +124,10 @@ describe("SDK Extension invocation runner patch", () => {
     const second = extension("second", () => {});
     const { runner } = runnerWithExtensions([first, second]);
     const captured: ExtensionInvocationMetadata[] = [];
-    const invocationRunner: ExtensionInvocationRunner = async <T>(metadata: ExtensionInvocationMetadata, invoke: () => T | Promise<T>) => {
+    const invocationRunner: ExtensionInvocationRunner = async <T>(
+      metadata: ExtensionInvocationMetadata,
+      invoke: () => T | Promise<T>,
+    ) => {
       captured.push(metadata);
       return await invoke();
     };
@@ -129,26 +140,32 @@ describe("SDK Extension invocation runner patch", () => {
       Array(EVENT_TYPES.length * 2).fill("event"),
     );
     expect(
-      captured.map((metadata) => metadata.kind === "event" ? metadata.eventType : "tool"),
+      captured.map((metadata) => (metadata.kind === "event" ? metadata.eventType : "tool")),
     ).toEqual(EVENT_TYPES.flatMap((eventType) => [eventType, eventType]));
     for (let index = 0; index < EVENT_TYPES.length; index += 1) {
       expect(captured[index * 2]!.sourceInfo).toBe(first.sourceInfo);
       expect(captured[index * 2 + 1]!.sourceInfo).toBe(second.sourceInfo);
     }
-    expect(captured.find((metadata) => metadata.kind === "event" && metadata.eventType === "tool_call"))
-      .toMatchObject({ toolName: "read", toolCallId: "tool-call-start" });
-    expect(captured.find((metadata) => metadata.kind === "event" && metadata.eventType === "tool_result"))
-      .toMatchObject({ toolName: "read", toolCallId: "tool-call-result" });
+    expect(
+      captured.find((metadata) => metadata.kind === "event" && metadata.eventType === "tool_call"),
+    ).toMatchObject({ toolName: "read", toolCallId: "tool-call-start" });
+    expect(
+      captured.find(
+        (metadata) => metadata.kind === "event" && metadata.eventType === "tool_result",
+      ),
+    ).toMatchObject({ toolName: "read", toolCallId: "tool-call-result" });
   });
 
   it("wraps Extension tool execution without bypassing the original context factory", async () => {
     const owner = extension("tools", () => {});
     const { runner } = runnerWithExtensions([owner]);
     const captured: ExtensionInvocationMetadata[] = [];
-    runner.setInvocationRunner(async <T>(metadata: ExtensionInvocationMetadata, invoke: () => T | Promise<T>) => {
-      captured.push(metadata);
-      return await invoke();
-    });
+    runner.setInvocationRunner(
+      async <T>(metadata: ExtensionInvocationMetadata, invoke: () => T | Promise<T>) => {
+        captured.push(metadata);
+        return await invoke();
+      },
+    );
     let contextCwd: string | undefined;
     const tool = wrapRegisteredTool(
       {
@@ -249,5 +266,96 @@ describe("SDK Extension invocation runner patch", () => {
       },
     ]);
     expect(getActiveExtensionInvocation(session)).toBeUndefined();
+  });
+});
+
+describe("SDK AgentSession invocation bind and reload", () => {
+  const layouts: TempAgentLayout[] = [];
+  const sessions: AgentSession[] = [];
+
+  afterEach(() => {
+    for (const session of sessions.splice(0)) {
+      try {
+        session.dispose();
+      } catch {
+        /* optional */
+      }
+    }
+    for (const layout of layouts.splice(0)) layout.cleanup();
+  });
+
+  it("rebinds invocationRunner onto the replacement Runner after reload", async () => {
+    const layout = createTempAgentLayout("pideck-invocation-bind-reload-");
+    layouts.push(layout);
+    const extensionPath = join(layout.root, "invocation-bind-reload.js");
+    writeFileSync(
+      extensionPath,
+      ["export default function (pi) {", '  pi.on("session_start", async () => {});', "}"].join(
+        "\n",
+      ),
+    );
+
+    const settingsManager = SettingsManager.create(layout.projectDir, layout.agentDir, {
+      projectTrusted: true,
+    });
+    const { modelRuntime } = await createTestModelServices(layout.agentDir);
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: layout.projectDir,
+      agentDir: layout.agentDir,
+      settingsManager,
+      additionalExtensionPaths: [extensionPath],
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+    });
+    await resourceLoader.reload();
+    expect(resourceLoader.getExtensions().errors).toEqual([]);
+    expect(resourceLoader.getExtensions().extensions).toHaveLength(1);
+
+    const { session } = await createAgentSession({
+      cwd: layout.projectDir,
+      agentDir: layout.agentDir,
+      model: PIDECK_NO_MODEL,
+      modelRuntime,
+      settingsManager,
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(layout.projectDir),
+    });
+    sessions.push(session);
+
+    const captured: ExtensionInvocationMetadata[] = [];
+    const invocationRunner: ExtensionInvocationRunner = async <T>(
+      metadata: ExtensionInvocationMetadata,
+      invoke: () => T | Promise<T>,
+    ) => {
+      captured.push(metadata);
+      return await invoke();
+    };
+    // Bind only the invocation runner so hasBindings depends on the P8 field,
+    // not uiContext. Direct ExtensionRunner.setInvocationRunner tests cannot
+    // catch a missing bindExtensions save or reload rebind.
+    await session.bindExtensions({ invocationRunner });
+
+    const sessionStarts = () =>
+      captured.filter(
+        (metadata) => metadata.kind === "event" && metadata.eventType === "session_start",
+      );
+    expect(sessionStarts()).toHaveLength(1);
+    expect(sessionStarts()[0]!.sourceInfo.path.replaceAll("\\", "/")).toContain(
+      "invocation-bind-reload.js",
+    );
+
+    const runnerAtBind = session.extensionRunner;
+    await session.reload();
+    expect(session.extensionRunner).not.toBe(runnerAtBind);
+    expect(sessionStarts()).toHaveLength(2);
+    expect(sessionStarts()[1]!.sourceInfo.path.replaceAll("\\", "/")).toContain(
+      "invocation-bind-reload.js",
+    );
+
+    await session.extensionRunner.emit({ type: "session_start", reason: "startup" });
+    expect(sessionStarts()).toHaveLength(3);
+    expect(sessionStarts()[2]!.sourceInfo).toBe(sessionStarts()[1]!.sourceInfo);
   });
 });

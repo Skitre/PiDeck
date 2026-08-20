@@ -35,10 +35,7 @@ function modelEntry(id: string, extra: Record<string, unknown> = {}) {
 function layoutWithProviders(providers: Record<string, unknown>): TempAgentLayout {
   const layout = createTempAgentLayout("pideck-auth-compat-");
   layouts.push(layout);
-  writeFileSync(
-    join(layout.agentDir, "models.json"),
-    JSON.stringify({ providers }, null, 2),
-  );
+  writeFileSync(join(layout.agentDir, "models.json"), JSON.stringify({ providers }, null, 2));
   return layout;
 }
 
@@ -169,12 +166,10 @@ describe("custom headers", () => {
     expect(headers["X-Provider-Only"]).toBe("keep");
   });
 
-  it("drops Model.headers deleted with the null sentinel from the request surface", async () => {
-    // In models.json a null header value is a resolution error
-    // (resolveHeadersOrThrow), so the sentinel only reaches a request through
-    // a Model object that carries it — the shape extension-provided model
-    // definitions use to delete an inherited header. The compat surface must
-    // filter it rather than emit a literal "null" header value.
+  it("keeps Model.headers null sentinels for the SDK request surface", async () => {
+    // 0.84.2 ProviderHeaders is Record<string, string | null>. The SDK stream
+    // path must see null so it can delete an inherited header. Host-built HTTP
+    // headers still drop nulls before they become a wire value.
     const layout = layoutWithProviders({});
     const { modelRegistry } = await createTestModelServices(layout.agentDir);
     modelRegistry.registerProvider("nulled", {
@@ -186,8 +181,6 @@ describe("custom headers", () => {
     });
 
     const model = modelRegistry.find("nulled", "m1")!;
-    // Model.headers is typed Record<string, string>; the null sentinel enters
-    // through extension model definitions whose looser config type allows it.
     const withSentinel = {
       ...model,
       headers: { "X-Keep": "1", "X-Drop": null },
@@ -197,7 +190,7 @@ describe("custom headers", () => {
     expect(auth.ok).toBe(true);
     if (auth.ok) {
       expect(auth.headers?.["X-Keep"]).toBe("1");
-      expect(auth.headers ?? {}).not.toHaveProperty("X-Drop");
+      expect(auth.headers?.["X-Drop"]).toBeNull();
     }
   });
 });

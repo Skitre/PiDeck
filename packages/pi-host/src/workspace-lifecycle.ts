@@ -18,7 +18,6 @@ import {
 import { activateOnce, bindForCandidate } from "./extension-ui-lifecycle.js";
 import type { ProviderOwnerToken } from "./extension-provider-ownership.js";
 import { captureFilesystemFingerprint } from "./filesystem-fingerprint.js";
-import { getInternalRuntime } from "./internal-runtime.js";
 import { logger } from "./logger.js";
 import { buildPackageSnapshot } from "./package-snapshot.js";
 import { buildSessionSnapshot } from "./session-snapshot.js";
@@ -779,7 +778,6 @@ export class WorkspaceLifecycle {
         cwd: args.canonicalCwd,
         agentDir,
         settingsManager,
-        env: getInternalRuntime().env,
       });
       const cache = this.context.deps.userResourceCache;
       if (!cache) {

@@ -3,6 +3,7 @@
  * PiDeck Host entry — owns all Pi SDK services.
  * Transport: JSONL on stdin/stdout; logs on stderr.
  */
+import "./sdk-adapters/install-host-sdk-adapters.js";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";

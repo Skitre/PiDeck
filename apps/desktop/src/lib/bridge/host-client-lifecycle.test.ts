@@ -20,7 +20,7 @@ function ready(hostInstanceId: string, timestamp = Date.now()) {
     payload: {
       protocolVersion: 1,
       ...identity(hostInstanceId),
-      sdkVersion: "0.82.1",
+      sdkVersion: "0.84.2",
       nodeVersion: process.version,
       agentDir: "C:/isolated-agent",
       phase: "waitingForWorkspace",
@@ -130,13 +130,7 @@ describe("HostClient Rust lifecycle epochs", () => {
 
     const replacementId = "20000000-0000-4000-8000-000000000001";
     wire.emit(ready(replacementId, 200));
-    wire.emit(
-      lifecycleFatal(
-        "00000000-0000-4000-8000-000000000002",
-        "stale process exit",
-        100,
-      ),
-    );
+    wire.emit(lifecycleFatal("00000000-0000-4000-8000-000000000002", "stale process exit", 100));
 
     expect(client.getHostInstanceId()).toBe(replacementId);
     expect(events).toEqual(["host.ready"]);

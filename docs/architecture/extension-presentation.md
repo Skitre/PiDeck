@@ -27,9 +27,9 @@ await ctx.sendMessage({
       correlationId: "run-42",
       groupKey: "run-42",
       title: "Reviewing the workspace",
-      summary: "Two of four checks are complete."
-    }
-  }
+      summary: "Two of four checks are complete.",
+    },
+  },
 });
 ```
 
@@ -38,20 +38,20 @@ serialized message directly. `details.presentation` is the portable SDK path.
 
 Presentation fields:
 
-| Field | Values / purpose |
-|---|---|
-| `version` | Must be `1` |
-| `extensionId` | Stable Extension identifier |
-| `audience` | `user` or `agent` |
-| `kind` | `activity`, `progress`, `decision`, `result`, or `warning` |
-| `correlationId` | Stable identifier for this logical event or request |
-| `sourceLabel` | Optional user-facing Extension name |
-| `status` | `pending`, `running`, `resolved`, `cancelled`, `expired`, or `failed` |
-| `severity` | `neutral`, `info`, `warning`, or `danger` |
-| `groupKey` | Optional identifier for related events |
-| `title`, `summary` | Bounded plain text shown for `audience: "user"` |
-| `actionRequestId` | Reference to a live decision request; never executable by itself |
-| `technicalDetails` | JSON shown only after opening the Extension title row |
+| Field              | Values / purpose                                                      |
+| ------------------ | --------------------------------------------------------------------- |
+| `version`          | Must be `1`                                                           |
+| `extensionId`      | Stable Extension identifier                                           |
+| `audience`         | `user` or `agent`                                                     |
+| `kind`             | `activity`, `progress`, `decision`, `result`, or `warning`            |
+| `correlationId`    | Stable identifier for this logical event or request                   |
+| `sourceLabel`      | Optional user-facing Extension name                                   |
+| `status`           | `pending`, `running`, `resolved`, `cancelled`, `expired`, or `failed` |
+| `severity`         | `neutral`, `info`, `warning`, or `danger`                             |
+| `groupKey`         | Optional identifier for related events                                |
+| `title`, `summary` | Bounded plain text shown for `audience: "user"`                       |
+| `actionRequestId`  | Reference to a live decision request; never executable by itself      |
+| `technicalDetails` | JSON shown only after opening the Extension title row                 |
 
 `display: false` always wins and keeps the message out of the transcript. For
 `audience: "agent"`, PiDeck ignores presentation title and summary in the main
@@ -106,9 +106,9 @@ const approved = await ctx.ui.confirm(
       presentation: "inline",
       sourceLabel: "Migration review",
       correlationId: "migration-42",
-      risk: "high"
-    }
-  }
+      risk: "high",
+    },
+  },
 );
 ```
 
@@ -157,28 +157,28 @@ await ctx.ui.select("Choose a cleanup mode", ["keep", "delete"], {
       {
         id: "delete",
         description: "Remove generated files permanently",
-        destructive: true
-      }
-    ]
-  }
+        destructive: true,
+      },
+    ],
+  },
 });
 ```
 
 PiDeck strips terminal controls, bounds presentation strings, ignores unknown
 metadata, and emits only protocol-whitelisted fields. Other UI modes ignore the
 optional `pideck` namespace. Extensions compiled against an unpatched upstream
-0.82.1 declaration need the PiDeck type extension (or an equivalent local type
+declaration need the PiDeck type extension (or an equivalent local type
 intersection) even though the runtime option is backward compatible.
 
 ### Host routing modes
 
 `extensionDecisionPresentation` is a Desktop setting synchronized to Pi Host:
 
-| Mode | Behavior |
-|---|---|
-| `legacy-modal` | Fail-safe Host fallback and one-click rollback; all requests use Modal |
-| `auto` | New-install default; active ordinary tool/command requests use Inline when available |
-| `inline-first` | Prefer Inline for other active origins after mandatory guards |
+| Mode           | Behavior                                                                             |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `legacy-modal` | Fail-safe Host fallback and one-click rollback; all requests use Modal               |
+| `auto`         | New-install default; active ordinary tool/command requests use Inline when available |
+| `inline-first` | Prefer Inline for other active origins after mandatory guards                        |
 
 Only a Desktop settings store with no existing file starts in `auto`. Legacy settings
 that predate the field and corrupt-settings recovery remain `legacy-modal`; Pi Host also
@@ -238,11 +238,11 @@ through a clear-search action.
 
 Compatibility is organized by behavior class rather than package popularity:
 
-| Layer | Evidence |
-|---|---|
-| Contract fixture | Real SDK loader coverage for subagent dialog/widget/custom/activity, permission and repository guards, planning select/editor, 150-option selection, persistent widgets, registered message renderer snapshots, provider-only registration, background ownership, and shutdown cleanup |
-| Pinned published packages | Exact `@juicesharp/rpiv-ask-user-question` `2.1.0` RPC/group/envelope path and `1.20.0` custom-terminal fallback, both locked with registry integrity hashes |
-| Scheduled latest audit | Weekly/manual GitHub workflow replaces only the disposable v2 test alias with npm `latest`; it is separate from pull-request and `main` gates |
+| Layer                     | Evidence                                                                                                                                                                                                                                                                               |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Contract fixture          | Real SDK loader coverage for subagent dialog/widget/custom/activity, permission and repository guards, planning select/editor, 150-option selection, persistent widgets, registered message renderer snapshots, provider-only registration, background ownership, and shutdown cleanup |
+| Pinned published packages | Exact `@juicesharp/rpiv-ask-user-question` `2.1.0` RPC/group/envelope path and `1.20.0` custom-terminal fallback, both locked with registry integrity hashes                                                                                                                           |
+| Scheduled latest audit    | Weekly/manual GitHub workflow replaces only the disposable v2 test alias with npm `latest`; it is separate from pull-request and `main` gates                                                                                                                                          |
 
 Core routing contains no representative package-name branch. The published packages
 are ecosystem evidence; the repository fixture remains the stable per-commit contract.

@@ -32,7 +32,7 @@ function host(): HostStatusSnapshot {
     sessionId: SESSION_ID,
     sessionRevision: 3,
     packageRevision: 1,
-    sdkVersion: "0.82.1",
+    sdkVersion: "0.84.2",
     nodeVersion: process.version,
     agentDir: "/agent",
     phase: "ready",
@@ -111,9 +111,7 @@ function exportEnvelope(path: string): HostResponseEnvelope {
 describe("exportFileName", () => {
   it("uses the session name and strips filesystem-hostile characters", () => {
     expect(exportFileName('a/b:c?"d"', SESSION_ID, "html")).toBe("a-b-c--d-.html");
-    expect(exportFileName(undefined, SESSION_ID, "jsonl")).toBe(
-      "session-33333333.jsonl",
-    );
+    expect(exportFileName(undefined, SESSION_ID, "jsonl")).toBe("session-33333333.jsonl");
   });
 });
 
@@ -158,9 +156,7 @@ describe("requestExport", () => {
       { format: "html", path: "/tmp/out.html" },
       null,
     );
-    expect(notifications()).toEqual([
-      { message: "Exported to /tmp/out.html", level: "info" },
-    ]);
+    expect(notifications()).toEqual([{ message: "Exported to /tmp/out.html", level: "info" }]);
     await vi.waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("desktop_open_path", {
         path: "/tmp/out.html",

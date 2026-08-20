@@ -26,20 +26,20 @@
 
 ## Agent commands
 
-| UI action | Method |
-|---|---|
-| Send (idle) | `agent.prompt` |
-| Send (busy) | `agent.followUp` or `agent.steer`, from Settings → General (`busySendBehavior`, default follow-up) |
-| Stop | `agent.abort` |
-| Stop (compacting) | `agent.abortCompaction` |
-| Stop (retrying) | `agent.abortRetry` |
-| `/compact [instructions]` or Compact now | `agent.compact` |
-| Auto-compaction switch | `agent.setAutoCompaction` |
-| `/session` stats dialog | `session.getStats` |
-| `/tree` dock panel | `session.getTree` / `agent.navigateTree` |
-| `/fork` selector or tree fork button | `session.getForkPoints` / `session.fork` |
-| `/export [html\|jsonl]` or stats-dialog buttons | `session.export` |
-| Tools panel | `agent.getTools` / `agent.setActiveTools` |
+| UI action                                       | Method                                                                                             |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Send (idle)                                     | `agent.prompt`                                                                                     |
+| Send (busy)                                     | `agent.followUp` or `agent.steer`, from Settings → General (`busySendBehavior`, default follow-up) |
+| Stop                                            | `agent.abort`                                                                                      |
+| Stop (compacting)                               | `agent.abortCompaction`                                                                            |
+| Stop (retrying)                                 | `agent.abortRetry`                                                                                 |
+| `/compact [instructions]` or Compact now        | `agent.compact`                                                                                    |
+| Auto-compaction switch                          | `agent.setAutoCompaction`                                                                          |
+| `/session` stats dialog                         | `session.getStats`                                                                                 |
+| `/tree` dock panel                              | `session.getTree` / `agent.navigateTree`                                                           |
+| `/fork` selector or tree fork button            | `session.getForkPoints` / `session.fork`                                                           |
+| `/export [html\|jsonl]` or stats-dialog buttons | `session.export`                                                                                   |
+| Tools panel                                     | `agent.getTools` / `agent.setActiveTools`                                                          |
 
 Tool Result `addedToolNames` → Host publishes full `agent.toolsChanged` (no client-side tool schema invention).
 
@@ -110,13 +110,13 @@ with reason `fork`. Forking before the first message is not supported.
 
 ## Extension UI
 
-**Binding (SDK 0.82.1):** Host calls only public
+**Binding (current patched SDK):** Host calls only public
 
 ```ts
 await session.bindExtensions({
   uiContext,
   mode: "rpc",
-  invocationRunner
+  invocationRunner,
 });
 ```
 

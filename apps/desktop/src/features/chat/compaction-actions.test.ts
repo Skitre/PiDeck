@@ -23,7 +23,7 @@ function host(sessionId: string = SESSION_A): HostStatusSnapshot {
     sessionId,
     sessionRevision: 3,
     packageRevision: 1,
-    sdkVersion: "0.82.1",
+    sdkVersion: "0.84.2",
     nodeVersion: process.version,
     agentDir: "/agent",
     phase: "ready",
@@ -154,12 +154,7 @@ describe("compaction actions", () => {
 
     await expect(requestCompact()).resolves.toBe(true);
 
-    expect(request).toHaveBeenCalledExactlyOnceWith(
-      "agent.compact",
-      EXPECTED_CONTEXT,
-      null,
-      null,
-    );
+    expect(request).toHaveBeenCalledExactlyOnceWith("agent.compact", EXPECTED_CONTEXT, null, null);
     expect(notifications()).toEqual([{ message: "Context compacted", level: "info" }]);
   });
 
@@ -222,11 +217,9 @@ describe("compaction actions", () => {
 
     await setAutoCompaction(false);
 
-    expect(request).toHaveBeenCalledExactlyOnceWith(
-      "agent.setAutoCompaction",
-      EXPECTED_CONTEXT,
-      { enabled: false },
-    );
+    expect(request).toHaveBeenCalledExactlyOnceWith("agent.setAutoCompaction", EXPECTED_CONTEXT, {
+      enabled: false,
+    });
     expect(useAppStore.getState().session?.autoCompactionEnabled).toBe(false);
   });
 

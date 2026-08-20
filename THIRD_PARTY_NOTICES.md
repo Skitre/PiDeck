@@ -46,11 +46,24 @@ packaging pipeline; exact pinned versions and archive hashes live in
 - License: MIT OR Apache-2.0
 - Source: <https://github.com/tauri-apps/tauri>
 
-## @earendil-works/pi-coding-agent
+## Pi SDK family (`@earendil-works/pi-*`)
 
-- Package: `@earendil-works/pi-coding-agent@0.80.7`
-- Role: Sole Agent / Session / Package / Resource runtime (Node Pi Host)
-- License: As published with the npm package
+Pi Host ships this family at the exact versions pinned in
+`packages/pi-host/package.json` and verified by
+`scripts/release-sdk-evidence.mjs` (`PI_SDK_PACKAGES`). Current pin: **0.84.2**.
+
+| Package                           | Role                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| `@earendil-works/pi-ai`           | LLM API / model discovery                                                 |
+| `@earendil-works/pi-agent-core`   | Agent core (lock-resolved; Host does not import it directly)              |
+| `@earendil-works/pi-coding-agent` | Agent / Session / Package / Resource runtime (Node Pi Host; pnpm-patched) |
+| `@earendil-works/pi-tui`          | TUI used by Extension UI                                                  |
+| `@earendil-works/pi-client`       | SDK client protocol boundary (lock-resolved)                              |
+| `@earendil-works/pi-protocol`     | SDK protocol (lock-resolved; not `@pideck/protocol`)                      |
+| `@earendil-works/pi-telemetry`    | Telemetry contracts used by `pi-ai` / `pi-agent-core` (lock-resolved)     |
+
+- License: MIT, as published with each npm package
+- Source: <https://github.com/earendil-works/pi>
 
 ## Other runtime dependencies
 

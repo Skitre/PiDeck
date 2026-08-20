@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { parse } from "yaml";
 
 export const PI_SDK_PACKAGES = Object.freeze([
@@ -9,6 +9,19 @@ export const PI_SDK_PACKAGES = Object.freeze([
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-coding-agent",
   "@earendil-works/pi-tui",
+  "@earendil-works/pi-client",
+  "@earendil-works/pi-protocol",
+  "@earendil-works/pi-telemetry",
+]);
+
+export const PRODUCT_VERSION_PATHS = Object.freeze([
+  "package.json",
+  "packages/pi-host/package.json",
+  "packages/protocol/package.json",
+  "apps/desktop/package.json",
+  "apps/desktop/src-tauri/tauri.conf.json",
+  "apps/desktop/src-tauri/Cargo.toml",
+  "apps/desktop/src-tauri/Cargo.lock",
 ]);
 
 const DIRECT_PI_SDK_PACKAGES = Object.freeze([
@@ -85,6 +98,57 @@ function findAgentCoreVersion(lock, sdkVersion, patchHash) {
     );
   }
   return [...versions][0];
+}
+
+function readProductVersion(root, relativePath) {
+  const path = join(root, relativePath);
+  const text = readFileSync(path, "utf8");
+  if (relativePath.endsWith("Cargo.toml")) {
+    const match = text.match(/^\[package\]\r?\nname = "pideck"\r?\nversion = "([^"]+)"/m);
+    if (!match) fail(`${relativePath} is missing [package] name = "pideck" version`);
+    return match[1];
+  }
+  if (relativePath.endsWith("Cargo.lock")) {
+    const match = text.match(/^name = "pideck"\r?\nversion = "([^"]+)"/m);
+    if (!match) fail(`${relativePath} is missing [[package]] name = "pideck" version`);
+    return match[1];
+  }
+  const manifest = JSON.parse(text);
+  if (typeof manifest.version !== "string" || manifest.version.length === 0) {
+    fail(`${relativePath} is missing a version string`);
+  }
+  return manifest.version;
+}
+
+export function assertThirdPartyNotices(root, packages, sdkVersion) {
+  const relativePath = "THIRD_PARTY_NOTICES.md";
+  const noticesPath = join(root, relativePath);
+  if (!existsSync(noticesPath)) fail(`${relativePath} is missing`);
+  const text = readFileSync(noticesPath, "utf8");
+  for (const packageName of Object.keys(packages)) {
+    if (!text.includes(packageName)) {
+      fail(`${relativePath} must name ${packageName}`);
+    }
+  }
+  if (!text.includes(sdkVersion)) {
+    fail(`${relativePath} must include the pinned SDK version ${sdkVersion}`);
+  }
+}
+
+export function assertProductVersionsEqual(root) {
+  const versions = Object.fromEntries(
+    PRODUCT_VERSION_PATHS.map((relativePath) => [
+      relativePath,
+      readProductVersion(root, relativePath),
+    ]),
+  );
+  const expected = versions["package.json"];
+  for (const [relativePath, version] of Object.entries(versions)) {
+    if (version !== expected) {
+      fail(`product version mismatch: ${relativePath} is ${version}, expected ${expected}`);
+    }
+  }
+  return expected;
 }
 
 function assertLockPackage(lock, packageName, version) {
@@ -178,12 +242,16 @@ export function loadReleaseSdkEvidence(root, runtimeLockOverride) {
     findAgentCoreVersion(lock, sdkVersion, lockPatch.hash),
     `${AGENT_CORE_PACKAGE} lock version`,
   );
-  const packages = {
-    "@earendil-works/pi-ai": sdkVersion,
-    "@earendil-works/pi-agent-core": agentCoreVersion,
-    "@earendil-works/pi-coding-agent": sdkVersion,
-    "@earendil-works/pi-tui": sdkVersion,
-  };
+  assertProductVersionsEqual(root);
+
+  const packages = Object.fromEntries(
+    PI_SDK_PACKAGES.map((packageName) => [packageName, sdkVersion]),
+  );
+  if (agentCoreVersion !== sdkVersion) {
+    fail(
+      `${AGENT_CORE_PACKAGE}@${agentCoreVersion} must match canonical SDK version ${sdkVersion}`,
+    );
+  }
   for (const [packageName, version] of Object.entries(packages)) {
     if (version !== sdkVersion) {
       fail(`${packageName}@${version} must match canonical SDK version ${sdkVersion}`);
@@ -200,6 +268,8 @@ export function loadReleaseSdkEvidence(root, runtimeLockOverride) {
   if (runtimeLock.hostProductionDeps?.manifest !== HOST_MANIFEST_PATH) {
     fail(`release runtime lock must point hostProductionDeps.manifest to ${HOST_MANIFEST_PATH}`);
   }
+
+  assertThirdPartyNotices(root, packages, sdkVersion);
 
   return {
     schemaVersion: 1,
@@ -247,26 +317,38 @@ function readPackageManifest(path, packageName, label) {
   return { manifest, manifestPath: path };
 }
 
+function readFromNodeModules(nodeModulesRoot, packageName, label) {
+  return readPackageManifest(packageManifestPath(nodeModulesRoot, packageName), packageName, label);
+}
+
+function containingNodeModules(packageDir) {
+  const parent = dirname(packageDir);
+  return basename(parent).startsWith("@") ? dirname(parent) : parent;
+}
+
+function addReachableNodeModules(nodeModulesRoots, packageDir) {
+  const realRoot = realpathSync(packageDir);
+  nodeModulesRoots.add(containingNodeModules(realRoot));
+  nodeModulesRoots.add(join(realRoot, "node_modules"));
+}
+
 export function assertPiPackageTree(hostRoot, expected, label = "package tree") {
   const versions = {};
   const topLevelNodeModules = join(hostRoot, "node_modules");
-  const codingAgent = readPackageManifest(
-    packageManifestPath(topLevelNodeModules, SDK_PACKAGE),
-    SDK_PACKAGE,
-    label,
-  );
+  const nodeModulesRoots = new Set([topLevelNodeModules]);
+  const codingAgent = readFromNodeModules(topLevelNodeModules, SDK_PACKAGE, label);
   if (!codingAgent) fail(`${label} is missing ${SDK_PACKAGE}`);
-  const codingAgentRealRoot = realpathSync(dirname(codingAgent.manifestPath));
-  const pnpmDependencyRoot = dirname(dirname(codingAgentRealRoot));
+  addReachableNodeModules(nodeModulesRoots, dirname(codingAgent.manifestPath));
+
   for (const packageName of PI_SDK_PACKAGES) {
-    const topLevelPath = packageManifestPath(topLevelNodeModules, packageName);
-    const pnpmDependencyPath = packageManifestPath(pnpmDependencyRoot, packageName);
-    const resolved =
-      readPackageManifest(topLevelPath, packageName, label) ??
-      readPackageManifest(pnpmDependencyPath, packageName, label);
+    let resolved = null;
+    for (const nodeModulesRoot of nodeModulesRoots) {
+      resolved = readFromNodeModules(nodeModulesRoot, packageName, label);
+      if (resolved) break;
+    }
     if (!resolved) fail(`${label} is missing ${packageName}`);
-    const { manifest } = resolved;
-    versions[packageName] = manifest.version;
+    versions[packageName] = resolved.manifest.version;
+    addReachableNodeModules(nodeModulesRoots, dirname(resolved.manifestPath));
   }
   assertRecord(versions, expected.packages, `${label} Pi package versions`);
   return versions;

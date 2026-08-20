@@ -1,8 +1,9 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { createHostAgentSession } from "./agent-session-factory.js";
+import { clearSessionModel } from "./no-model.js";
 import { createTempAgentLayout, type TempAgentLayout } from "./test-helpers/temp-agent.js";
 import { createTestModelServices } from "./test-helpers/model-runtime.js";
 
@@ -103,8 +104,38 @@ describe("createHostAgentSession Provider policy", () => {
     });
 
     expect(session.model).toMatchObject({ provider: "enabled", id: "enabled-model" });
-    await session.clearModel();
+    await clearSessionModel(session);
     expect(session.model).toMatchObject({ provider: "unknown", id: "unknown" });
+    session.dispose();
+  });
+
+  it("does not persist the no-model sentinel as the default Provider", async () => {
+    const { layout, modelRuntime } = await setup({
+      pideckEnabledProviders: [],
+      providers: {
+        disabled: provider("disabled", ["disabled-model"]),
+        enabled: provider("enabled", ["enabled-model"]),
+      },
+    });
+    const settingsManager = SettingsManager.create(layout.projectDir, layout.agentDir, {
+      projectTrusted: true,
+    });
+    const { session } = await createHostAgentSession({
+      cwd: layout.projectDir,
+      agentDir: layout.agentDir,
+      modelRuntime,
+      settingsManager,
+      sessionManager: SessionManager.inMemory(layout.projectDir),
+    });
+
+    expect(session.model).toMatchObject({ provider: "unknown", id: "unknown" });
+    await settingsManager.flush();
+    const settings = JSON.parse(readFileSync(join(layout.agentDir, "settings.json"), "utf8")) as {
+      defaultProvider?: string;
+      defaultModel?: string;
+    };
+    expect(settings.defaultProvider).not.toBe("unknown");
+    expect(settings.defaultModel).not.toBe("unknown");
     session.dispose();
   });
 

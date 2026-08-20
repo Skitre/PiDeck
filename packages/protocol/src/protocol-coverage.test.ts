@@ -672,7 +672,7 @@ describe("protocol coverage — events", () => {
     "host.ready": {
       ...baseIdentity,
       protocolVersion: 1,
-      sdkVersion: "0.82.1",
+      sdkVersion: "0.84.2",
       nodeVersion: "v22",
       agentDir: "/a",
       phase: "waitingForWorkspace",
@@ -686,7 +686,7 @@ describe("protocol coverage — events", () => {
     "host.statusChanged": {
       ...baseIdentity,
       protocolVersion: 1,
-      sdkVersion: "0.82.1",
+      sdkVersion: "0.84.2",
       nodeVersion: "v22",
       agentDir: "/a",
       phase: "ready",
@@ -895,7 +895,7 @@ describe("protocol coverage — response discrimination", () => {
     const env = createSuccessResponse(baseIdentity, RESPONSE_ID, "system.hello", {
       ...baseIdentity,
       protocolVersion: 1,
-      sdkVersion: "0.82.1",
+      sdkVersion: "0.84.2",
       nodeVersion: "v22",
       agentDir: "/a",
       phase: "waitingForWorkspace",

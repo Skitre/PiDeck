@@ -14,7 +14,7 @@
 │  Node Pi Host (packages/pi-host)                        │
 │  - system / workspace / session / agent / model         │
 │  - package / resource / piSettings / extensionUi        │
-│  - @earendil-works/pi-coding-agent@0.82.1               │
+│  - @earendil-works/pi-coding-agent@0.84.2               │
 └──────────────────────────▲──────────────────────────────┘
                            │ typed protocol (via Rust)
 ┌──────────────────────────┴──────────────────────────────┐

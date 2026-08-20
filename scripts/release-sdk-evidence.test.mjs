@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   PI_SDK_PACKAGES,
+  PRODUCT_VERSION_PATHS,
   assertPiPackageTree,
+  assertProductVersionsEqual,
   assertReleaseProductionManifest,
   assertReleaseSdkEvidence,
+  assertThirdPartyNotices,
   deriveReleaseProductionDependencies,
   loadReleaseSdkEvidence,
 } from "./release-sdk-evidence.mjs";
@@ -56,6 +60,18 @@ test("probes Node-safe runtime entries for every Host production dependency", ()
   assert.ok(!specifiers.includes("pdfjs-dist"));
 });
 
+test("requires THIRD_PARTY_NOTICES to name the verified Pi SDK family and pin", () => {
+  const evidence = loadReleaseSdkEvidence(root);
+  assertThirdPartyNotices(root, evidence.packages, evidence.sdkVersion);
+});
+
+test("requires every product version file to match the root package.json", () => {
+  const version = assertProductVersionsEqual(root);
+  assert.equal(typeof version, "string");
+  assert.match(version, /^\d+\.\d+\.\d+$/);
+  assert.equal(PRODUCT_VERSION_PATHS.length, 7);
+});
+
 test("requires bundled bash.exe in the Portable Git runtime contract", () => {
   const runtimeLock = JSON.parse(
     readFileSync(join(root, "scripts/release-runtime.lock.json"), "utf8"),
@@ -87,4 +103,81 @@ test("rejects drifted runtime-lock and staged evidence", () => {
   );
   patchLock.hostProductionDeps.sdkPatchSha256 = "0".repeat(64);
   assert.throws(() => loadReleaseSdkEvidence(root, patchLock), /SDK patch SHA-256 mismatch/);
+});
+
+const TELEMETRY_PACKAGE = "@earendil-works/pi-telemetry";
+
+function writeManifest(dir, name, version) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name, version }));
+}
+
+function fixturePackages(version) {
+  return Object.fromEntries(PI_SDK_PACKAGES.map((name) => [name, version]));
+}
+
+function writeFamilyExceptTelemetry(hostRoot, version) {
+  for (const packageName of PI_SDK_PACKAGES) {
+    if (packageName === TELEMETRY_PACKAGE) continue;
+    writeManifest(join(hostRoot, "node_modules", ...packageName.split("/")), packageName, version);
+  }
+}
+
+test("resolves pi-telemetry through a reachable pi-ai node_modules link", () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), "pideck-sdk-tree-reachable-"));
+  try {
+    const version = "0.84.2";
+    writeFamilyExceptTelemetry(hostRoot, version);
+    writeManifest(
+      join(
+        hostRoot,
+        "node_modules",
+        "@earendil-works",
+        "pi-ai",
+        "node_modules",
+        ...TELEMETRY_PACKAGE.split("/"),
+      ),
+      TELEMETRY_PACKAGE,
+      version,
+    );
+    const versions = assertPiPackageTree(
+      hostRoot,
+      { packages: fixturePackages(version) },
+      "reachable fixture",
+    );
+    assert.equal(versions[TELEMETRY_PACKAGE], version);
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects a pnpm store entry that is not reachable from Host dependencies", () => {
+  const hostRoot = mkdtempSync(join(tmpdir(), "pideck-sdk-tree-orphan-"));
+  try {
+    const version = "0.84.2";
+    writeFamilyExceptTelemetry(hostRoot, version);
+    writeManifest(
+      join(
+        hostRoot,
+        "node_modules",
+        ".pnpm",
+        "@earendil-works+pi-telemetry@0.84.2",
+        "node_modules",
+        ...TELEMETRY_PACKAGE.split("/"),
+      ),
+      TELEMETRY_PACKAGE,
+      version,
+    );
+    assert.throws(
+      () =>
+        assertPiPackageTree(
+          hostRoot,
+          { packages: fixturePackages(version) },
+          "orphan store fixture",
+        ),
+      /missing @earendil-works\/pi-telemetry/,
+    );
+  } finally {
+    rmSync(hostRoot, { recursive: true, force: true });
+  }
 });

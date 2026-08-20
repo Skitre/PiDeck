@@ -18,7 +18,7 @@ const current: HostStatusSnapshot = {
   protocolVersion: 1,
   hostInstanceId: "11111111-1111-4111-8111-111111111111",
   phase: "ready",
-  sdkVersion: "0.82.1",
+  sdkVersion: "0.84.2",
   nodeVersion: "v24.18.0",
   agentDir: "C:\\temp\\agent",
   modelConfigHealth: { state: "ok", source: "ModelRegistry.getError" },

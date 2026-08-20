@@ -29,7 +29,7 @@ function host(): HostStatusSnapshot {
     sessionId: SESSION_A,
     sessionRevision: 3,
     packageRevision: 1,
-    sdkVersion: "0.82.1",
+    sdkVersion: "0.84.2",
     nodeVersion: process.version,
     agentDir: "/agent",
     phase: "agentBusy",
@@ -109,9 +109,7 @@ describe("QueuePanel Run Now", () => {
     useAppStore.getState().applySessionSnapshot(null);
     useAppStore.getState().setHost(host());
     useAppStore.getState().setWorkspace(workspace());
-    useAppStore.getState().applySessionSnapshot(
-      session(SESSION_A, ["run this", "later"]),
-    );
+    useAppStore.getState().applySessionSnapshot(session(SESSION_A, ["run this", "later"]));
   });
 
   afterEach(() => {
@@ -124,9 +122,7 @@ describe("QueuePanel Run Now", () => {
     const response = new Promise<HostResponseEnvelope>((resolve) => {
       resolveRequest = resolve;
     });
-    const request = vi
-      .spyOn(hostClient, "request")
-      .mockImplementation(() => response as never);
+    const request = vi.spyOn(hostClient, "request").mockImplementation(() => response as never);
     const user = userEvent.setup();
     render(<QueuePanel />);
 
@@ -196,9 +192,7 @@ describe("QueuePanel Run Now", () => {
         unitCount: 2,
       },
     ]);
-    useAppStore.getState().applySessionSnapshot(
-      session(SESSION_A, [`review this\n\n${marker}`]),
-    );
+    useAppStore.getState().applySessionSnapshot(session(SESSION_A, [`review this\n\n${marker}`]));
     const request = vi.spyOn(hostClient, "request").mockResolvedValue({
       ok: true,
       result: { queue: { revision: 8, steering: ["steer"], followUp: [] } },

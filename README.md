@@ -110,7 +110,7 @@ installs them in place.
 
 ## Works with the Pi CLI — but doesn't need it
 
-PiDeck bundles the Pi SDK (currently `0.82.1`) and its own Node runtime, so
+PiDeck bundles the Pi SDK (currently `0.84.2`) and its own Node runtime, so
 it runs standalone — no global `pi` executable or Node installation required.
 The Windows build bundles Git as well.
 

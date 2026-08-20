@@ -2,8 +2,8 @@ import { createServer, type Server } from "node:http";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ModelConfigHealth, ProviderDraft } from "@pideck/protocol";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { ModelConfigHealth, ProviderDraft, SessionSnapshot } from "@pideck/protocol";
+import type { AgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai/compat";
 import { createProviderHandlers } from "./provider-controller.js";
 import { getEnabledProviderIds, getProviderModelAllowLists } from "./provider-models-config.js";
@@ -112,43 +112,51 @@ function configuredModel(id: string): ProviderDraft["models"][number] {
   };
 }
 
+const SNAPSHOT_SESSION_ID = "33333333-3333-4333-8333-333333333333";
+const SNAPSHOT_WORKSPACE_ID = "22222222-2222-4222-8222-222222222222";
+
 function runtimeSession(model: Model<Api>, isIdle: boolean) {
   const state = { model };
+  const runtime = { thinkingLevel: "off" };
   const setModel = vi.fn(async (next: Model<Api>) => {
     state.model = next;
   });
-  const clearModel = vi.fn(async () => {
-    state.model = {
-      provider: "unknown",
-      id: "unknown",
-      name: "unknown",
-      api: "unknown",
-      baseUrl: "",
-      reasoning: false,
-      input: [],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 0,
-      maxTokens: 0,
-    } as Model<Api>;
+  const setThinkingLevel = vi.fn((level: string) => {
+    runtime.thinkingLevel = level;
   });
   const session = {
     isIdle,
+    isCompacting: false,
+    isRetrying: false,
+    messages: [],
     get model() {
       return state.model;
     },
+    get thinkingLevel() {
+      return runtime.thinkingLevel;
+    },
     state,
-    thinkingLevel: "off",
-    setThinkingLevel: vi.fn(),
+    agent: { state },
+    autoCompactionEnabled: true,
+    autoRetryEnabled: true,
+    steeringMode: "all",
+    followUpMode: "all",
+    setThinkingLevel,
     setModel,
-    clearModel,
+    extensionRunner: { emit: vi.fn(async () => undefined) },
+    getSteeringMessages: () => [],
+    getFollowUpMessages: () => [],
+    getAllTools: () => [],
+    getActiveToolNames: () => [],
   } as unknown as AgentSession;
-  return { session, setModel, clearModel, state };
+  return { session, setModel, setThinkingLevel, state };
 }
 
 function attachRuntimeGraph(
   factory: WorkspaceGraphFactory,
   active: AgentSession | null,
   background: AgentSession[] = [],
+  extras: Partial<WorkspaceGraph> = {},
 ): void {
   const backgroundSessions = new Map(
     background.map((session, index) => [
@@ -159,7 +167,37 @@ function attachRuntimeGraph(
   Reflect.set(factory, "graph", {
     agentSession: active,
     backgroundSessions,
+    ...extras,
   } as WorkspaceGraph);
+}
+
+function attachClearableSession(
+  factory: WorkspaceGraphFactory,
+  session: AgentSession,
+  revision = 7,
+): void {
+  attachRuntimeGraph(factory, session, [], {
+    sessionManager: {} as SessionManager,
+    sessionSnapshot: {
+      sessionId: SNAPSHOT_SESSION_ID,
+      revision,
+    } as SessionSnapshot,
+    canonicalCwd: "C:/workspace",
+    workspaceId: SNAPSHOT_WORKSPACE_ID,
+    toolRevision: 1,
+  });
+}
+
+function expectPublishedNoModelSnapshot(
+  factory: WorkspaceGraphFactory,
+  emit: ReturnType<typeof vi.spyOn>,
+  revision: number,
+): void {
+  const snapshot = factory.getGraph()?.sessionSnapshot;
+  expect(snapshot?.revision).toBe(revision);
+  expect(snapshot?.model).toMatchObject({ provider: "unknown", modelId: "unknown" });
+  expect(snapshot?.thinkingLevel).toBe("off");
+  expect(emit).toHaveBeenCalledWith("session.snapshot", snapshot);
 }
 
 function writeAnthropicSuccess(response: import("node:http").ServerResponse): void {
@@ -475,7 +513,7 @@ describe("Provider controller", () => {
   });
 
   it("allows removing the final enabled Provider and clears the idle Session model", async () => {
-    const { credentialStore, factory, handlers, layout, modelRegistry } = await setup({
+    const { credentialStore, factory, handlers, layout, modelRegistry, server } = await setup({
       pideckEnabledProviders: ["custom"],
       providers: {
         custom: {
@@ -490,7 +528,8 @@ describe("Provider controller", () => {
     const current = modelRegistry.find("custom", "primary");
     if (!current) throw new Error("Missing current model fixture");
     const active = runtimeSession(current, true);
-    attachRuntimeGraph(factory, active.session);
+    attachClearableSession(factory, active.session);
+    const emit = vi.spyOn(server, "emit");
 
     const outcome = await handlers["provider.remove"]!({
       id: "remove-only-idle-provider",
@@ -498,8 +537,9 @@ describe("Provider controller", () => {
     } as never);
 
     expect("error" in outcome ? outcome.error.message : null).toBeNull();
-    expect(active.clearModel).toHaveBeenCalledOnce();
     expect(active.state.model).toMatchObject({ provider: "unknown", id: "unknown" });
+    expect(active.session.setThinkingLevel).toHaveBeenCalledWith("off");
+    expectPublishedNoModelSnapshot(factory, emit, 7);
     const persisted = JSON.parse(readFileSync(join(layout.agentDir, "models.json"), "utf8"));
     expect(persisted.providers.custom).toBeUndefined();
     expect(persisted.pideckEnabledProviders).toEqual([]);
@@ -507,7 +547,7 @@ describe("Provider controller", () => {
   });
 
   it("allows removing a Provider when every Provider is already disabled", async () => {
-    const { credentialStore, factory, handlers, layout, modelRegistry } = await setup({
+    const { credentialStore, factory, handlers, layout, modelRegistry, server } = await setup({
       pideckEnabledProviders: [],
       providers: {
         custom: {
@@ -528,7 +568,8 @@ describe("Provider controller", () => {
     const current = modelRegistry.find("custom", "primary");
     if (!current) throw new Error("Missing current model fixture");
     const active = runtimeSession(current, true);
-    attachRuntimeGraph(factory, active.session);
+    attachClearableSession(factory, active.session);
+    const emit = vi.spyOn(server, "emit");
 
     const outcome = await handlers["provider.remove"]!({
       id: "remove-disabled-provider",
@@ -536,8 +577,9 @@ describe("Provider controller", () => {
     } as never);
 
     expect("error" in outcome ? outcome.error.message : null).toBeNull();
-    expect(active.clearModel).toHaveBeenCalledOnce();
     expect(active.state.model).toMatchObject({ provider: "unknown", id: "unknown" });
+    expect(active.session.setThinkingLevel).toHaveBeenCalledWith("off");
+    expectPublishedNoModelSnapshot(factory, emit, 7);
     const persisted = JSON.parse(readFileSync(join(layout.agentDir, "models.json"), "utf8"));
     expect(persisted.providers.custom).toBeUndefined();
     expect(persisted.providers.other).toBeDefined();
@@ -1924,7 +1966,7 @@ describe("Provider login", () => {
   });
 
   it("allows disabling the final Provider and clears the idle Session model", async () => {
-    const { factory, handlers, layout, modelRegistry } = await setup({
+    const { factory, handlers, layout, modelRegistry, server } = await setup({
       pideckEnabledProviders: ["custom"],
       providers: {
         custom: {
@@ -1938,7 +1980,8 @@ describe("Provider login", () => {
     const current = modelRegistry.find("custom", "primary");
     if (!current) throw new Error("Missing current model fixture");
     const active = runtimeSession(current, true);
-    attachRuntimeGraph(factory, active.session);
+    attachClearableSession(factory, active.session);
+    const emit = vi.spyOn(server, "emit");
 
     const outcome = await handlers["provider.setEnabled"]!({
       id: "disable-final-provider",
@@ -1946,8 +1989,9 @@ describe("Provider login", () => {
     } as never);
 
     expect("error" in outcome ? outcome.error.message : null).toBeNull();
-    expect(active.clearModel).toHaveBeenCalledOnce();
     expect(active.state.model).toMatchObject({ provider: "unknown", id: "unknown" });
+    expect(active.session.setThinkingLevel).toHaveBeenCalledWith("off");
+    expectPublishedNoModelSnapshot(factory, emit, 7);
     const persisted = JSON.parse(readFileSync(join(layout.agentDir, "models.json"), "utf8"));
     expect(persisted.pideckEnabledProviders).toEqual([]);
   });

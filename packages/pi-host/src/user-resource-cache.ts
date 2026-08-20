@@ -41,15 +41,10 @@ export class UserResourceCache {
   private reloadCount = 0;
   private readonly bindings = new WeakMap<DefaultResourceLoader, ExtensionHolder>();
 
-  constructor(
-    private readonly agentDir: string,
-    private readonly env?: NodeJS.ProcessEnv,
-  ) {}
+  constructor(private readonly agentDir: string) {}
 
-  private loaderOptions<T extends { cwd: string; agentDir: string }>(
-    options: T,
-  ): T & { env?: NodeJS.ProcessEnv } {
-    return this.env ? { ...options, env: this.env } : options;
+  private loaderOptions<T extends { cwd: string; agentDir: string }>(options: T): T {
+    return options;
   }
 
   get fullReloadCount(): number {

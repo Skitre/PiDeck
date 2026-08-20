@@ -4,6 +4,7 @@ import {
   type AssistantMessage,
   type Context,
   type Model,
+  type ProviderHeaders,
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai/compat";
 
@@ -15,7 +16,7 @@ type TitleModelRegistry = {
     | {
         ok: true;
         apiKey?: string;
-        headers?: Record<string, string>;
+        headers?: ProviderHeaders;
         env?: Record<string, string>;
       }
     | { ok: false; error: string }
@@ -44,10 +45,7 @@ function cleanTitle(value: string): string {
     .trim();
 }
 
-export function sanitizeSessionTitle(
-  value: string,
-  fallback = DEFAULT_SESSION_TITLE,
-): string {
+export function sanitizeSessionTitle(value: string, fallback = DEFAULT_SESSION_TITLE): string {
   const firstLine = value
     .split(/\r?\n/)
     .map((line) => cleanTitle(line))
@@ -70,14 +68,13 @@ export function extractLatestAssistantText(messages: readonly unknown[]): string
     if (typeof message.content === "string") return message.content;
     if (!Array.isArray(message.content)) continue;
     return message.content
-      .filter(
-        (part): part is { type: "text"; text: string } =>
-          Boolean(
-            part &&
-              typeof part === "object" &&
-              (part as { type?: unknown }).type === "text" &&
-              typeof (part as { text?: unknown }).text === "string",
-          ),
+      .filter((part): part is { type: "text"; text: string } =>
+        Boolean(
+          part &&
+          typeof part === "object" &&
+          (part as { type?: unknown }).type === "text" &&
+          typeof (part as { text?: unknown }).text === "string",
+        ),
       )
       .map((part) => part.text)
       .join("\n");
@@ -108,9 +105,7 @@ export async function generateRefinedSessionTitle(args: {
         role: "user",
         content: [
           `User request:\n${args.userPrompt.slice(0, 2_000)}`,
-          args.assistantText
-            ? `Assistant response:\n${args.assistantText.slice(0, 2_000)}`
-            : "",
+          args.assistantText ? `Assistant response:\n${args.assistantText.slice(0, 2_000)}` : "",
         ]
           .filter(Boolean)
           .join("\n\n"),
