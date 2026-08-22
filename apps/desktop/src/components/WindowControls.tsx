@@ -2,6 +2,9 @@ import { Maximize2, Minus, Square, X, type LucideIcon } from "lucide-react";
 
 export type WindowControlsPlatform = "macos" | "windows";
 
+/** Overlay Windows caption buttons are 3 × 44px; keep a little slack. */
+export const WINDOWS_CAPTION_INSET_CLASS = "pr-[140px]";
+
 export function shouldRenderWindowControls(
   platform: WindowControlsPlatform,
   settingsOverlayOpen: boolean,

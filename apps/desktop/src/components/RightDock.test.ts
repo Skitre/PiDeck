@@ -34,4 +34,17 @@ describe("dock tab overflow", () => {
       overflow: ["b", "c"],
     });
   });
+
+  it("keeps a preferred tab visible without replacing the active tab", () => {
+    expect(
+      partitionDockTabs(["tree", "files", "browser", "extensions"], "browser", 3, ["extensions"]),
+    ).toEqual({
+      visible: ["tree", "extensions", "browser"],
+      overflow: ["files"],
+    });
+    expect(partitionDockTabs(["files", "extensions"], "files", 1, ["extensions"])).toEqual({
+      visible: ["files"],
+      overflow: ["extensions"],
+    });
+  });
 });

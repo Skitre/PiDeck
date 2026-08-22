@@ -2,6 +2,19 @@ import type { MessageKey } from "../i18n";
 import type { AppState } from "../stores/app-store";
 import { useAppStore } from "../stores/app-store";
 import { requestTreePanel } from "../dock-tree";
+import {
+  activateAdjacentExtensionDockTab,
+  canMoveFocusedExtensionSlot,
+  canResetFocusedExtensionFamily,
+  focusAdjacentExtensionFloat,
+  hasExtensionDockSplit,
+  hasFocusedExtensionDockGroup,
+  hasLiveExtensionFloats,
+  moveFocusedExtensionDockGroup,
+  moveFocusedExtensionSlot,
+  resetFocusedExtensionFamily,
+  resizeExtensionDockSplit,
+} from "../extension-ui-commands";
 import { abortCurrentAgent, createNewSession, isCreateSessionPending } from "./actions";
 import {
   requestDockCommand,
@@ -92,5 +105,104 @@ export const appCommands: readonly AppCommand[] = [
     chord: "mod+/",
     worksInTerminal: true,
     run: requestShortcutHelp,
+  },
+  {
+    id: "extension.float.next",
+    titleKey: "commandExtensionFloatNext",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && hasLiveExtensionFloats(),
+    run: () => {
+      focusAdjacentExtensionFloat(1);
+    },
+  },
+  {
+    id: "extension.float.previous",
+    titleKey: "commandExtensionFloatPrevious",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && hasLiveExtensionFloats(),
+    run: () => {
+      focusAdjacentExtensionFloat(-1);
+    },
+  },
+  {
+    id: "extension.slot.moveDock",
+    titleKey: "commandExtensionMoveDock",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && canMoveFocusedExtensionSlot(),
+    run: () => moveFocusedExtensionSlot("dockPrimary"),
+  },
+  {
+    id: "extension.slot.moveFloat",
+    titleKey: "commandExtensionMoveFloat",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && canMoveFocusedExtensionSlot(),
+    run: () => moveFocusedExtensionSlot("float"),
+  },
+  {
+    id: "extension.slot.moveAnchorAbove",
+    titleKey: "commandExtensionMoveAnchorAbove",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && canMoveFocusedExtensionSlot(),
+    run: () => moveFocusedExtensionSlot("aboveComposer"),
+  },
+  {
+    id: "extension.slot.moveAnchorBelow",
+    titleKey: "commandExtensionMoveAnchorBelow",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && canMoveFocusedExtensionSlot(),
+    run: () => moveFocusedExtensionSlot("belowComposer"),
+  },
+  {
+    id: "extension.dock.tabNext",
+    titleKey: "commandExtensionDockTabNext",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && hasFocusedExtensionDockGroup(),
+    run: () => {
+      activateAdjacentExtensionDockTab(1);
+    },
+  },
+  {
+    id: "extension.dock.tabPrevious",
+    titleKey: "commandExtensionDockTabPrevious",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && hasFocusedExtensionDockGroup(),
+    run: () => {
+      activateAdjacentExtensionDockTab(-1);
+    },
+  },
+  {
+    id: "extension.dock.moveSecondary",
+    titleKey: "commandExtensionDockMoveSecondary",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && canMoveFocusedExtensionSlot(),
+    run: () => moveFocusedExtensionDockGroup("secondary"),
+  },
+  {
+    id: "extension.dock.movePrimary",
+    titleKey: "commandExtensionDockMovePrimary",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && canMoveFocusedExtensionSlot(),
+    run: () => moveFocusedExtensionDockGroup("primary"),
+  },
+  {
+    id: "extension.dock.resizeLarger",
+    titleKey: "commandExtensionDockResizeLarger",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && hasExtensionDockSplit(),
+    run: () => resizeExtensionDockSplit(0.05),
+  },
+  {
+    id: "extension.dock.resizeSmaller",
+    titleKey: "commandExtensionDockResizeSmaller",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && hasExtensionDockSplit(),
+    run: () => resizeExtensionDockSplit(-0.05),
+  },
+  {
+    id: "extension.family.reset",
+    titleKey: "commandExtensionResetFamily",
+    blockedByOverlay: true,
+    enabled: (state) => state.page === "chat" && canResetFocusedExtensionFamily(),
+    run: () => resetFocusedExtensionFamily(),
   },
 ];

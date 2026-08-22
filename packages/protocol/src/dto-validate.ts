@@ -10,6 +10,7 @@ import {
   MAX_EXTENSION_UI_OPTIONS,
   MAX_EXTENSION_UI_SOURCE_LABEL_LENGTH,
   MAX_EXTENSION_UI_TITLE_LENGTH,
+  MAX_EXTENSION_UI_EXTENSION_ID_LENGTH,
   MAX_EXTENSION_MESSAGE_RENDER_CHARACTERS,
   MAX_EXTENSION_MESSAGE_RENDER_LINE_LENGTH,
   MAX_EXTENSION_MESSAGE_RENDER_LINES,
@@ -21,6 +22,8 @@ import type {
   RehydrateSnapshot,
   ToolSnapshot,
 } from "./types.js";
+import { EXTENSION_UI_ROUTE_REASONS } from "./types.js";
+import { isExtensionDialogPresentationOverrides } from "./extension-ui-settings.js";
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1213,7 +1216,7 @@ function isExtensionUiOrigin(value: unknown): boolean {
   }
   const baseKeys = ["invocationKind", "extensionId", "extensionDisplayName", "sourceKind"];
   if (
-    !isBoundedNonEmptyString(value.extensionId, 128) ||
+    !isBoundedNonEmptyString(value.extensionId, MAX_EXTENSION_UI_EXTENSION_ID_LENGTH) ||
     !isBoundedNonEmptyString(value.extensionDisplayName, 120) ||
     !["package", "user", "project", "synthetic"].includes(String(value.sourceKind))
   ) {
@@ -1301,20 +1304,7 @@ function isExtensionUiRequest(value: unknown): boolean {
       ["inline", "modal"].includes(String(value.presentation))) &&
     (value.risk === undefined || ["normal", "high"].includes(String(value.risk))) &&
     (value.routeReason === undefined ||
-      [
-        "stale-owner",
-        "explicit-modal",
-        "explicit-inline",
-        "high-risk",
-        "destructive-option",
-        "project-trust",
-        "session-lifecycle",
-        "active-tool",
-        "active-command",
-        "background-session",
-        "inline-unavailable",
-        "unknown-origin",
-      ].includes(String(value.routeReason))) &&
+      (EXTENSION_UI_ROUTE_REASONS as readonly string[]).includes(String(value.routeReason))) &&
     (value.groupKey === undefined || isBoundedNonEmptyString(value.groupKey, 256)) &&
     (value.allowFreeform === undefined || isBoolean(value.allowFreeform)) &&
     (value.origin === undefined || isExtensionUiOrigin(value.origin))
@@ -1863,10 +1853,16 @@ export function validateMethodResultShape(method: HostMethod, result: unknown): 
         : "invalid agent.prompt result";
     case "extensionUi.configure":
       return isPlainObject(result) &&
-        hasExactKeys(result, ["extensionDecisionPresentation"]) &&
+        hasExactKeys(
+          result,
+          ["extensionDecisionPresentation"],
+          ["extensionDialogPresentationOverrides"],
+        ) &&
         ["legacy-modal", "auto", "inline-first"].includes(
           String(result.extensionDecisionPresentation),
-        )
+        ) &&
+        (result.extensionDialogPresentationOverrides === undefined ||
+          isExtensionDialogPresentationOverrides(result.extensionDialogPresentationOverrides))
         ? null
         : "invalid extensionUi.configure result";
     case "agent.steer":
@@ -2225,19 +2221,21 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
         : "invalid extensionUi.groupClosed payload";
     case "extensionUi.statusChanged":
       return isPlainObject(payload) &&
-        hasExactKeys(payload, ["text"], ["key"]) &&
+        hasExactKeys(payload, ["text"], ["key", "origin"]) &&
         isOptionalString(payload.key) &&
-        isString(payload.text)
+        isString(payload.text) &&
+        (payload.origin === undefined || isExtensionUiOrigin(payload.origin))
         ? null
         : "invalid extensionUi.statusChanged payload";
     case "extensionUi.widgetChanged":
       return isPlainObject(payload) &&
-        hasExactKeys(payload, ["widget"], ["key", "placement"]) &&
+        hasExactKeys(payload, ["widget"], ["key", "placement", "origin"]) &&
         isOptionalString(payload.key) &&
         isJsonValue(payload.widget) &&
         (payload.placement === undefined ||
           payload.placement === "aboveEditor" ||
-          payload.placement === "belowEditor")
+          payload.placement === "belowEditor") &&
+        (payload.origin === undefined || isExtensionUiOrigin(payload.origin))
         ? null
         : "invalid extensionUi.widgetChanged payload";
     case "extensionUi.widgetAttentionRequested":
@@ -2267,7 +2265,7 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
         : "invalid extensionUi.notification payload";
     case "extensionUi.customStarted":
       return isPlainObject(payload) &&
-        hasExactKeys(payload, ["requestId", "cols", "rows"], ["title"]) &&
+        hasExactKeys(payload, ["requestId", "cols", "rows"], ["title", "origin", "overlay"]) &&
         isString(payload.requestId) &&
         isOptionalString(payload.title) &&
         typeof payload.cols === "number" &&
@@ -2275,7 +2273,9 @@ export function validateEventPayloadShape(event: HostEventName, payload: unknown
         payload.cols > 0 &&
         typeof payload.rows === "number" &&
         Number.isInteger(payload.rows) &&
-        payload.rows > 0
+        payload.rows > 0 &&
+        (payload.origin === undefined || isExtensionUiOrigin(payload.origin)) &&
+        (payload.overlay === undefined || isBoolean(payload.overlay))
         ? null
         : "invalid extensionUi.customStarted payload";
     case "extensionUi.customFrame":

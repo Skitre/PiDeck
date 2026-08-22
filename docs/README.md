@@ -10,7 +10,7 @@
 
 Three folders:
 
-- **[architecture/](./architecture/)** — how the system works: process topology, protocol, chat/packages runtime, source map
+- **[architecture/](./architecture/)** — how the system works: process topology, protocol, chat and Extension UI, packages, source map
 - **[operations/](./operations/)** — how to develop and release: dev setup, release pipeline, pre-release checklist, completion report
 - **[history/](./history/)** — point-in-time records: project reviews, remediation tracker, roadmap
 
@@ -23,14 +23,15 @@ Landed behavior updates these pages in the same change.
 3. [Protocol](./architecture/protocol.md)
 4. [Chat runtime](./architecture/chat-runtime.md)
 5. [Extension presentation](./architecture/extension-presentation.md)
-6. [Packages & workspaces](./architecture/packages-workspaces.md)
-7. [Pi settings files](./architecture/pi-settings.md)
-8. [Commands, shortcuts, and context menus](./architecture/commands-and-menus.md)
-9. [Source map](./architecture/source-map.md)
-10. [P0 scope and verification](./operations/p0-scope.md)
-11. [Development](./operations/development.md)
-12. [Release](./operations/release.md)
-13. [Remediation / completion report](./operations/remediation-report.md)
+6. [Extension UI surfaces](./architecture/extension-ui-surfaces.md)（[简体中文](./architecture/extension-ui-surfaces.zh-CN.md)）
+7. [Packages & workspaces](./architecture/packages-workspaces.md)
+8. [Pi settings files](./architecture/pi-settings.md)
+9. [Commands, shortcuts, and context menus](./architecture/commands-and-menus.md)
+10. [Source map](./architecture/source-map.md)
+11. [P0 scope and verification](./operations/p0-scope.md)
+12. [Development](./operations/development.md)
+13. [Release](./operations/release.md)
+14. [Remediation / completion report](./operations/remediation-report.md)
 
 ## Document index
 
@@ -40,7 +41,11 @@ Landed behavior updates these pages in the same change.
 | [architecture/process-boundaries.md](./architecture/process-boundaries.md) | Current | Rust / Node / React ownership |
 | [architecture/protocol.md](./architecture/protocol.md) | Current | Methods, events, identity, errors |
 | [architecture/chat-runtime.md](./architecture/chat-runtime.md) | Current | Session, chat, tools, Extension UI |
-| [architecture/extension-presentation.md](./architecture/extension-presentation.md) | Current | Cross-Extension transcript presentation and inline requests |
+| [architecture/extension-presentation.md](./architecture/extension-presentation.md) | Current + accepted delta | Cross-Extension transcript presentation, Host routing, and the Extension Deck dialog-override contract |
+| [architecture/extension-ui-surfaces.md](./architecture/extension-ui-surfaces.md) | Current | SDK `ctx.ui` verb map, widget focus rules, PiDeck placement |
+| [architecture/extension-ui-surfaces.zh-CN.md](./architecture/extension-ui-surfaces.zh-CN.md) | Current | 上一条的简体中文对照 |
+| [architecture/extension-deck.md](./architecture/extension-deck.md) | Target design | Accepted end state: fixed app shell and global per-Extension presentation profiles |
+| [architecture/deck.md](./architecture/deck.md) | Superseded | Historical whole-window pane-workspace alternative; do not implement |
 | [architecture/packages-workspaces.md](./architecture/packages-workspaces.md) | Current | Workspace loading, user-scope packages, catalog, resources |
 | [architecture/commands-and-menus.md](./architecture/commands-and-menus.md) | Current | Command registry, keyboard dispatch, and context-menu ownership |
 | [architecture/source-map.md](./architecture/source-map.md) | Current | Feature → source paths + gating scripts |

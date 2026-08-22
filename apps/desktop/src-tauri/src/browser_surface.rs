@@ -155,8 +155,13 @@ fn browser_navigation_allowed(url: &Url) -> bool {
         || url.as_str() == "about:blank"
 }
 
+struct BrowserSurface {
+    webview: Webview,
+    visible: bool,
+}
+
 pub struct BrowserSurfaceManager {
-    surfaces: HashMap<String, Webview>,
+    surfaces: HashMap<String, BrowserSurface>,
 }
 
 impl BrowserSurfaceManager {
@@ -180,19 +185,17 @@ impl BrowserSurfaceManager {
             .ok_or_else(|| "main window is unavailable".to_string())?;
         let bounds = clamp_to_window(&window, bounds.validate()?);
         let url = parse_browser_url(raw_url)?;
-        if let Some(webview) = self.surfaces.get(surface_id) {
-            webview
+        if let Some(surface) = self.surfaces.get_mut(surface_id) {
+            surface
+                .webview
                 .set_bounds(bounds_rect_for_window(&window, bounds))
                 .map_err(|error| error.to_string())?;
-            if visible {
-                webview.show()
-            } else {
-                webview.hide()
-            }
-            .map_err(|error| error.to_string())?;
+            apply_webview_visibility(&surface.webview, visible)?;
+            surface.visible = visible;
             return Ok(BrowserSurfaceSnapshot {
                 surface_id: surface_id.to_string(),
-                url: webview
+                url: surface
+                    .webview
                     .url()
                     .map(|current| current.to_string())
                     .unwrap_or_else(|_| url.to_string()),
@@ -262,30 +265,39 @@ impl BrowserSurfaceManager {
         if !visible {
             webview.hide().map_err(|error| error.to_string())?;
         }
-        self.surfaces.insert(surface_id.to_string(), webview);
+        self.surfaces
+            .insert(surface_id.to_string(), BrowserSurface { webview, visible });
         Ok(BrowserSurfaceSnapshot {
             surface_id: surface_id.to_string(),
             url: url.to_string(),
         })
     }
 
-    fn get(&self, surface_id: &str) -> Result<&Webview, String> {
+    fn get(&self, surface_id: &str) -> Result<&BrowserSurface, String> {
         validate_surface_id(surface_id)?;
         self.surfaces
             .get(surface_id)
             .ok_or_else(|| "browser surface does not exist".to_string())
     }
 
+    fn get_mut(&mut self, surface_id: &str) -> Result<&mut BrowserSurface, String> {
+        validate_surface_id(surface_id)?;
+        self.surfaces
+            .get_mut(surface_id)
+            .ok_or_else(|| "browser surface does not exist".to_string())
+    }
+
     pub fn navigate(&self, surface_id: &str, raw_url: &str) -> Result<String, String> {
         let url = parse_browser_url(raw_url)?;
         self.get(surface_id)?
+            .webview
             .navigate(url.clone())
             .map_err(|error| error.to_string())?;
         Ok(url.to_string())
     }
 
     pub fn control(&self, surface_id: &str, action: &str) -> Result<(), String> {
-        let webview = self.get(surface_id)?;
+        let webview = &self.get(surface_id)?.webview;
         match action {
             "back" => webview.eval("history.back()"),
             "forward" => webview.eval("history.forward()"),
@@ -296,45 +308,62 @@ impl BrowserSurfaceManager {
         .map_err(|error| error.to_string())
     }
 
-    pub fn set_bounds(&self, surface_id: &str, bounds: BrowserSurfaceBounds) -> Result<(), String> {
-        let webview = self.get(surface_id)?;
-        let window = webview.window();
+    pub fn set_bounds(
+        &mut self,
+        surface_id: &str,
+        bounds: BrowserSurfaceBounds,
+    ) -> Result<(), String> {
+        let surface = self.get_mut(surface_id)?;
+        let window = surface.webview.window();
         let bounds = clamp_to_window(&window, bounds.validate()?);
-        webview
+        surface
+            .webview
             .set_bounds(bounds_rect_for_window(&window, bounds))
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string())?;
+        // WebView2 can re-show a child surface when bounds change.
+        if !surface.visible {
+            surface.webview.hide().map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 
-    pub fn set_visible(&self, surface_id: &str, visible: bool) -> Result<(), String> {
-        let webview = self.get(surface_id)?;
-        if visible {
-            webview.show()
-        } else {
-            webview.hide()
-        }
-        .map_err(|error| error.to_string())
+    pub fn set_visible(&mut self, surface_id: &str, visible: bool) -> Result<(), String> {
+        let surface = self.get_mut(surface_id)?;
+        apply_webview_visibility(&surface.webview, visible)?;
+        surface.visible = visible;
+        Ok(())
     }
 
     pub fn focus(&self, surface_id: &str) -> Result<(), String> {
         self.get(surface_id)?
+            .webview
             .set_focus()
             .map_err(|error| error.to_string())
     }
 
     pub fn close(&mut self, surface_id: &str) -> Result<bool, String> {
         validate_surface_id(surface_id)?;
-        let Some(webview) = self.surfaces.remove(surface_id) else {
+        let Some(surface) = self.surfaces.remove(surface_id) else {
             return Ok(false);
         };
-        webview.close().map_err(|error| error.to_string())?;
+        surface.webview.close().map_err(|error| error.to_string())?;
         Ok(true)
     }
 
     pub fn shutdown_all(&mut self) {
-        for (_, webview) in self.surfaces.drain() {
-            let _ = webview.close();
+        for (_, surface) in self.surfaces.drain() {
+            let _ = surface.webview.close();
         }
     }
+}
+
+fn apply_webview_visibility(webview: &Webview, visible: bool) -> Result<(), String> {
+    if visible {
+        webview.show()
+    } else {
+        webview.hide()
+    }
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

@@ -42,6 +42,7 @@ const id: HostIdentity = {
 
 const COMMAND_RUN_ID = "00000000-0000-4000-8000-000000000006";
 const NEXT_COMMAND_RUN_ID = "00000000-0000-4000-8000-000000000007";
+const UNKNOWN_ORIGIN = { invocationKind: "unknown" } as const;
 
 function commandInvocation(invocation: string): ResolvedExtensionCommandInvocation {
   return {
@@ -90,27 +91,118 @@ function extensionUiHandlers() {
 describe("Extension UI configuration handler", () => {
   it("applies and returns the server-owned mode idempotently", async () => {
     let mode: "legacy-modal" | "auto" | "inline-first" = "legacy-modal";
+    let overrides: Record<string, "followHost" | "inline" | "modal"> = {};
     const server = {
-      setExtensionDecisionPresentation: vi.fn((next: typeof mode) => {
-        mode = next;
-      }),
-      getExtensionDecisionPresentation: vi.fn(() => mode),
+      applyExtensionUiConfigure: vi.fn(
+        (params: {
+          extensionDecisionPresentation: typeof mode;
+          extensionDialogPresentationOverrides?: typeof overrides;
+        }) => {
+          mode = params.extensionDecisionPresentation;
+          if (params.extensionDialogPresentationOverrides !== undefined) {
+            overrides = params.extensionDialogPresentationOverrides;
+          }
+          return {
+            extensionDecisionPresentation: mode,
+            extensionDialogPresentationOverrides: overrides,
+          };
+        },
+      ),
     };
     const handlers = createExtensionUiHandlers({
       getServer: () => server,
     } as never);
 
-    const configure = () =>
+    const configure = (
+      params: Record<string, unknown> = { extensionDecisionPresentation: "inline-first" },
+    ) =>
       handlers["extensionUi.configure"]!({
-        params: { extensionDecisionPresentation: "inline-first" },
+        params,
       } as never);
     await expect(configure()).resolves.toEqual({
-      result: { extensionDecisionPresentation: "inline-first" },
+      result: {
+        extensionDecisionPresentation: "inline-first",
+        extensionDialogPresentationOverrides: {},
+      },
+    });
+    await expect(
+      configure({
+        extensionDecisionPresentation: "auto",
+        extensionDialogPresentationOverrides: { ext_review: "inline" },
+      }),
+    ).resolves.toEqual({
+      result: {
+        extensionDecisionPresentation: "auto",
+        extensionDialogPresentationOverrides: { ext_review: "inline" },
+      },
     });
     await expect(configure()).resolves.toEqual({
-      result: { extensionDecisionPresentation: "inline-first" },
+      result: {
+        extensionDecisionPresentation: "inline-first",
+        extensionDialogPresentationOverrides: { ext_review: "inline" },
+      },
     });
-    expect(server.setExtensionDecisionPresentation).toHaveBeenCalledTimes(2);
+    expect(server.applyExtensionUiConfigure).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects illegal override maps without applying configure", async () => {
+    const server = {
+      applyExtensionUiConfigure: vi.fn(),
+    };
+    const handlers = createExtensionUiHandlers({
+      getServer: () => server,
+    } as never);
+
+    await expect(
+      handlers["extensionUi.configure"]!({
+        params: {
+          extensionDecisionPresentation: "auto",
+          extensionDialogPresentationOverrides: { ext_review: "dock" },
+        },
+      } as never),
+    ).resolves.toMatchObject({
+      error: { message: "invalid extensionDialogPresentationOverrides" },
+    });
+    expect(server.applyExtensionUiConfigure).not.toHaveBeenCalled();
+  });
+
+  it("replaces the override map when an empty object is sent", async () => {
+    let overrides: Record<string, "followHost" | "inline" | "modal"> = {
+      ext_review: "inline",
+    };
+    const server = {
+      applyExtensionUiConfigure: vi.fn(
+        (params: {
+          extensionDecisionPresentation: "legacy-modal" | "auto" | "inline-first";
+          extensionDialogPresentationOverrides?: typeof overrides;
+        }) => {
+          if (params.extensionDialogPresentationOverrides !== undefined) {
+            overrides = params.extensionDialogPresentationOverrides;
+          }
+          return {
+            extensionDecisionPresentation: params.extensionDecisionPresentation,
+            extensionDialogPresentationOverrides: overrides,
+          };
+        },
+      ),
+    };
+    const handlers = createExtensionUiHandlers({
+      getServer: () => server,
+    } as never);
+
+    await expect(
+      handlers["extensionUi.configure"]!({
+        params: {
+          extensionDecisionPresentation: "auto",
+          extensionDialogPresentationOverrides: {},
+        },
+      } as never),
+    ).resolves.toEqual({
+      result: {
+        extensionDecisionPresentation: "auto",
+        extensionDialogPresentationOverrides: {},
+      },
+    });
   });
 });
 
@@ -220,6 +312,7 @@ describe("extension-ui-bridge", () => {
       emit: (e, p) => events.push({ e, p }),
       getIdentity: () => id,
       getActiveInvocation: () => activeInvocation,
+      getExtensionDecisionPresentation: () => "auto",
     });
     const pending = ui.confirm("Continue?", "Review changes", {
       pideck: { sourceLabel: "Untrusted label" },
@@ -920,7 +1013,12 @@ describe("extension-ui-bridge", () => {
 
     expect(events.at(-1)).toEqual({
       e: "extensionUi.widgetChanged",
-      p: { key: "progress", widget: ["working"], placement: "belowEditor" },
+      p: {
+        key: "progress",
+        widget: ["working"],
+        placement: "belowEditor",
+        origin: UNKNOWN_ORIGIN,
+      },
     });
   });
 
@@ -1043,8 +1141,8 @@ describe("extension-ui-bridge", () => {
       .filter((event) => event.e === "extensionUi.widgetChanged")
       .map((event) => event.p);
     expect(widgets).toEqual([
-      { key: "progress", widget: ["old"] },
-      { key: "progress", widget: null },
+      { key: "progress", widget: ["old"], origin: UNKNOWN_ORIGIN },
+      { key: "progress", widget: null, origin: UNKNOWN_ORIGIN },
     ]);
     expect(
       events.some(
@@ -1086,7 +1184,7 @@ describe("extension-ui-bridge", () => {
       key?: string;
       text?: string;
     };
-    expect(status).toEqual({ key: "status", text: "ready" });
+    expect(status).toEqual({ key: "status", text: "ready", origin: UNKNOWN_ORIGIN });
     const widget = events.find((event) => event.e === "extensionUi.widgetChanged")?.p as {
       key?: string;
       widget?: Record<string, string>;
@@ -1271,7 +1369,11 @@ describe("extension-ui-bridge", () => {
       "extensionUi.widgetChanged",
       "extensionUi.notification",
     ]);
-    expect(events[1]?.p).toEqual({ key: "startup", widget: ["ready"] });
+    expect(events[1]?.p).toEqual({
+      key: "startup",
+      widget: ["ready"],
+      origin: UNKNOWN_ORIGIN,
+    });
     publish();
     expect(events).toHaveLength(3);
     binding.cleanup();
@@ -1311,12 +1413,17 @@ describe("extension-ui-bridge", () => {
       {
         identity: promoted,
         e: "extensionUi.widgetChanged",
-        p: { key: "todos", widget: ["latest"], placement: "belowEditor" },
+        p: {
+          key: "todos",
+          widget: ["latest"],
+          placement: "belowEditor",
+          origin: UNKNOWN_ORIGIN,
+        },
       },
       {
         identity: promoted,
         e: "extensionUi.statusChanged",
-        p: { key: "todo-status", text: "running" },
+        p: { key: "todo-status", text: "running", origin: UNKNOWN_ORIGIN },
       },
     ]);
     binding.cleanup();
@@ -1644,6 +1751,7 @@ describe("extension-ui-bridge", () => {
     expect(updates[0]?.p).toEqual({
       key: "tasks",
       widget: ["line one", "line two"],
+      origin: UNKNOWN_ORIGIN,
     });
     widget = updates.at(-1)?.p as { key: string; widget: string[] };
     expect(widget.widget).toEqual(["updated", "line two"]);
@@ -1652,7 +1760,7 @@ describe("extension-ui-bridge", () => {
     expect(disposed).toBe(true);
     expect(events.at(-1)).toEqual({
       e: "extensionUi.widgetChanged",
-      p: { key: "tasks", widget: ["static replacement"] },
+      p: { key: "tasks", widget: ["static replacement"], origin: UNKNOWN_ORIGIN },
     });
 
     requestRender?.();
@@ -1662,7 +1770,7 @@ describe("extension-ui-bridge", () => {
     ui.setWidget("tasks", undefined);
     expect(events.at(-1)).toEqual({
       e: "extensionUi.widgetChanged",
-      p: { key: "tasks", widget: null },
+      p: { key: "tasks", widget: null, origin: UNKNOWN_ORIGIN },
     });
     expect(events.filter((x) => x.e === "extensionUi.widgetChanged")).toHaveLength(4);
   });
@@ -1695,8 +1803,8 @@ describe("extension-ui-bridge", () => {
     expect(
       events.filter((event) => event.e === "extensionUi.widgetChanged").map((event) => event.p),
     ).toEqual([
-      { key: "nano-context", widget: ["old context"] },
-      { key: "nano-context", widget: ["new context"] },
+      { key: "nano-context", widget: ["old context"], origin: UNKNOWN_ORIGIN },
+      { key: "nano-context", widget: ["new context"], origin: UNKNOWN_ORIGIN },
     ]);
   });
 
@@ -1719,8 +1827,8 @@ describe("extension-ui-bridge", () => {
     expect(
       events.filter((event) => event.e === "extensionUi.widgetChanged").map((event) => event.p),
     ).toEqual([
-      { key: "progress", widget: ["old"] },
-      { key: "progress", widget: null },
+      { key: "progress", widget: ["old"], origin: UNKNOWN_ORIGIN },
+      { key: "progress", widget: null, origin: UNKNOWN_ORIGIN },
     ]);
   });
 
@@ -1905,5 +2013,181 @@ describe("extension-ui-bridge", () => {
     publish();
     binding.cleanup();
     expect(disposed).toBe(true);
+  });
+});
+
+describe("Extension Deck origin capture", () => {
+  const trustedToolOrigin = {
+    invocationKind: "tool" as const,
+    extensionId: "ext_review",
+    extensionDisplayName: "Review",
+    sourceKind: "package" as const,
+    toolName: "ask",
+    toolCallId: "call-1",
+  };
+  const trustedPackageOrigin = {
+    invocationKind: "background" as const,
+    extensionId: "ext_pkg",
+    extensionDisplayName: "Package",
+    sourceKind: "package" as const,
+  };
+
+  it("attaches active invocation origin to widget, status, and custom start", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+      getActiveInvocation: () =>
+        ({
+          origin: trustedToolOrigin,
+          active: true,
+        }) as never,
+    });
+    ui.setWidget("fleet", ["rows"]);
+    ui.setStatus("slash", "ready");
+    const started = ui.custom(() => ({ render: () => [], invalidate: () => {} }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetChanged").at(-1)?.p,
+    ).toMatchObject({ origin: trustedToolOrigin });
+    expect(
+      events.filter((event) => event.e === "extensionUi.statusChanged").at(-1)?.p,
+    ).toMatchObject({ origin: trustedToolOrigin });
+    expect(
+      events.filter((event) => event.e === "extensionUi.customStarted").at(-1)?.p,
+    ).toMatchObject({ origin: trustedToolOrigin });
+    const request = events.find((event) => event.e === "extensionUi.customStarted")?.p as {
+      requestId: string;
+    };
+    respondExtensionUi(request.requestId, "cancelled", undefined, id);
+    await started;
+  });
+
+  it("uses trusted package fallback and unknown fallback without guessing", () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const withPackage = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+      getTrustedPackageOrigin: () => trustedPackageOrigin,
+    });
+    withPackage.setWidget("fleet", ["rows"]);
+    expect(events.at(-1)?.p).toMatchObject({ origin: trustedPackageOrigin });
+
+    const unknownEvents: Array<{ e: HostEventName; p: unknown }> = [];
+    const unknown = createExtensionUiContext({
+      emit: (e, p) => unknownEvents.push({ e, p }),
+      getIdentity: () => id,
+    });
+    unknown.setWidget("guessed-from-key", ["rows"]);
+    expect(unknownEvents.at(-1)?.p).toMatchObject({ origin: UNKNOWN_ORIGIN });
+  });
+
+  it("replays and clears widgets with the origin captured at mutation time", async () => {
+    const events: Array<{ identity: HostIdentity; e: HostEventName; p: unknown }> = [];
+    let ui: ReturnType<typeof createExtensionUiContext> | undefined;
+    const session = {
+      bindExtensions: async ({ uiContext }: { uiContext: typeof ui }) => {
+        ui = uiContext;
+      },
+    };
+    const binding = await bindExtensionUi(session as never, null, {
+      emit: () => {},
+      emitForIdentity: (identity, e, p) => events.push({ identity, e, p }),
+      getIdentity: () => id,
+      getActiveInvocation: () =>
+        ({
+          origin: trustedToolOrigin,
+          active: true,
+        }) as never,
+    });
+    const publish = await binding.activate();
+    publish();
+    ui!.setWidget("fleet", ["live"]);
+    ui!.setStatus("slash", "ready");
+    events.length = 0;
+    binding.replayState();
+    expect(events.map((event) => event.p)).toEqual([
+      { key: "fleet", widget: ["live"], origin: trustedToolOrigin },
+      { key: "slash", text: "ready", origin: trustedToolOrigin },
+    ]);
+
+    ui!.setWidget("fleet", undefined);
+    ui!.setStatus("slash", undefined);
+    expect(
+      events.filter((event) => event.e === "extensionUi.widgetChanged").at(-1)?.p,
+    ).toMatchObject({ key: "fleet", widget: null, origin: trustedToolOrigin });
+    expect(
+      events.filter((event) => event.e === "extensionUi.statusChanged").at(-1)?.p,
+    ).toMatchObject({ key: "slash", text: "", origin: trustedToolOrigin });
+    binding.cleanup();
+  });
+
+  it("does not read a later active invocation during deferred factory render", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    let currentOrigin: unknown = trustedPackageOrigin;
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+      getActiveInvocation: () =>
+        currentOrigin
+          ? ({
+              origin: currentOrigin,
+              active: true,
+            } as never)
+          : undefined,
+    });
+    let requestRender: (() => void) | undefined;
+    ui.setWidget("fleet", (tui) => {
+      requestRender = () => tui.requestRender();
+      return {
+        render: () => ["one"],
+        invalidate: () => {},
+      };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    currentOrigin = trustedToolOrigin;
+    requestRender?.();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const payloads = events
+      .filter((event) => event.e === "extensionUi.widgetChanged")
+      .map((event) => event.p);
+    expect(
+      payloads.every(
+        (payload) =>
+          (payload as { origin?: { extensionId?: string } }).origin?.extensionId === "ext_pkg",
+      ),
+    ).toBe(true);
+  });
+
+  it("copies custom overlay true and false onto customStarted", async () => {
+    const events: Array<{ e: HostEventName; p: unknown }> = [];
+    const ui = createExtensionUiContext({
+      emit: (e, p) => events.push({ e, p }),
+      getIdentity: () => id,
+    });
+    const overlayTrue = ui.custom(() => ({ render: () => [], invalidate: () => {} }), {
+      overlay: true,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const first = events.find((event) => event.e === "extensionUi.customStarted")?.p as {
+      requestId: string;
+      overlay?: boolean;
+    };
+    expect(first.overlay).toBe(true);
+    respondExtensionUi(first.requestId, "cancelled", undefined, id);
+    await overlayTrue;
+
+    events.length = 0;
+    const overlayFalse = ui.custom(() => ({ render: () => [], invalidate: () => {} }), {
+      overlay: false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = events.find((event) => event.e === "extensionUi.customStarted")?.p as {
+      requestId: string;
+      overlay?: boolean;
+    };
+    expect(second.overlay).toBe(false);
+    respondExtensionUi(second.requestId, "cancelled", undefined, id);
+    await overlayFalse;
   });
 });

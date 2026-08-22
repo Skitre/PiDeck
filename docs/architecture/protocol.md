@@ -44,6 +44,11 @@ stale target returns `STALE_REVISION` and does not touch the foreground Session.
 an optional `system.hello` parameter; Host defaults independently to `legacy-modal`
 and echoes the active value in `HostStatusSnapshot`.
 
+The accepted, not-yet-implemented [Extension Deck](./extension-deck.md) delta
+adds the bounded `extensionDialogPresentationOverrides` map to `system.hello`
+and `extensionUi.configure`. That map changes Host routing only; it is not a
+Desktop presentation override and does not contain other DesktopSettings.
+
 Queue replacement and clearing additionally require `expectedRevision`. A mismatch
 returns `STALE_REVISION` before the SDK queue is mutated. Queue snapshots in Session
 snapshots, mutation responses, and `agent.queueChanged` all carry the same revision.
@@ -96,6 +101,11 @@ See `HOST_EVENT_NAMES` in `packages/protocol/src/events.ts`. Notable:
   or becomes stale. Desktop never derives group completion from adjacent requests or
   transcript events.
 - `extensionUi.customStarted` / `customFrame` / `customClosed` — ui.custom() panels: the host runs a real pi-tui TUI over a virtual terminal (`packages/pi-host/src/virtual-terminal.ts`) and streams its ANSI output as frames; the desktop renders them in an xterm.js dock panel and feeds keyboard input back via `extensionUi.customInput`
+
+Extension Deck also adds optional trusted `origin` to status, widget, and
+`customStarted` payloads plus optional `overlay` to `customStarted`. These are
+backward-compatible event-field additions; exact ownership and fallback rules
+live in [Extension Deck](./extension-deck.md#identity-and-protocol).
 
 ### Assistant message streaming
 

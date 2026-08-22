@@ -1,5 +1,8 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { resolveWindowControlsPlatform } from "../../components/WindowControls";
+import {
+  WINDOWS_CAPTION_INSET_CLASS,
+  resolveWindowControlsPlatform,
+} from "../../components/WindowControls";
 import { useAppStore } from "../../lib/stores/app-store";
 import { useT } from "../../lib/i18n/use-t";
 import { requestDockCommand } from "../../lib/commands/events";
@@ -33,7 +36,7 @@ export function ChatHeader() {
   return (
     <div
       className={`flex h-11 shrink-0 items-center gap-4 pl-5 transition-[padding-right] duration-200 ease-out ${
-        dockOpen ? "pr-2" : "pr-[140px]"
+        dockOpen ? "pr-2" : WINDOWS_CAPTION_INSET_CLASS
       }`}
       data-chat-header
       data-dock-open={dockOpen ? "true" : "false"}

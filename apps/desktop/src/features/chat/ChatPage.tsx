@@ -8,6 +8,11 @@ import { InlineExtensionUiRequest } from "./InlineExtensionUiRequest";
 import { workspaceDisplayName } from "../workspaces/WorkspacePicker";
 import { useT } from "../../lib/i18n/use-t";
 import { conversationContentWidthStyle } from "./conversation-layout";
+import {
+  ExtensionDockStrip,
+  ExtensionFloatLayer,
+  ExtensionUiUndoToast,
+} from "../extensions/ExtensionPresentationMounts";
 
 export function ChatPage() {
   const t = useT();
@@ -59,6 +64,7 @@ export function ChatPage() {
       style={conversationContentWidthStyle(conversationContentWidth)}
     >
       <ChatHeader />
+      <ExtensionDockStrip />
       {authBlocked && (
         <div
           role="status"
@@ -113,6 +119,8 @@ export function ChatPage() {
           {t("chatNoSession")}
         </div>
       )}
+      <ExtensionFloatLayer />
+      <ExtensionUiUndoToast />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   type HostResponseEnvelope,
   type HostStatusSnapshot,
   type ExtensionDecisionPresentation,
+  type ExtensionDialogPresentationOverrides,
 } from "@pideck/protocol";
 
 export type HostTransport = {
@@ -243,6 +244,7 @@ export class HostClient {
     clientName = "pideck",
     clientVersion = "0.1.0",
     extensionDecisionPresentation: ExtensionDecisionPresentation = "auto",
+    extensionDialogPresentationOverrides?: ExtensionDialogPresentationOverrides,
   ): Promise<HostStatusSnapshot> {
     const res = await this.request(
       "system.hello",
@@ -252,6 +254,9 @@ export class HostClient {
         clientVersion,
         protocolVersion: 1,
         extensionDecisionPresentation,
+        ...(extensionDialogPresentationOverrides !== undefined
+          ? { extensionDialogPresentationOverrides }
+          : {}),
       },
       10_000,
     );

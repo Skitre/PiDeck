@@ -24,10 +24,7 @@ import {
   withExtensionCommandOrigin,
 } from "./extension-invocation-context.js";
 import { createTestModelServices } from "./test-helpers/model-runtime.js";
-import {
-  createTempAgentLayout,
-  type TempAgentLayout,
-} from "./test-helpers/temp-agent.js";
+import { createTempAgentLayout, type TempAgentLayout } from "./test-helpers/temp-agent.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const MATRIX_EXTENSION = join(
@@ -76,11 +73,9 @@ async function loadMatrix(): Promise<LoadedMatrix> {
     });
   }
 
-  const settingsManager = SettingsManager.create(
-    layout.projectDir,
-    layout.agentDir,
-    { projectTrusted: true },
-  );
+  const settingsManager = SettingsManager.create(layout.projectDir, layout.agentDir, {
+    projectTrusted: true,
+  });
   const { modelRuntime } = await createTestModelServices(layout.agentDir);
   const resourceLoader = new DefaultResourceLoader({
     cwd: layout.projectDir,
@@ -157,16 +152,10 @@ function askTool(session: AgentSession) {
 }
 
 async function runCommand(matrix: LoadedMatrix, commandName: string): Promise<void> {
-  const resolved = resolveExtensionCommandInvocation(
-    matrix.session,
-    `/${commandName}`,
-  );
+  const resolved = resolveExtensionCommandInvocation(matrix.session, `/${commandName}`);
   expect(resolved).toBeDefined();
-  await withExtensionCommandOrigin(
-    matrix.session,
-    randomUUID(),
-    resolved!,
-    () => resolved!.command.handler("", matrix.session.extensionRunner.createCommandContext()),
+  await withExtensionCommandOrigin(matrix.session, randomUUID(), resolved!, () =>
+    resolved!.command.handler("", matrix.session.extensionRunner.createCommandContext()),
   );
 }
 
@@ -182,40 +171,32 @@ describe("Extension behavior-class compatibility matrix", () => {
         .filter((event) => event.event === "extensionUi.widgetChanged")
         .map((event) => event.payload as { key: string; widget: unknown; placement?: string });
       expect(widgets).toEqual([
-        {
+        expect.objectContaining({
           key: "matrix-persistent",
           widget: ["Matrix widget: ready"],
           placement: "belowEditor",
-        },
+        }),
       ]);
-      expect(
-        matrix.events.some((event) => event.event === "extensionUi.request"),
-      ).toBe(false);
+      expect(matrix.events.some((event) => event.event === "extensionUi.request")).toBe(false);
       expect(matrix.session.extensionRunner.getMessageRenderer("matrix-message")).toBeDefined();
       expect(matrix.session.extensionRunner.getEntryRenderer("matrix-entry")).toBeDefined();
       expect(
-        matrix.session.extensionRunner
-          .getModelRegistry()
-          .find("matrix-provider", "matrix-model"),
+        matrix.session.extensionRunner.getModelRegistry().find("matrix-provider", "matrix-model"),
       ).toMatchObject({ id: "matrix-model", provider: "matrix-provider" });
 
       await matrix.session.extensionRunner.emit({
         type: "session_shutdown",
         reason: "quit",
       });
-      expect(matrix.busEvents.get("pideck:matrix:shutdown")).toEqual([
-        { cleaned: true },
-      ]);
+      expect(matrix.busEvents.get("pideck:matrix:shutdown")).toEqual([{ cleaned: true }]);
       expect(
-        matrix.events
-          .filter((event) => event.event === "extensionUi.widgetChanged")
-          .at(-1)?.payload,
-      ).toEqual({ key: "matrix-persistent", widget: null });
+        matrix.events.filter((event) => event.event === "extensionUi.widgetChanged").at(-1)
+          ?.payload,
+      ).toMatchObject({ key: "matrix-persistent", widget: null });
       expect(
-        matrix.events
-          .filter((event) => event.event === "extensionUi.statusChanged")
-          .at(-1)?.payload,
-      ).toEqual({ key: "matrix-watcher", text: "" });
+        matrix.events.filter((event) => event.event === "extensionUi.statusChanged").at(-1)
+          ?.payload,
+      ).toMatchObject({ key: "matrix-watcher", text: "" });
     } finally {
       matrix.cleanup();
     }
@@ -241,9 +222,7 @@ describe("Extension behavior-class compatibility matrix", () => {
       });
 
       const entries = matrix.session.sessionManager.getBranch();
-      expect(
-        entries.find((entry) => entry.id === rendered.entryId),
-      ).toMatchObject({
+      expect(entries.find((entry) => entry.id === rendered.entryId)).toMatchObject({
         type: "custom_message",
         customType: "matrix-message",
         display: true,
@@ -312,17 +291,13 @@ describe("Extension behavior-class compatibility matrix", () => {
             (event.payload as { message?: string }).message === "Matrix subagent activity",
         ),
       ).toBe(true);
-      expect(
-        matrix.events.filter((event) => event.event === "extensionUi.customClosed"),
-      ).toEqual([
+      expect(matrix.events.filter((event) => event.event === "extensionUi.customClosed")).toEqual([
         {
           event: "extensionUi.customClosed",
           payload: { requestId: custom.requestId },
         },
       ]);
-      expect(
-        matrix.events.filter((event) => event.event === "extensionUi.groupClosed"),
-      ).toEqual([
+      expect(matrix.events.filter((event) => event.event === "extensionUi.groupClosed")).toEqual([
         {
           event: "extensionUi.groupClosed",
           payload: { groupKey: request.groupKey, status: "completed" },
@@ -336,7 +311,7 @@ describe("Extension behavior-class compatibility matrix", () => {
               (event.payload as { key?: string }).key === "matrix-subagent",
           )
           .at(-1)?.payload,
-      ).toEqual({ key: "matrix-subagent", widget: null });
+      ).toMatchObject({ key: "matrix-subagent", widget: null });
     } finally {
       matrix.cleanup();
     }
@@ -431,12 +406,7 @@ describe("Extension behavior-class compatibility matrix", () => {
       );
       expect(editor.kind).toBe("editor");
       expect(editor.groupKey).toBe(select.groupKey);
-      respondExtensionUi(
-        editor.requestId,
-        "resolved",
-        "Reviewed matrix plan",
-        matrix.identity,
-      );
+      respondExtensionUi(editor.requestId, "resolved", "Reviewed matrix plan", matrix.identity);
       await planRun;
       expect(matrix.busEvents.get("pideck:matrix:plan-result")).toEqual([
         { next: "Edit plan", plan: "Reviewed matrix plan" },
@@ -493,9 +463,7 @@ describe("Extension behavior-class compatibility matrix", () => {
           matrixIdentity("session-foreground"),
         ),
       ).toBe(false);
-      expect(respondExtensionUi(request.requestId, "resolved", true, matrix.identity)).toBe(
-        true,
-      );
+      expect(respondExtensionUi(request.requestId, "resolved", true, matrix.identity)).toBe(true);
       await backgroundRun;
       expect(matrix.busEvents.get("pideck:matrix:background-result")).toEqual([
         { confirmed: true },

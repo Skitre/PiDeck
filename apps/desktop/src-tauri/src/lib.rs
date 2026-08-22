@@ -2,6 +2,7 @@ mod browser_surface;
 mod commands;
 mod desktop_settings;
 mod draft_store;
+mod extension_ui_settings;
 mod pi_host;
 #[cfg(test)]
 mod pi_host_tests;

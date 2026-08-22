@@ -3,6 +3,7 @@ import type { ExtensionUiOrigin, HostIdentity } from "@pideck/protocol";
 import {
   classifyHostDecisionRisk,
   resolveDecisionRoute,
+  resolveExtensionDialogPreference,
   resolveExtensionUiOwnerSessionState,
   type DecisionRouteInput,
 } from "./extension-ui-policy.js";
@@ -16,9 +17,7 @@ const toolOrigin: ExtensionUiOrigin = {
   toolCallId: "tool-call-1",
 };
 
-function routeInput(
-  patch: Partial<DecisionRouteInput> = {},
-): DecisionRouteInput {
+function routeInput(patch: Partial<DecisionRouteInput> = {}): DecisionRouteInput {
   return {
     mode: "auto",
     kind: "select",
@@ -124,9 +123,7 @@ describe("resolveDecisionRoute", () => {
       ),
     ).toMatchObject({ presentation: "modal", risk: "high", reason: "project-trust" });
     expect(
-      resolveDecisionRoute(
-        routeInput({ hasDestructiveOption: true, riskHint: "normal" }),
-      ),
+      resolveDecisionRoute(routeInput({ hasDestructiveOption: true, riskHint: "normal" })),
     ).toMatchObject({
       presentation: "modal",
       risk: "high",
@@ -163,9 +160,10 @@ describe("resolveDecisionRoute", () => {
   });
 
   it("honors explicit modal and only honors explicit inline when available", () => {
-    expect(
-      resolveDecisionRoute(routeInput({ presentationHint: "modal" })),
-    ).toMatchObject({ presentation: "modal", reason: "explicit-modal" });
+    expect(resolveDecisionRoute(routeInput({ presentationHint: "modal" }))).toMatchObject({
+      presentation: "modal",
+      reason: "explicit-modal",
+    });
     expect(
       resolveDecisionRoute(
         routeInput({
@@ -175,18 +173,96 @@ describe("resolveDecisionRoute", () => {
         }),
       ),
     ).toMatchObject({ presentation: "modal", reason: "inline-unavailable" });
+    expect(resolveDecisionRoute(routeInput({ presentationHint: "inline" }))).toMatchObject({
+      presentation: "inline",
+      reason: "explicit-inline",
+    });
+  });
+
+  it("applies trusted Extension preference after mandatory guards and before global policy", () => {
     expect(
-      resolveDecisionRoute(routeInput({ presentationHint: "inline" })),
-    ).toMatchObject({ presentation: "inline", reason: "explicit-inline" });
+      resolveDecisionRoute(
+        routeInput({
+          mode: "legacy-modal",
+          extensionPreference: "inline",
+        }),
+      ),
+    ).toMatchObject({
+      presentation: "inline",
+      reason: "user-extension-inline",
+    });
+    expect(
+      resolveDecisionRoute(
+        routeInput({
+          presentationHint: "inline",
+          extensionPreference: "modal",
+        }),
+      ),
+    ).toMatchObject({
+      presentation: "modal",
+      reason: "user-extension-modal",
+    });
+    expect(
+      resolveDecisionRoute(
+        routeInput({
+          extensionPreference: "followHost",
+        }),
+      ),
+    ).toMatchObject({
+      presentation: "inline",
+      reason: "active-tool",
+    });
+    expect(
+      resolveDecisionRoute(
+        routeInput({
+          extensionPreference: "inline",
+          riskHint: "high",
+        }),
+      ),
+    ).toMatchObject({
+      presentation: "modal",
+      risk: "high",
+      reason: "high-risk",
+    });
+    expect(
+      resolveDecisionRoute(
+        routeInput({
+          extensionPreference: "inline",
+          origin: {
+            invocationKind: "event",
+            extensionId: "ext-1",
+            extensionDisplayName: "Example",
+            sourceKind: "package",
+            eventType: "session_start",
+          },
+        }),
+      ),
+    ).toMatchObject({ presentation: "modal", reason: "session-lifecycle" });
+    expect(
+      resolveDecisionRoute(
+        routeInput({
+          extensionPreference: "inline",
+          inlineSurfaceAvailable: false,
+        }),
+      ),
+    ).toMatchObject({ presentation: "modal", reason: "inline-unavailable" });
+    expect(
+      resolveDecisionRoute(
+        routeInput({
+          origin: { invocationKind: "unknown" },
+          extensionPreference: "inline",
+        }),
+      ),
+    ).toMatchObject({ presentation: "modal", reason: "unknown-origin" });
   });
 
   it("cancels stale owners and queues background owners with a final presentation", () => {
-    expect(
-      resolveDecisionRoute(routeInput({ ownerSessionState: "stale" })),
-    ).toEqual({ disposition: "cancel", risk: "normal", reason: "stale-owner" });
-    expect(
-      resolveDecisionRoute(routeInput({ ownerSessionState: "background" })),
-    ).toEqual({
+    expect(resolveDecisionRoute(routeInput({ ownerSessionState: "stale" }))).toEqual({
+      disposition: "cancel",
+      risk: "normal",
+      reason: "stale-owner",
+    });
+    expect(resolveDecisionRoute(routeInput({ ownerSessionState: "background" }))).toEqual({
       disposition: "queue",
       presentation: "inline",
       risk: "normal",
@@ -205,12 +281,26 @@ const identity: HostIdentity = {
   packageRevision: 4,
 };
 
+describe("resolveExtensionDialogPreference", () => {
+  it("matches only a trusted origin extensionId byte-for-byte", () => {
+    const overrides = { "ext-1": "inline" as const, "ext-2": "modal" as const };
+    expect(resolveExtensionDialogPreference(toolOrigin, overrides)).toBe("inline");
+    expect(
+      resolveExtensionDialogPreference({ invocationKind: "unknown" }, overrides),
+    ).toBeUndefined();
+    expect(
+      resolveExtensionDialogPreference({ ...toolOrigin, extensionId: "ext-1 " }, overrides),
+    ).toBeUndefined();
+    expect(
+      resolveExtensionDialogPreference({ ...toolOrigin, extensionId: "ext-missing" }, overrides),
+    ).toBeUndefined();
+  });
+});
+
 describe("resolveExtensionUiOwnerSessionState", () => {
   it("distinguishes active, candidate, background, and stale bindings", () => {
     expect(resolveExtensionUiOwnerSessionState(identity, identity, true)).toBe("active");
-    expect(resolveExtensionUiOwnerSessionState(identity, identity, false)).toBe(
-      "candidate",
-    );
+    expect(resolveExtensionUiOwnerSessionState(identity, identity, false)).toBe("candidate");
     expect(
       resolveExtensionUiOwnerSessionState(
         identity,
@@ -219,11 +309,7 @@ describe("resolveExtensionUiOwnerSessionState", () => {
       ),
     ).toBe("background");
     expect(
-      resolveExtensionUiOwnerSessionState(
-        identity,
-        { ...identity, workspaceRevision: 3 },
-        true,
-      ),
+      resolveExtensionUiOwnerSessionState(identity, { ...identity, workspaceRevision: 3 }, true),
     ).toBe("stale");
     expect(
       resolveExtensionUiOwnerSessionState(

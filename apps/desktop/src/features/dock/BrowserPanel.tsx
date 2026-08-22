@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useT } from "../../lib/i18n/use-t";
 import { openSystemUrl } from "../../lib/open-system-url";
+import { useIsBrowserOccluded } from "../../lib/browser-occlusion";
 import { useAppStore } from "../../lib/stores/app-store";
 
 type BrowserBounds = {
@@ -127,6 +128,7 @@ export function BrowserPanel({
   const t = useT();
   const surfaceId = `dock-browser-${id}`;
   const page = useAppStore((state) => state.page);
+  const occluded = useIsBrowserOccluded();
   const pushNotification = useAppStore((state) => state.pushNotification);
   const bodyRef = useRef<HTMLDivElement>(null);
   const createdRef = useRef(false);
@@ -140,7 +142,7 @@ export function BrowserPanel({
   const [currentUrl, setCurrentUrl] = useState(initialUrl);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nativeVisible = visible && !blocked && page === "chat";
+  const nativeVisible = visible && !blocked && page === "chat" && !occluded;
   onTitleRef.current = onTitle;
 
   useEffect(() => {
@@ -186,7 +188,7 @@ export function BrowserPanel({
   }, [surfaceId]);
 
   const ensureSurface = useCallback(async () => {
-    if (createdRef.current || creatingRef.current || !visible) return;
+    if (createdRef.current || creatingRef.current || !visible || !nativeVisible) return;
     if (!isTauriRuntime()) {
       setError(t("dockBrowserNativeOnly"));
       return;
@@ -218,6 +220,7 @@ export function BrowserPanel({
   }, [surfaceId, currentUrl, nativeVisible, t, visible]);
 
   const syncBounds = useCallback(() => {
+    if (!nativeVisible) return;
     const bounds = elementBounds(bodyRef.current);
     if (!bounds) return;
     if (!createdRef.current) {
@@ -230,7 +233,7 @@ export function BrowserPanel({
     if (key === lastBoundsRef.current) return;
     lastBoundsRef.current = key;
     void invoke("browser_surface_set_bounds", { surfaceId, bounds }).catch(() => undefined);
-  }, [ensureSurface, surfaceId]);
+  }, [ensureSurface, nativeVisible, surfaceId]);
 
   useEffect(() => {
     const element = bodyRef.current;
@@ -361,7 +364,11 @@ export function BrowserPanel({
           />
         </form>
       </div>
-      <div ref={bodyRef} className="relative min-h-0 flex-1 bg-white pl-2">
+      <div
+        ref={bodyRef}
+        className="relative min-h-0 flex-1 bg-white pl-2"
+        {...(visible ? { "data-pideck-browser-surface": "" } : {})}
+      >
         {error && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-surface px-6 text-center text-xs text-muted">
             <Globe2 size={20} />

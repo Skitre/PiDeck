@@ -38,12 +38,17 @@ import {
   MAX_EXTENSION_UI_SOURCE_LABEL_LENGTH,
   MAX_EXTENSION_UI_TITLE_LENGTH,
   type ExtensionDecisionPresentation,
+  type ExtensionDialogPresentationOverrides,
   type ExtensionUiClosedReason,
   type ExtensionUiOrigin,
   type HostEventName,
   type HostIdentity,
   type SessionTargetContext,
   type ExtensionMessageRenderSnapshot,
+} from "@pideck/protocol";
+import {
+  isExtensionDialogPresentationOverrides,
+  isTrustedExtensionUiOrigin,
 } from "@pideck/protocol";
 import type { MethodHandler as ServerMethodHandler } from "./server.js";
 import type { WorkspaceGraphFactory } from "./workspace-graph-factory.js";
@@ -59,6 +64,7 @@ import {
 import {
   classifyHostDecisionRisk,
   resolveDecisionRoute,
+  resolveExtensionDialogPreference,
   resolveExtensionUiOwnerSessionState,
 } from "./extension-ui-policy.js";
 import { ExtensionUiGroupRegistry } from "./extension-ui-groups.js";
@@ -164,6 +170,8 @@ export type ExtensionUiBridgeOptions = {
   getIdentity: () => HostIdentity;
   getCurrentIdentity?: () => HostIdentity;
   getExtensionDecisionPresentation?: () => ExtensionDecisionPresentation;
+  getExtensionDialogPresentationOverrides?: () => ExtensionDialogPresentationOverrides;
+  getTrustedPackageOrigin?: () => ExtensionUiOrigin | undefined;
   isInlineSurfaceAvailable?: () => boolean;
   waitUntilActive?: () => Promise<void>;
   isDisposed?: () => boolean;
@@ -445,14 +453,55 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
   const desktopTheme = createDesktopExtensionTheme();
   const activeWidgetFactories = new Map<string, ActiveWidgetFactory>();
   const publishedWidgetKeys = new Set<string>();
+  const widgetOrigins = new Map<string, ExtensionUiOrigin>();
+  const statusOrigins = new Map<string, ExtensionUiOrigin>();
 
-  const publishWidget = (key: string, widget: unknown, placement: "belowEditor" | undefined) => {
-    if (widget === null || widget === undefined) publishedWidgetKeys.delete(key);
-    else publishedWidgetKeys.add(key);
+  const captureTrustedOrigin = (): ExtensionUiOrigin => {
+    const invocationOrigin = activeInvocation()?.origin;
+    if (isTrustedExtensionUiOrigin(invocationOrigin)) return invocationOrigin;
+    const packageOrigin = opts.getTrustedPackageOrigin?.();
+    if (isTrustedExtensionUiOrigin(packageOrigin)) {
+      return {
+        invocationKind: "background",
+        extensionId: packageOrigin.extensionId,
+        extensionDisplayName: packageOrigin.extensionDisplayName,
+        sourceKind: packageOrigin.sourceKind,
+      };
+    }
+    return invocationOrigin ?? { invocationKind: "unknown" };
+  };
+
+  const originForLiveKey = (
+    store: Map<string, ExtensionUiOrigin>,
+    key: string,
+    captured: ExtensionUiOrigin,
+    live: boolean,
+  ): ExtensionUiOrigin => {
+    if (isTrustedExtensionUiOrigin(captured)) {
+      if (live) store.set(key, captured);
+      else store.delete(key);
+      return captured;
+    }
+    const saved = store.get(key);
+    if (!live) store.delete(key);
+    return saved ?? captured;
+  };
+
+  const publishWidget = (
+    key: string,
+    widget: unknown,
+    placement: "belowEditor" | undefined,
+    origin: ExtensionUiOrigin,
+  ) => {
+    const live = widget !== null && widget !== undefined;
+    if (live) publishedWidgetKeys.add(key);
+    else publishedWidgetKeys.delete(key);
+    const resolvedOrigin = originForLiveKey(widgetOrigins, key, origin, live);
     opts.emit("extensionUi.widgetChanged", {
       key,
       widget,
       ...(placement ? { placement } : {}),
+      origin: resolvedOrigin,
     });
   };
 
@@ -500,9 +549,9 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
     if (signals.some((signal) => signal.aborted)) return undefined;
     const timeoutMs = normalizeDialogTimeout(dialogOpts?.timeout);
     const id = identityAt();
-    const origin: ExtensionUiOrigin = invocation?.origin ?? {
-      invocationKind: "unknown",
-    };
+    const origin: ExtensionUiOrigin = isTrustedExtensionUiOrigin(invocation?.origin)
+      ? invocation.origin
+      : captureTrustedOrigin();
     const { optionDetails, presentationHint, riskHint, ...requestMetadata } =
       normalizePiDeckDialogMetadata(payload.pideck);
     const options = Array.isArray(payload.options)
@@ -528,8 +577,12 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
       opts.getCurrentIdentity?.() ?? id,
       inlineSurfaceAvailable,
     );
+    const extensionPreference = resolveExtensionDialogPreference(
+      origin,
+      opts.getExtensionDialogPresentationOverrides?.() ?? {},
+    );
     const route = resolveDecisionRoute({
-      mode: opts.getExtensionDecisionPresentation?.() ?? "auto",
+      mode: opts.getExtensionDecisionPresentation?.() ?? "legacy-modal",
       kind,
       origin,
       ...classifyHostDecisionRisk(origin),
@@ -538,6 +591,7 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
       hasDestructiveOption: options?.some((option) => option.destructive === true) ?? false,
       ownerSessionState,
       inlineSurfaceAvailable,
+      ...(extensionPreference ? { extensionPreference } : {}),
     });
     if (route.disposition === "cancel") return undefined;
     const groupKey = decisionGroups.groupForRequest(invocation, id);
@@ -673,9 +727,18 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
     },
     onTerminalInput: () => () => {},
     setStatus: (key, text) => {
+      const sanitizedKey = stripAnsi(String(key));
+      const liveText = text === undefined ? "" : stripAnsi(String(text));
+      const origin = originForLiveKey(
+        statusOrigins,
+        sanitizedKey,
+        captureTrustedOrigin(),
+        liveText !== "",
+      );
       opts.emit("extensionUi.statusChanged", {
-        key: stripAnsi(String(key)),
-        text: text === undefined ? "" : stripAnsi(String(text)),
+        key: sanitizedKey,
+        text: liveText,
+        origin,
       });
       opts.onRendererActivity?.();
     },
@@ -686,6 +749,7 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
     setWidget: (key, content, options?) => {
       const sanitizedKey = stripAnsi(String(key));
       const placement = options?.placement === "belowEditor" ? "belowEditor" : undefined;
+      const capturedOrigin = captureTrustedOrigin();
       const commandOrigin = activeCommandOrigin();
       let replacingPublishedWidget = publishedWidgetKeys.has(sanitizedKey);
       disposeWidgetFactory(sanitizedKey);
@@ -698,6 +762,7 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
             onData: () => {},
           }),
         );
+        const factoryOrigin = capturedOrigin;
         let widgetComponent: (Component & { dispose?(): void }) | undefined;
         let disposed = false;
         let lastSnapshot: string | undefined;
@@ -729,16 +794,17 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
             render: (width) => {
               if (disposed || !widgetComponent) return [];
               try {
-                const renderOrigin =
-                  activeCommandOrigin() ?? pendingRenderOrigin ?? initialRenderOrigin;
                 const lines = widgetComponent.render(width);
                 const sanitizedLines = lines.map((line) => stripAnsi(line));
                 const snapshot = JSON.stringify(sanitizedLines);
                 if (snapshot !== lastSnapshot) {
                   lastSnapshot = snapshot;
-                  publishWidget(sanitizedKey, sanitizedLines, placement);
+                  publishWidget(sanitizedKey, sanitizedLines, placement, factoryOrigin);
                   replacingPublishedWidget = false;
-                  requestWidgetAttention(sanitizedKey, renderOrigin);
+                  requestWidgetAttention(
+                    sanitizedKey,
+                    activeCommandOrigin() ?? pendingRenderOrigin ?? initialRenderOrigin,
+                  );
                 }
                 pendingRenderOrigin = undefined;
                 initialRenderOrigin = undefined;
@@ -750,7 +816,7 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
                 if (lastSnapshot !== undefined || replacingPublishedWidget) {
                   lastSnapshot = undefined;
                   replacingPublishedWidget = false;
-                  publishWidget(sanitizedKey, null, placement);
+                  publishWidget(sanitizedKey, null, placement, factoryOrigin);
                 }
                 if (sanitizedMessage !== lastRenderError) {
                   lastRenderError = sanitizedMessage;
@@ -775,7 +841,7 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
           dispose();
           if (publishedWidgetKeys.has(sanitizedKey)) {
             replacingPublishedWidget = false;
-            publishWidget(sanitizedKey, null, placement);
+            publishWidget(sanitizedKey, null, placement, factoryOrigin);
           }
           const message = err instanceof Error ? err.message : String(err);
           opts.emit("package.diagnostic", {
@@ -786,7 +852,7 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
         return;
       }
       const widget = content === undefined ? null : sanitize(content);
-      publishWidget(sanitizedKey, widget, placement);
+      publishWidget(sanitizedKey, widget, placement, capturedOrigin);
       if (widget !== null && widget !== undefined) {
         requestWidgetAttention(sanitizedKey, commandOrigin);
       }
@@ -876,10 +942,13 @@ export function createExtensionUiContext(opts: ExtensionUiBridgeOptions): Extens
         });
         activeCustoms.set(requestId, { terminal: vt, owner });
 
+        const customOrigin = captureTrustedOrigin();
         opts.emit("extensionUi.customStarted", {
           requestId,
           cols: vt.columns,
           rows: vt.rows,
+          origin: customOrigin,
+          ...(options?.overlay !== undefined ? { overlay: options.overlay === true } : {}),
         });
         tui.start();
 
@@ -1100,6 +1169,8 @@ export async function bindExtensionUi(
     getIdentity: () => bindingIdentity,
     getCurrentIdentity: opts.getCurrentIdentity,
     getExtensionDecisionPresentation: opts.getExtensionDecisionPresentation,
+    getExtensionDialogPresentationOverrides: opts.getExtensionDialogPresentationOverrides,
+    getTrustedPackageOrigin: opts.getTrustedPackageOrigin,
     isInlineSurfaceAvailable: opts.isInlineSurfaceAvailable ?? (() => readyForEvents),
     waitUntilActive: () => activation,
     isDisposed: () => disposed,
@@ -1288,6 +1359,7 @@ export function createExtensionUiHandlers(
     "extensionUi.configure": async (ctx) => {
       const params = ctx.params as {
         extensionDecisionPresentation: ExtensionDecisionPresentation;
+        extensionDialogPresentationOverrides?: unknown;
       };
       const server = factory.getServer();
       if (!server) {
@@ -1295,11 +1367,21 @@ export function createExtensionUiHandlers(
           error: createHostError("INTERNAL_ERROR", "Pi Host server is not bound"),
         };
       }
-      server.setExtensionDecisionPresentation(params.extensionDecisionPresentation);
+      if (
+        params.extensionDialogPresentationOverrides !== undefined &&
+        !isExtensionDialogPresentationOverrides(params.extensionDialogPresentationOverrides)
+      ) {
+        return {
+          error: createHostError("INVALID_REQUEST", "invalid extensionDialogPresentationOverrides"),
+        };
+      }
       return {
-        result: {
-          extensionDecisionPresentation: server.getExtensionDecisionPresentation(),
-        },
+        result: server.applyExtensionUiConfigure({
+          extensionDecisionPresentation: params.extensionDecisionPresentation,
+          ...(params.extensionDialogPresentationOverrides !== undefined
+            ? { extensionDialogPresentationOverrides: params.extensionDialogPresentationOverrides }
+            : {}),
+        }),
       };
     },
     "extensionUi.respond": async (ctx) => {

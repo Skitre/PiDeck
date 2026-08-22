@@ -4,8 +4,15 @@ import {
   DESKTOP_LANGUAGES,
   DESKTOP_THEME_FAMILIES,
   DESKTOP_THEMES,
+  DEFAULT_EXTENSION_UI_SETTINGS,
   TERMINAL_PROFILE_IDS,
+  isExtensionUiSettings,
+  projectExtensionDialogPresentationOverrides,
+  sanitizeExtensionUiSettings,
   type DesktopSettings,
+  type ExtensionDecisionPresentation,
+  type ExtensionDialogPresentationOverrides,
+  type ExtensionUiSettings,
 } from "@pideck/protocol";
 import {
   MAX_CODE_FONT_SIZE,
@@ -53,6 +60,7 @@ const DESKTOP_SETTINGS_KEYS = new Set([
   "codeFontSize",
   "knownWorkspaces",
   "shortcutOverrides",
+  "extensionUi",
 ]);
 const EXTENSION_DECISION_PRESENTATIONS = ["legacy-modal", "auto", "inline-first"] as const;
 const NULLABLE_PATH_KEYS = [
@@ -157,9 +165,73 @@ function assertDesktopSettingsUpdate(patch: DesktopSettingsUpdate): void {
       throw new Error("shortcutOverrides must map command ids to strings or null");
     }
   }
+  if (values.extensionUi !== undefined && !isExtensionUiSettings(values.extensionUi)) {
+    throw new Error("Invalid extensionUi settings");
+  }
 }
 
 let settingsWriteQueue: Promise<void> = Promise.resolve();
+const EXTENSION_UI_SHADOW_KEY = "pideck.extensionUi.shadow";
+const UNKNOWN_NATIVE_EXTENSION_UI = /unknown desktop settings field:\s*extensionUi/i;
+let nativeExtensionUiWritable: boolean | null = null;
+
+function isUnknownNativeExtensionUiField(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return UNKNOWN_NATIVE_EXTENSION_UI.test(message);
+}
+
+function readExtensionUiShadow(): ExtensionUiSettings | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(EXTENSION_UI_SHADOW_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    return isExtensionUiSettings(parsed) ? sanitizeExtensionUiSettings(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeExtensionUiShadow(settings: ExtensionUiSettings): void {
+  try {
+    globalThis.localStorage?.setItem(EXTENSION_UI_SHADOW_KEY, JSON.stringify(settings));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function clearExtensionUiShadow(): void {
+  try {
+    globalThis.localStorage?.removeItem(EXTENSION_UI_SHADOW_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+function extensionUiHasMemory(settings: ExtensionUiSettings): boolean {
+  return (
+    Object.keys(settings.observedCapabilities).length > 0 ||
+    Object.keys(settings.presentations).length > 0
+  );
+}
+
+/** Merge a frontend shadow when the running native build still rejects `extensionUi`. */
+export function hydrateDesktopSettings(settings: DesktopSettings): DesktopSettings {
+  const native = sanitizeExtensionUiSettings(settings.extensionUi);
+  if (extensionUiHasMemory(native)) {
+    nativeExtensionUiWritable = nativeExtensionUiWritable ?? true;
+    clearExtensionUiShadow();
+    return { ...settings, extensionUi: native };
+  }
+  const shadow = readExtensionUiShadow();
+  if (!shadow) return { ...settings, extensionUi: native };
+  nativeExtensionUiWritable = false;
+  return { ...settings, extensionUi: shadow };
+}
+
+export function resetNativeExtensionUiCompatForTests(): void {
+  nativeExtensionUiWritable = null;
+  clearExtensionUiShadow();
+}
 
 export function recentDesktopLocationPatch(
   workspacePath: string,
@@ -200,8 +272,37 @@ async function writeDesktopSettings(patch: DesktopSettingsUpdate): Promise<void>
     return;
   }
 
-  const next = await invoke<DesktopSettings>("desktop_settings_patch", { patch });
-  useAppStore.getState().setDesktopSettings(next);
+  const sendPatch: DesktopSettingsUpdate = { ...patch };
+  if (nativeExtensionUiWritable === false && sendPatch.extensionUi !== undefined) {
+    delete sendPatch.extensionUi;
+    if (Object.keys(sendPatch).length === 0) {
+      useAppStore.getState().setDesktopSettings(nextLocal);
+      writeExtensionUiShadow(canonicalExtensionUiSettings(nextLocal));
+      return;
+    }
+  }
+
+  try {
+    const next = await invoke<DesktopSettings>("desktop_settings_patch", { patch: sendPatch });
+    if (patch.extensionUi !== undefined && nativeExtensionUiWritable !== false) {
+      nativeExtensionUiWritable = true;
+      clearExtensionUiShadow();
+    }
+    const merged =
+      nativeExtensionUiWritable === false ? { ...next, extensionUi: nextLocal.extensionUi } : next;
+    useAppStore.getState().setDesktopSettings(merged);
+    if (nativeExtensionUiWritable === false) {
+      writeExtensionUiShadow(canonicalExtensionUiSettings(merged));
+    }
+  } catch (error) {
+    if (patch.extensionUi !== undefined && isUnknownNativeExtensionUiField(error)) {
+      nativeExtensionUiWritable = false;
+      useAppStore.getState().setDesktopSettings(nextLocal);
+      writeExtensionUiShadow(canonicalExtensionUiSettings(nextLocal));
+      return;
+    }
+    throw error;
+  }
 }
 
 export function persistDesktopSettings(patch: DesktopSettingsUpdate): Promise<void> {
@@ -216,4 +317,38 @@ export function persistRecentDesktopLocation(
   sessionPath: string | null,
 ): Promise<void> {
   return persistDesktopSettings(recentDesktopLocationPatch(workspacePath, sessionPath));
+}
+
+export function canonicalExtensionUiSettings(
+  settings: Pick<DesktopSettings, "extensionUi"> | null | undefined,
+): ExtensionUiSettings {
+  return sanitizeExtensionUiSettings(settings?.extensionUi ?? DEFAULT_EXTENSION_UI_SETTINGS);
+}
+
+export function extensionUiHostConfigureParams(
+  settings:
+    Pick<DesktopSettings, "extensionDecisionPresentation" | "extensionUi"> | null | undefined,
+): {
+  extensionDecisionPresentation: ExtensionDecisionPresentation;
+  extensionDialogPresentationOverrides: ExtensionDialogPresentationOverrides;
+} {
+  return {
+    extensionDecisionPresentation: settings?.extensionDecisionPresentation ?? "auto",
+    extensionDialogPresentationOverrides: projectExtensionDialogPresentationOverrides(
+      canonicalExtensionUiSettings(settings),
+    ),
+  };
+}
+
+export async function persistExtensionUiSettings(
+  update: (current: ExtensionUiSettings) => ExtensionUiSettings,
+): Promise<ExtensionUiSettings> {
+  const current = canonicalExtensionUiSettings(useAppStore.getState().desktopSettings);
+  const next = sanitizeExtensionUiSettings(update(current));
+  if (!isExtensionUiSettings(next)) {
+    throw new Error("Invalid extensionUi settings");
+  }
+  if (JSON.stringify(next) === JSON.stringify(current)) return current;
+  await persistDesktopSettings({ extensionUi: next });
+  return canonicalExtensionUiSettings(useAppStore.getState().desktopSettings);
 }

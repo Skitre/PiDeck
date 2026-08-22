@@ -4,6 +4,10 @@ import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  acquireBrowserOcclusion,
+  resetBrowserOcclusionForTests,
+} from "../../lib/browser-occlusion";
 import { useAppStore } from "../../lib/stores/app-store";
 
 type TestBrowserEvent = {
@@ -87,6 +91,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   cleanup();
+  resetBrowserOcclusionForTests();
   await new Promise((resolve) => window.setTimeout(resolve, 0));
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -211,6 +216,11 @@ describe("BrowserPanel native lifecycle", () => {
         visible: false,
       }),
     );
+    mocks.invoke.mockClear();
+    act(() => {
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("browser_surface_set_bounds", expect.anything());
 
     view.unmount();
     await waitFor(() =>
@@ -298,5 +308,37 @@ describe("BrowserPanel native lifecycle", () => {
     });
 
     expect(screen.getByRole("button", { name: "Reload" })).toBeInTheDocument();
+  });
+
+  it("hides the native surface until the last occlusion owner releases", async () => {
+    render(<BrowserPanel id={7} visible blocked={false} onTitle={vi.fn()} />);
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("browser_surface_create", expect.anything()),
+    );
+
+    const releaseModal = acquireBrowserOcclusion("extension-ui-modal");
+    const releaseSettings = acquireBrowserOcclusion("settings");
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("browser_surface_set_visible", {
+        surfaceId: "dock-browser-7",
+        visible: false,
+      }),
+    );
+
+    releaseModal();
+    mocks.invoke.mockClear();
+    await new Promise((resolve) => window.setTimeout(resolve, 20));
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "browser_surface_set_visible",
+      expect.objectContaining({ visible: true }),
+    );
+
+    releaseSettings();
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("browser_surface_set_visible", {
+        surfaceId: "dock-browser-7",
+        visible: true,
+      }),
+    );
   });
 });

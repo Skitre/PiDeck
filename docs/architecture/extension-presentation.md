@@ -3,7 +3,14 @@
 PiDeck supports a declarative Extension Presentation v1 contract for custom
 messages and blocking Extension UI requests. The contract carries semantics and
 copy, not Extension-owned HTML, React components, CSS, colors, or executable
-actions.
+actions. The SDK verb map (`select`, `setWidget`, `custom()`, and the rest) lives
+in [Extension UI surfaces](./extension-ui-surfaces.md).
+
+> **Implementation status (2026-08-22):** Presentation v1 and the global Host
+> routing modes are implemented. The per-Extension blocking-dialog override
+> contract in “Host routing modes” is the accepted, not-yet-implemented
+> [Extension Deck](./extension-deck.md) delta. It must land protocol-through-Host
+> in one batch; Desktop-only routing is not an intermediate state.
 
 ## Custom messages
 
@@ -176,7 +183,7 @@ intersection) even though the runtime option is backward compatible.
 
 | Mode           | Behavior                                                                             |
 | -------------- | ------------------------------------------------------------------------------------ |
-| `legacy-modal` | Fail-safe Host fallback and one-click rollback; all requests use Modal               |
+| `legacy-modal` | Fail-safe Host fallback; requests without a per-Extension override use Modal         |
 | `auto`         | New-install default; active ordinary tool/command requests use Inline when available |
 | `inline-first` | Prefer Inline for other active origins after mandatory guards                        |
 
@@ -185,10 +192,68 @@ that predate the field and corrupt-settings recovery remain `legacy-modal`; Pi H
 starts in `legacy-modal` until a Desktop handshake explicitly configures it. Existing
 explicit user choices are preserved.
 
-Safety and ownership precedence is stable across modes: stale owners cancel;
-background requests stay with their Session; high-risk/destructive and Session
-lifecycle requests use Modal; explicit Modal and unavailable Inline surfaces use
-Modal. Extension Inline hints are honored only after those guards.
+Extension Deck adds one Host-consumed, per-Extension override contract:
+
+```ts
+type ExtensionDialogPresentationPreference = "followHost" | "inline" | "modal";
+
+type ExtensionDialogPresentationOverrides = Record<
+  string, // trusted opaque ExtensionId
+  ExtensionDialogPresentationPreference
+>;
+
+type ExtensionUiConfigureParams = {
+  extensionDecisionPresentation: ExtensionDecisionPresentation;
+  extensionDialogPresentationOverrides: ExtensionDialogPresentationOverrides;
+};
+
+type ExtensionUiConfigureResult = ExtensionUiConfigureParams;
+
+type SystemHelloExtensionUiParams = {
+  extensionDecisionPresentation?: ExtensionDecisionPresentation;
+  extensionDialogPresentationOverrides?: ExtensionDialogPresentationOverrides;
+};
+```
+
+Desktop derives this bounded map from the canonical global Extension profiles and
+sends it in the initial `system.hello` when settings are available and with every later
+`extensionUi.configure`; it does not send the rest of DesktopSettings. The configure
+request replaces both Host values atomically and returns the accepted pair. Hello
+omission retains the fail-safe values. Unknown preferences, unknown fields, empty IDs,
+IDs longer than `MAX_EXTENSION_UI_EXTENSION_ID_LENGTH`, more than
+`MAX_EXTENSION_UI_IDENTITIES` entries, or a map whose UTF-8 JSON encoding exceeds
+`MAX_EXTENSION_UI_SETTINGS_BYTES` reject the request rather than being partially
+accepted. These constants are shared with Extension Deck settings.
+Until the first successful hello/configure handshake, Host uses `legacy-modal` and an
+empty override map. An origin that is absent, `unknown`, or lacks a trusted
+`extensionId` cannot match an override and follows the global policy.
+
+Extension IDs are opaque and matched byte-for-byte after normal protocol string
+validation; neither Desktop nor Host case-folds, path-normalizes, or reconstructs them.
+
+Routing precedence is authoritative and must be implemented in Host in this order:
+
+1. Resolve ownership. Stale owners cancel; background requests stay queued with their
+   owning Session and never render in the active Session.
+2. Apply mandatory guards. High-risk/destructive requests and Session lifecycle
+   requests use Modal. If Inline is unavailable, the fallback is Modal. No Extension
+   metadata or user preference may downgrade these outcomes.
+3. For a normal request with a trusted Extension origin, apply its preference.
+   `modal` selects Modal with `routeReason: "user-extension-modal"`; `inline` selects
+   Inline with `routeReason: "user-extension-inline"`; `followHost` continues.
+4. Apply the existing global-policy matrix: `legacy-modal` returns Modal;
+   otherwise a sanitized Modal hint returns Modal, an Inline hint returns Inline,
+   `auto` makes active tool/command origins Inline and other origins Modal, and
+   `inline-first` makes the remaining active origins Inline. In this final tier an
+   explicit Extension Modal hint is a default, not a safety lock, so a normal
+   request's explicit user `inline` preference may override it.
+
+For a background request, Host computes the eventual presentation with the same safety
+and preference rules while retaining `background-session` as the queue reason. The
+existing `presentationReason` carries the governing presentation reason. Desktop never
+re-routes a Host-final Modal locally. Changing a preference affects subsequently routed
+requests; an already-published blocking request stays in its Host-final surface until
+settled.
 
 Host risk is derived from trusted invocation metadata. A decision raised inside a
 `tool_call` permission interceptor is high risk, as is the reserved future
@@ -199,7 +264,10 @@ parses titles, option labels, commands, or package names to infer risk.
 On the wire, `presentationHint` / `riskHint` preserve sanitized Extension metadata.
 `presentation` / `risk` are the Host-final values consumed by Desktop, and
 `routeReason` records the governing decision such as `active-tool`, `high-risk`,
-`session-lifecycle`, `background-session`, or `inline-unavailable`.
+`session-lifecycle`, `background-session`, `user-extension-inline`,
+`user-extension-modal`, or `inline-unavailable`. Add the two `user-extension-*`
+members to `ExtensionUiRouteReason`, its exact validators, and protocol coverage in the
+same batch as the configure contract.
 
 ### Decision groups
 

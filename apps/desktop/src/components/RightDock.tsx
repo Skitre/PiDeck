@@ -7,6 +7,7 @@ import {
   Globe2,
   LoaderCircle,
   Plus,
+  Puzzle,
   RotateCcw,
   SquareTerminal,
   X,
@@ -34,9 +35,20 @@ import { subscribeDockBrowser } from "../lib/dock-browser";
 import { subscribeTreePanel } from "../lib/dock-tree";
 import { useT } from "../lib/i18n/use-t";
 import { subscribeDockCommands } from "../lib/commands/events";
+import { isExtensionDeckV1Enabled } from "../lib/extension-deck-gate";
+import { hasLiveDockedExtensionContent } from "../lib/extension-ui-dock-layout";
+import { useLiveExtensionPresentationSlots } from "../lib/extension-ui-live-slots";
+import { ExtensionDockArea } from "../features/extensions/ExtensionDockArea";
+import { WINDOWS_CAPTION_INSET_CLASS, resolveWindowControlsPlatform } from "./WindowControls";
 
 export type DockTabId =
-  "files" | "tree" | "changes" | `browser:${number}` | `shell:${number}` | `extension:${string}`;
+  | "files"
+  | "tree"
+  | "changes"
+  | "extensions"
+  | `browser:${number}`
+  | `shell:${number}`
+  | `extension:${string}`;
 
 type ShellDockTab = {
   id: number;
@@ -95,13 +107,20 @@ export function partitionDockTabs<T extends string>(
   tabIds: readonly T[],
   activeTab: T | null,
   visibleLimit: number,
+  preferVisible: readonly T[] = [],
 ): { visible: T[]; overflow: T[] } {
   const limit = Math.max(0, Math.min(tabIds.length, visibleLimit));
   if (tabIds.length <= limit) return { visible: [...tabIds], overflow: [] };
   const visible = tabIds.slice(0, limit);
-  if (activeTab && tabIds.includes(activeTab) && !visible.includes(activeTab) && limit > 0) {
-    visible[limit - 1] = activeTab;
-  }
+  const ensureVisible = (tab: T | null | undefined) => {
+    if (!tab || !tabIds.includes(tab) || visible.includes(tab) || limit === 0) return;
+    if (activeTab && visible.includes(activeTab) && limit <= 1) return;
+    const replaceAt =
+      activeTab && visible[limit - 1] === activeTab && limit > 1 ? limit - 2 : limit - 1;
+    visible[replaceAt] = tab;
+  };
+  ensureVisible(activeTab);
+  for (const tab of preferVisible) ensureVisible(tab);
   return {
     visible,
     overflow: tabIds.filter((tabId) => !visible.includes(tabId)),
@@ -128,11 +147,15 @@ export function RightDock() {
   const t = useT();
   const dockOpen = useAppStore((state) => state.dockOpen);
   const panel = useAppStore((state) => state.extensionTerminal);
+  const deckV1 = isExtensionDeckV1Enabled();
+  const presentationSlots = useLiveExtensionPresentationSlots();
+  const hasDockedExtensions = hasLiveDockedExtensionContent(presentationSlots);
+  const dockPanel = deckV1 ? null : panel;
   const workspaceCwd = useAppStore((state) => state.workspace?.canonicalCwd ?? null);
   const terminalProfile = useAppStore((state) => state.desktopSettings?.terminalProfile ?? "auto");
   const setDockOpen = useAppStore((state) => state.setDockOpen);
   const pushNotification = useAppStore((state) => state.pushNotification);
-  const initialExtensionTab = panel ? extensionTabId(panel.requestId) : null;
+  const initialExtensionTab = dockPanel ? extensionTabId(dockPanel.requestId) : null;
   const [activeTab, setActiveTab] = useState<DockTabId | null>(initialExtensionTab);
   const [tabOrder, setTabOrder] = useState<DockTabId[]>(
     initialExtensionTab ? [initialExtensionTab] : [],
@@ -177,8 +200,29 @@ export function RightDock() {
     });
   };
 
-  const panelRequestId = panel?.requestId ?? null;
+  const panelRequestId = dockPanel?.requestId ?? null;
   useEffect(() => {
+    if (deckV1) {
+      setExtensionClosing(null);
+      setTabOrder((current) => {
+        const withoutLegacy = current.filter((tabId) => !String(tabId).startsWith("extension:"));
+        if (hasDockedExtensions) {
+          return withoutLegacy.includes("extensions")
+            ? withoutLegacy
+            : [...withoutLegacy, "extensions"];
+        }
+        return withoutLegacy.filter((tabId) => tabId !== "extensions");
+      });
+      setActiveTab((active) => {
+        if (hasDockedExtensions) {
+          if (active?.startsWith("extension:")) return "extensions";
+          return active ?? "extensions";
+        }
+        return active === "extensions" || active?.startsWith("extension:") ? null : active;
+      });
+      return;
+    }
+    setTabOrder((current) => current.filter((tabId) => tabId !== "extensions"));
     if (panelRequestId) {
       const tabId = extensionTabId(panelRequestId);
       setExtensionClosing(null);
@@ -197,7 +241,7 @@ export function RightDock() {
       );
       return next;
     });
-  }, [panelRequestId]);
+  }, [deckV1, hasDockedExtensions, panelRequestId]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -227,6 +271,10 @@ export function RightDock() {
     const tabBar = tabBarRef.current;
     if (!tabBar) return;
     const updateLimit = (width: number) => {
+      if (width <= 0) {
+        setVisibleTabLimit(Number.MAX_SAFE_INTEGER);
+        return;
+      }
       setVisibleTabLimit(visibleDockTabLimit(width, tabOrder.length));
     };
     updateLimit(tabBar.getBoundingClientRect().width);
@@ -242,7 +290,10 @@ export function RightDock() {
     tabOrder,
     activeTab,
     visibleTabLimit,
+    tabOrder.includes("extensions") ? ["extensions"] : [],
   );
+  const captionInset =
+    resolveWindowControlsPlatform() === "windows" ? WINDOWS_CAPTION_INSET_CLASS : "pr-2";
   visibleTabIdsRef.current = visibleTabIds;
 
   useEffect(
@@ -391,6 +442,7 @@ export function RightDock() {
   };
 
   const closeTab = (tabId: DockTabId) => {
+    if (tabId === "extensions") return;
     if (tabId === "files" || tabId === "tree" || tabId === "changes") {
       closeOrderTab(tabId);
       return;
@@ -410,6 +462,7 @@ export function RightDock() {
     if (tabId === "files") return { label: t("dockFiles"), Icon: FolderTree };
     if (tabId === "tree") return { label: t("dockTree"), Icon: GitBranch };
     if (tabId === "changes") return { label: t("gitChanges"), Icon: GitCompareArrows };
+    if (tabId === "extensions") return { label: t("dockExtensions"), Icon: Puzzle };
     if (tabId.startsWith("browser:")) {
       const id = Number(tabId.slice("browser:".length));
       return {
@@ -505,7 +558,7 @@ export function RightDock() {
       <div
         data-tauri-drag-region
         data-dock-header
-        className="relative z-50 flex h-11 shrink-0 items-center border-b border-border pl-2 pr-[180px]"
+        className={`relative z-50 flex h-11 shrink-0 items-center border-b border-border pl-2 ${captionInset}`}
       >
         <div ref={tabBarRef} className="flex min-w-0 flex-1 items-center gap-1 self-stretch">
           <div
@@ -563,173 +616,179 @@ export function RightDock() {
                       <RotateCcw size={12} />
                     </button>
                   )}
-                  <button
-                    type="button"
-                    title={t("dockCloseNamed", { label })}
-                    aria-label={t("dockCloseNamed", { label })}
-                    disabled={closing}
-                    className="shrink-0 p-1 text-muted hover:text-foreground disabled:opacity-60"
-                    onClick={() => closeTab(tabId)}
-                  >
-                    {closing ? (
-                      <LoaderCircle size={12} className="animate-spin" />
-                    ) : (
-                      <X size={12} />
-                    )}
-                  </button>
+                  {tabId !== "extensions" && (
+                    <button
+                      type="button"
+                      title={t("dockCloseNamed", { label })}
+                      aria-label={t("dockCloseNamed", { label })}
+                      disabled={closing}
+                      className="shrink-0 p-1 text-muted hover:text-foreground disabled:opacity-60"
+                      onClick={() => closeTab(tabId)}
+                    >
+                      {closing ? (
+                        <LoaderCircle size={12} className="animate-spin" />
+                      ) : (
+                        <X size={12} />
+                      )}
+                    </button>
+                  )}
                 </div>
               );
             })}
           </div>
 
-          {overflowTabIds.length > 0 && (
-            <details
-              open={overflowMenuOpen}
-              className="relative shrink-0"
-              onToggle={(event) => {
-                const open = event.currentTarget.open;
-                setOverflowMenuOpen(open);
-                if (open) setAddMenuOpen(false);
-              }}
-            >
-              <summary
-                title={t("dockMoreTabs")}
-                aria-label={t("dockMoreTabs")}
-                className="flex size-7 cursor-pointer list-none items-center justify-center rounded text-muted hover:bg-surface-overlay hover:text-foreground [&::-webkit-details-marker]:hidden"
-              >
-                <ChevronDown size={14} />
-              </summary>
-              <div className="theme-floating-surface interface-density-compact-menu absolute right-0 top-8 z-50 w-56 overflow-hidden rounded border border-border bg-surface-raised py-1 shadow-lg">
-                {overflowTabIds.map((tabId) => {
-                  const { label, Icon } = tabInfo(tabId);
-                  return (
-                    <div
-                      key={tabId}
-                      className="flex items-center text-muted hover:bg-surface-overlay"
-                    >
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:text-foreground"
-                        onClick={(event) => {
-                          setActiveTab(tabId);
-                          setOverflowMenuOpen(false);
-                          event.currentTarget.closest("details")?.removeAttribute("open");
-                        }}
-                      >
-                        <Icon size={13} className="shrink-0" />
-                        <span className="truncate">{label}</span>
-                      </button>
-                      <button
-                        type="button"
-                        title={t("dockCloseNamed", { label })}
-                        aria-label={t("dockCloseNamed", { label })}
-                        className="mr-1 flex size-6 shrink-0 items-center justify-center rounded hover:bg-surface-raised hover:text-foreground"
-                        onClick={() => closeTab(tabId)}
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </details>
-          )}
-
-          <div ref={addMenuRef} className="relative shrink-0">
-            <button
-              ref={addButtonRef}
-              type="button"
-              title={t("dockNewPage")}
-              aria-label={t("dockNewPage")}
-              aria-haspopup="menu"
-              aria-expanded={addMenuOpen}
-              className="flex size-7 items-center justify-center rounded text-muted hover:bg-surface-overlay hover:text-foreground"
-              onClick={() => {
-                setOverflowMenuOpen(false);
-                setAddMenuOpen((open) => !open);
-              }}
-            >
-              <Plus size={14} />
-            </button>
-            {addMenuOpen && (
-              <div
-                role="menu"
-                className={`theme-floating-surface interface-density-menu absolute top-8 z-[70] w-44 overflow-hidden rounded border border-border bg-surface-raised py-1 shadow-lg ${
-                  tabOrder.length === 0 ? "left-0" : "right-0"
-                }`}
-                onKeyDown={(event) => {
-                  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-                    return;
-                  }
-                  const items = Array.from(
-                    event.currentTarget.querySelectorAll<HTMLButtonElement>(
-                      '[role="menuitem"]:not(:disabled)',
-                    ),
-                  );
-                  if (items.length === 0) return;
-                  event.preventDefault();
-                  const current = items.indexOf(document.activeElement as HTMLButtonElement);
-                  const next =
-                    event.key === "Home"
-                      ? 0
-                      : event.key === "End"
-                        ? items.length - 1
-                        : event.key === "ArrowDown"
-                          ? (current + 1 + items.length) % items.length
-                          : (current - 1 + items.length) % items.length;
-                  items[next]?.focus();
+          <div data-dock-tab-controls className="flex shrink-0 items-center gap-1">
+            {overflowTabIds.length > 0 && (
+              <details
+                open={overflowMenuOpen}
+                className="relative shrink-0"
+                onToggle={(event) => {
+                  const open = event.currentTarget.open;
+                  setOverflowMenuOpen(open);
+                  if (open) setAddMenuOpen(false);
                 }}
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground"
-                  onClick={createFiles}
+                <summary
+                  title={t("dockMoreTabs")}
+                  aria-label={t("dockMoreTabs")}
+                  className="flex size-7 cursor-pointer list-none items-center justify-center rounded text-muted hover:bg-surface-overlay hover:text-foreground [&::-webkit-details-marker]:hidden"
                 >
-                  <FolderTree size={14} />
-                  {t("dockFiles")}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground"
-                  onClick={createTree}
-                >
-                  <GitBranch size={14} />
-                  {t("dockSessionTree")}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!workspaceCwd}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
-                  onClick={createChanges}
-                >
-                  <GitCompareArrows size={14} />
-                  {t("gitChanges")}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={browserTabs.length >= MAX_BROWSER_TABS}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
-                  onClick={createBrowser}
-                >
-                  <Globe2 size={14} />
-                  {t("dockBrowser")}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled={!workspaceCwd}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
-                  onClick={createShell}
-                >
-                  <SquareTerminal size={14} />
-                  {t("dockTerminal")}
-                </button>
-              </div>
+                  <ChevronDown size={14} />
+                </summary>
+                <div className="theme-floating-surface interface-density-compact-menu absolute right-0 top-8 z-50 w-56 overflow-hidden rounded border border-border bg-surface-raised py-1 shadow-lg">
+                  {overflowTabIds.map((tabId) => {
+                    const { label, Icon } = tabInfo(tabId);
+                    return (
+                      <div
+                        key={tabId}
+                        className="flex items-center text-muted hover:bg-surface-overlay"
+                      >
+                        <button
+                          type="button"
+                          className="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:text-foreground"
+                          onClick={(event) => {
+                            setActiveTab(tabId);
+                            setOverflowMenuOpen(false);
+                            event.currentTarget.closest("details")?.removeAttribute("open");
+                          }}
+                        >
+                          <Icon size={13} className="shrink-0" />
+                          <span className="truncate">{label}</span>
+                        </button>
+                        {tabId !== "extensions" && (
+                          <button
+                            type="button"
+                            title={t("dockCloseNamed", { label })}
+                            aria-label={t("dockCloseNamed", { label })}
+                            className="mr-1 flex size-6 shrink-0 items-center justify-center rounded hover:bg-surface-raised hover:text-foreground"
+                            onClick={() => closeTab(tabId)}
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </details>
             )}
+
+            <div ref={addMenuRef} className="relative shrink-0">
+              <button
+                ref={addButtonRef}
+                type="button"
+                title={t("dockNewPage")}
+                aria-label={t("dockNewPage")}
+                aria-haspopup="menu"
+                aria-expanded={addMenuOpen}
+                className="flex size-7 items-center justify-center rounded text-muted hover:bg-surface-overlay hover:text-foreground"
+                onClick={() => {
+                  setOverflowMenuOpen(false);
+                  setAddMenuOpen((open) => !open);
+                }}
+              >
+                <Plus size={14} />
+              </button>
+              {addMenuOpen && (
+                <div
+                  role="menu"
+                  className={`theme-floating-surface interface-density-menu absolute top-8 z-[70] w-44 overflow-hidden rounded border border-border bg-surface-raised py-1 shadow-lg ${
+                    tabOrder.length === 0 ? "left-0" : "right-0"
+                  }`}
+                  onKeyDown={(event) => {
+                    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+                      return;
+                    }
+                    const items = Array.from(
+                      event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                        '[role="menuitem"]:not(:disabled)',
+                      ),
+                    );
+                    if (items.length === 0) return;
+                    event.preventDefault();
+                    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                    const next =
+                      event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? items.length - 1
+                          : event.key === "ArrowDown"
+                            ? (current + 1 + items.length) % items.length
+                            : (current - 1 + items.length) % items.length;
+                    items[next]?.focus();
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground"
+                    onClick={createFiles}
+                  >
+                    <FolderTree size={14} />
+                    {t("dockFiles")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground"
+                    onClick={createTree}
+                  >
+                    <GitBranch size={14} />
+                    {t("dockSessionTree")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!workspaceCwd}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
+                    onClick={createChanges}
+                  >
+                    <GitCompareArrows size={14} />
+                    {t("gitChanges")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={browserTabs.length >= MAX_BROWSER_TABS}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
+                    onClick={createBrowser}
+                  >
+                    <Globe2 size={14} />
+                    {t("dockBrowser")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!workspaceCwd}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted hover:bg-surface-overlay hover:text-foreground disabled:opacity-40"
+                    onClick={createShell}
+                  >
+                    <SquareTerminal size={14} />
+                    {t("dockTerminal")}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -807,7 +866,19 @@ export function RightDock() {
             }
           />
         ))}
-        {panel && <ExtensionTerminal visible={activeTab === extensionTabId(panel.requestId)} />}
+        {deckV1 && tabOrder.includes("extensions") && (
+          <div
+            role="tabpanel"
+            id="dock-panel-extensions"
+            aria-labelledby="dock-tab-extensions"
+            className={`min-h-0 flex-1 ${activeTab === "extensions" ? "flex" : "hidden"}`}
+          >
+            <ExtensionDockArea visible={activeTab === "extensions" && dockOpen} />
+          </div>
+        )}
+        {!deckV1 && dockPanel && (
+          <ExtensionTerminal visible={activeTab === extensionTabId(dockPanel.requestId)} />
+        )}
         {tabOrder.length === 0 && (
           <div className="flex min-h-0 flex-1 items-center justify-center">
             <div className="flex w-56 flex-col items-center gap-4">

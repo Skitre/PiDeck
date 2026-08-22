@@ -285,7 +285,7 @@ pub async fn browser_surface_set_bounds(
     surface_id: String,
     bounds: BrowserSurfaceBounds,
 ) -> Result<(), String> {
-    let browsers = state.browsers.lock().await;
+    let mut browsers = state.browsers.lock().await;
     browsers.set_bounds(&surface_id, bounds)
 }
 
@@ -295,7 +295,7 @@ pub async fn browser_surface_set_visible(
     surface_id: String,
     visible: bool,
 ) -> Result<(), String> {
-    let browsers = state.browsers.lock().await;
+    let mut browsers = state.browsers.lock().await;
     browsers.set_visible(&surface_id, visible)
 }
 

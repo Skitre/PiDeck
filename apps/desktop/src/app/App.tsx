@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useBrowserOcclusion } from "../lib/browser-occlusion";
 import { useAppStore, type SettingsSection } from "../lib/stores/app-store";
 import { hostClient, isSyntheticLifecycleFatal } from "../lib/bridge/host-client";
 import { createTauriTransport } from "../lib/bridge/tauri-transport";
@@ -22,6 +23,7 @@ import { groupTimedAgentEventsBySession } from "../lib/chat/transcript-drafts";
 import { type TimedAgentEventEnvelope } from "../lib/chat/transcript-reducer";
 import { classifyToolSnapshot } from "../lib/stores/tool-revision";
 import { expectedIdentityForEvent, extensionUiRequestDelivery } from "./event-identity";
+import { observeExtensionUiHostEvent } from "../lib/extension-ui-observation";
 import { publishValidatedHostEvent } from "../lib/bridge/validated-host-events";
 import { mergeHostIdentity, nullableSessionContext } from "../lib/bridge/host-context";
 import { requestSessionOpenWithRetry } from "../lib/bridge/session-open-request";
@@ -34,6 +36,8 @@ import { shouldRestoreLastSession } from "./session-restore";
 import { StartupScreen, resolveStartupStage, useInitialStartupScreen } from "./StartupScreen";
 import { DraftPersistenceController } from "./DraftPersistenceController";
 import {
+  extensionUiHostConfigureParams,
+  hydrateDesktopSettings,
   notifyDesktopSettingsSaveFailure,
   persistDesktopSettings,
   persistRecentDesktopLocation,
@@ -53,6 +57,7 @@ import {
 
 function SettingsOverlay({ section }: { section: SettingsSection }) {
   const t = useT();
+  useBrowserOcclusion("settings");
   const setPage = useAppStore((s) => s.setPage);
   const [active, setActive] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -318,6 +323,7 @@ export function handleHostEvent(
         requestRecovery("extensionUi.request missing session identity");
         return false;
       }
+      observeExtensionUiHostEvent(event.event, event.payload);
       const extensionRequest = {
         ...event.payload,
         expiresAt: event.payload.timeoutMs ? Date.now() + event.payload.timeoutMs : undefined,
@@ -364,14 +370,16 @@ export function handleHostEvent(
       store.closeExtensionDecisionGroup(event.payload.groupKey, event.payload.status);
       break;
     case "extensionUi.statusChanged":
+      observeExtensionUiHostEvent(event.event, event.payload);
       if (
         event.sessionId === store.session?.sessionId &&
         event.sessionRevision === store.session?.revision
       ) {
-        store.setExtensionStatus(event.payload.key, event.payload.text ?? "");
+        store.setExtensionStatus(event.payload.key, event.payload.text ?? "", event.payload.origin);
       }
       break;
     case "extensionUi.widgetChanged":
+      observeExtensionUiHostEvent(event.event, event.payload);
       if (
         event.sessionId === store.session?.sessionId &&
         event.sessionRevision === store.session?.revision
@@ -380,6 +388,7 @@ export function handleHostEvent(
           key: event.payload.key ?? "default",
           widget: event.payload.widget,
           ...(event.payload.placement ? { placement: event.payload.placement } : {}),
+          ...(event.payload.origin ? { origin: event.payload.origin } : {}),
           hostInstanceId: event.hostInstanceId,
           workspaceId: event.workspaceId,
           workspaceRevision: event.workspaceRevision,
@@ -412,11 +421,14 @@ export function handleHostEvent(
         requestRecovery("extensionUi.customStarted missing session identity");
         return false;
       }
+      observeExtensionUiHostEvent(event.event, event.payload);
       store.openExtensionTerminal({
         requestId: event.payload.requestId,
         title: event.payload.title,
         cols: event.payload.cols,
         rows: event.payload.rows,
+        ...(event.payload.origin ? { origin: event.payload.origin } : {}),
+        ...(event.payload.overlay !== undefined ? { overlay: event.payload.overlay } : {}),
         context: {
           expectedHostInstanceId: event.hostInstanceId,
           expectedWorkspaceId: event.workspaceId,
@@ -562,7 +574,7 @@ export function App() {
           const { invoke } = await import("@tauri-apps/api/core");
           const snapshot = await invoke<DesktopSettingsSnapshot>("desktop_settings_get");
           if (!cancelled && snapshot.settings) {
-            store.setDesktopSettings(snapshot.settings);
+            store.setDesktopSettings(hydrateDesktopSettings(snapshot.settings));
             applyTheme(snapshot.settings.theme, { family: snapshot.settings.themeFamily });
             applyAppearancePreferences(snapshot.settings);
             if (snapshot.warning) {
@@ -675,12 +687,15 @@ export function App() {
               let lastError: unknown;
               for (let attempt = 0; attempt < 5 && !cancelled; attempt += 1) {
                 try {
+                  const helloSettings = useAppStore.getState().desktopSettings;
                   const configuredPresentation =
-                    useAppStore.getState().desktopSettings?.extensionDecisionPresentation ?? "auto";
+                    helloSettings?.extensionDecisionPresentation ?? "auto";
                   const status = await hostClient.hello(
                     "pideck",
                     await getAppVersion(),
                     configuredPresentation,
+                    extensionUiHostConfigureParams(helloSettings)
+                      .extensionDialogPresentationOverrides,
                   );
                   if (expectedHostId !== "bootstrap" && status.hostInstanceId !== expectedHostId) {
                     throw new Error("Host generation changed during hello");

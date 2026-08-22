@@ -7,15 +7,12 @@ import {
   KeyRound,
   Package,
   Palette,
+  Puzzle,
   RefreshCw,
   ServerCog,
   Settings2,
 } from "lucide-react";
-import type {
-  BusySendBehavior,
-  ExtensionDecisionPresentation,
-  TerminalProfileId,
-} from "@pideck/protocol";
+import type { BusySendBehavior, TerminalProfileId } from "@pideck/protocol";
 import { Dialog, secondaryButton } from "../../components/Dialog";
 import { SectionHeader } from "../../components/SectionHeader";
 import { Switch } from "../../components/Switch";
@@ -26,6 +23,7 @@ import {
   persistDesktopSettings,
   type DesktopSettingsUpdate,
 } from "../../lib/desktop-settings";
+import { ExtensionUiSettingsPage } from "./ExtensionUiSettingsPage";
 import { HostSettings } from "./HostSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { PackagesPage } from "../packages/PackagesPage";
@@ -33,7 +31,6 @@ import { UsageSettings } from "./UsageSettings";
 import { ShortcutsSettings } from "./ShortcutsSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { RestartHostButton } from "./restart-host";
-import { hostClient } from "../../lib/bridge/host-client";
 
 type ShellProfileSummary = {
   id: TerminalProfileId;
@@ -54,7 +51,6 @@ function GeneralSettings() {
   const [shellCatalog, setShellCatalog] = useState<ShellProfileCatalog | null>(null);
   const [shellCatalogLoading, setShellCatalogLoading] = useState(false);
   const [shellCatalogError, setShellCatalogError] = useState<string | null>(null);
-  const [decisionPresentationSaving, setDecisionPresentationSaving] = useState(false);
 
   async function openSettingsFile() {
     if (!host?.agentDir) return;
@@ -95,68 +91,6 @@ function GeneralSettings() {
       return false;
     }
   }
-
-  async function patchExtensionDecisionPresentation(next: ExtensionDecisionPresentation) {
-    const previous =
-      useAppStore.getState().desktopSettings?.extensionDecisionPresentation ?? "auto";
-    if (next === previous || decisionPresentationSaving) return;
-
-    const hostAtStart = useAppStore.getState().host;
-    let configuredHost = false;
-    setDecisionPresentationSaving(true);
-    try {
-      if (hostAtStart) {
-        const response = await hostClient.request(
-          "extensionUi.configure",
-          { expectedHostInstanceId: hostAtStart.hostInstanceId },
-          { extensionDecisionPresentation: next },
-        );
-        if (!response.ok) throw new Error(response.error.message);
-        configuredHost = true;
-      }
-      await persistDesktopSettings({ extensionDecisionPresentation: next });
-    } catch (error) {
-      const currentHost = useAppStore.getState().host;
-      const currentHostId = currentHost?.hostInstanceId;
-      if (configuredHost && currentHostId && currentHostId === hostAtStart?.hostInstanceId) {
-        try {
-          await hostClient.request(
-            "extensionUi.configure",
-            { expectedHostInstanceId: currentHostId },
-            { extensionDecisionPresentation: previous },
-          );
-        } catch {
-          // The next hello re-applies the persisted value after a Host epoch change.
-        }
-      }
-      notifyDesktopSettingsSaveFailure(error);
-    } finally {
-      setDecisionPresentationSaving(false);
-    }
-  }
-
-  const decisionPresentation = desktopSettings?.extensionDecisionPresentation ?? "auto";
-  const decisionPresentationOptions: Array<{
-    value: ExtensionDecisionPresentation;
-    label: MessageKey;
-    description: MessageKey;
-  }> = [
-    {
-      value: "auto",
-      label: "generalExtensionDecisionAuto",
-      description: "generalExtensionDecisionAutoDesc",
-    },
-    {
-      value: "legacy-modal",
-      label: "generalExtensionDecisionLegacy",
-      description: "generalExtensionDecisionLegacyDesc",
-    },
-    {
-      value: "inline-first",
-      label: "generalExtensionDecisionInlineFirst",
-      description: "generalExtensionDecisionInlineFirstDesc",
-    },
-  ];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -221,54 +155,6 @@ function GeneralSettings() {
                   </option>
                 </select>
               </div>
-            </div>
-          </section>
-
-          <section>
-            <h2 className="mb-2 text-sm font-medium text-muted">
-              {t("generalExtensionDecisionGroup")}
-            </h2>
-            <div className="flex flex-col gap-3 rounded-lg border border-border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <label htmlFor="extension-decision-presentation" className="min-w-0 text-sm">
-                  <span className="block">{t("generalExtensionDecision")}</span>
-                  <span
-                    id="extension-decision-presentation-help"
-                    className="block text-xs text-muted"
-                  >
-                    {t("generalExtensionDecisionDesc")}
-                  </span>
-                </label>
-                <select
-                  id="extension-decision-presentation"
-                  className="h-8 min-w-44 max-w-72 rounded-md border border-border bg-surface px-2 text-xs"
-                  aria-label={t("generalExtensionDecision")}
-                  aria-describedby="extension-decision-presentation-help"
-                  value={decisionPresentation}
-                  disabled={decisionPresentationSaving}
-                  onChange={(event) =>
-                    void patchExtensionDecisionPresentation(
-                      event.target.value as ExtensionDecisionPresentation,
-                    )
-                  }
-                >
-                  {decisionPresentationOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {t(option.label)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-right text-[11px] leading-4 text-muted">
-                {t(
-                  decisionPresentationOptions.find(
-                    (option) => option.value === decisionPresentation,
-                  )?.description ?? "generalExtensionDecisionDesc",
-                )}
-              </p>
-              <span className="sr-only" role="status" aria-live="polite">
-                {decisionPresentationSaving ? t("generalExtensionDecisionSaving") : ""}
-              </span>
             </div>
           </section>
 
@@ -373,6 +259,7 @@ const SETTINGS_NAV: Array<{
 }> = [
   { id: "general", label: "navGeneral", icon: Settings2 },
   { id: "appearance", label: "navAppearance", icon: Palette },
+  { id: "extensionUi", label: "navExtensionUi", icon: Puzzle },
   { id: "providers", label: "navProviders", icon: KeyRound },
   { id: "packages", label: "navPackages", icon: Package },
   { id: "usage", label: "navUsage", icon: ChartColumn },
@@ -462,6 +349,8 @@ export function SettingsPage({
           <GeneralSettings />
         ) : section === "appearance" ? (
           <AppearanceSettings />
+        ) : section === "extensionUi" ? (
+          <ExtensionUiSettingsPage />
         ) : section === "shortcuts" ? (
           <ShortcutsSettings />
         ) : section === "providers" ? (

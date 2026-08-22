@@ -1,12 +1,6 @@
-import type {
-  AgentSession,
-  ExtensionCommandContextActions,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ExtensionCommandContextActions } from "@earendil-works/pi-coding-agent";
 import type { HostIdentity } from "@pideck/protocol";
-import {
-  bindExtensionUi,
-  type ExtensionUiBinding,
-} from "./extension-ui-bridge.js";
+import { bindExtensionUi, type ExtensionUiBinding } from "./extension-ui-bridge.js";
 import type { PiHostServer } from "./server.js";
 
 export type ExtensionUiSlots = {
@@ -25,14 +19,12 @@ export function bindForCandidate(
   commandContextActions?: ExtensionCommandContextActions,
 ): Promise<ExtensionUiBinding> {
   return bindExtensionUi(session, extensionsResult, {
-    emit: (event, payload) =>
-      server.emitForIdentity(candidateIdentity, event, payload),
-    emitForIdentity: (identity, event, payload) =>
-      server.emitForIdentity(identity, event, payload),
+    emit: (event, payload) => server.emitForIdentity(candidateIdentity, event, payload),
+    emitForIdentity: (identity, event, payload) => server.emitForIdentity(identity, event, payload),
     getIdentity: () => candidateIdentity,
     getCurrentIdentity: () => server.getIdentity(),
-    getExtensionDecisionPresentation: () =>
-      server.getExtensionDecisionPresentation(),
+    getExtensionDecisionPresentation: () => server.getExtensionDecisionPresentation(),
+    getExtensionDialogPresentationOverrides: () => server.getExtensionDialogPresentationOverrides(),
     ...(commandContextActions !== undefined ? { commandContextActions } : {}),
   });
 }

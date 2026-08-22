@@ -120,7 +120,11 @@ await session.bindExtensions({
 });
 ```
 
-`uiContext` implements positional `ExtensionUIContext` APIs (`select(title, options)`, `confirm(title, message)`, `input`, `editor`, `notify`, `setStatus`, `setWidget`). TUI-only methods (custom editor/footer/header factories) are no-op or throw a clear unsupported error — they never access private setters.
+`uiContext` implements the public `ExtensionUIContext` surface. Blocking dialogs,
+`notify`, `setStatus`, `setWidget`, and `custom()` are wired; TUI chrome such as
+`setFooter` / `setHeader` / `setEditorComponent` is a no-op. The Host never
+touches private SDK setters. The full verb map is
+[Extension UI surfaces](./extension-ui-surfaces.md).
 
 The narrow SDK patch invokes `invocationRunner` around each registered tool and each
 individual Extension event handler. PiDeck stores the resulting trusted `SourceInfo`
@@ -147,6 +151,12 @@ Host-scoped `extensionUi.configure` method:
 - `auto` is the new-install Desktop default and keeps ordinary active tool/command requests Inline when the surface is ready.
 - `inline-first` also prefers Inline for other active origins after mandatory guards.
 
+Those bullets describe the current implementation. The accepted
+[Extension Deck](./extension-deck.md) target adds a global per-Extension
+Follow Host / Inline / Modal preference, still resolved by Host after mandatory
+ownership, risk, lifecycle, and surface-availability guards. Until that batch
+lands, `legacy-modal` continues to mean every request is Modal.
+
 An absent Desktop settings file opts into `auto`; a legacy file missing the field,
 corrupt-settings recovery, or a Host without the Desktop handshake remains
 `legacy-modal`. Trusted `tool_call` permission interceptors are Host-high-risk and
@@ -160,7 +170,8 @@ declare Extension Presentation v1 under `details.presentation`; agent-audience
 coordination and other visible Extension activity join the assistant's execution
 trace instead of splitting the conversation. Opening the trace reveals a quiet
 Extension title row; opening that row reveals raw protocol and metadata. See
-[Extension presentation](./extension-presentation.md).
+[Extension presentation](./extension-presentation.md) and
+[Extension UI surfaces](./extension-ui-surfaces.md).
 
 One tool or command invocation can issue multiple blocking dialogs. Host assigns the
 requests one redacted `groupKey` and closes the group at the invocation boundary;

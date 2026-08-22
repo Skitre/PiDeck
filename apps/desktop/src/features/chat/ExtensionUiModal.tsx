@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import { useBrowserOcclusion } from "../../lib/browser-occlusion";
 import { useAppStore } from "../../lib/stores/app-store";
 import { ExtensionUiRequestContent } from "./ExtensionUiRequestContent";
 import { useExtensionUiResponse } from "./use-extension-ui-response";
@@ -14,6 +15,7 @@ export function ExtensionUiModal() {
   const wasSubmittingRef = useRef(false);
   const titleId = useId();
   const requestId = request?.requestId ?? null;
+  useBrowserOcclusion("extension-ui-modal", requestId !== null);
 
   useEffect(() => {
     if (!requestId) return;

@@ -5,31 +5,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../../lib/stores/app-store";
 import { SettingsPage } from "./SettingsPage";
-import { hostClient } from "../../lib/bridge/host-client";
-
-const CONNECTED_HOST = {
-  protocolVersion: 1 as const,
-  hostInstanceId: "11111111-1111-4111-8111-111111111111",
-  workspaceId: null,
-  workspaceRevision: 0,
-  sessionId: null,
-  sessionRevision: 0,
-  packageRevision: 0,
-  sdkVersion: "0.84.2",
-  nodeVersion: "v24.18.0",
-  agentDir: "/agent",
-  phase: "waitingForWorkspace" as const,
-  capabilities: {
-    packageUpdateCheck: false,
-    extensionUi: true as const,
-    sessionExport: true,
-  },
-  modelConfigHealth: {
-    state: "ok" as const,
-    source: "ModelRegistry.getError" as const,
-  },
-  extensionDecisionPresentation: "legacy-modal" as const,
-};
 
 const tauriMocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -106,7 +81,16 @@ describe("SettingsPage navigation guard", () => {
       within(navigation)
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["General", "Appearance", "Providers", "Packages", "Usage", "Host", "Shortcuts"]);
+    ).toEqual([
+      "General",
+      "Appearance",
+      "Extension UI",
+      "Providers",
+      "Packages",
+      "Usage",
+      "Host",
+      "Shortcuts",
+    ]);
   });
 
   it("keeps startup controls in General and moves interface controls to Appearance", async () => {
@@ -116,6 +100,8 @@ describe("SettingsPage navigation guard", () => {
     expect(screen.getByText("Startup")).toBeInTheDocument();
     expect(screen.getByText("Restore last session")).toBeInTheDocument();
     expect(screen.getByText("Auto-restart Pi Host")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Extension prompt presentation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Extension UI" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Theme/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Language/)).not.toBeInTheDocument();
     expect(
@@ -328,45 +314,6 @@ describe("SettingsPage navigation guard", () => {
       expect(useAppStore.getState().desktopSettings?.busySendBehavior).toBe("steer"),
     );
     expect(select).toHaveValue("steer");
-  });
-
-  it("synchronizes automatic presentation and offers one-click legacy rollback", async () => {
-    const user = userEvent.setup();
-    useAppStore.getState().setHost(CONNECTED_HOST);
-    const request = vi.spyOn(hostClient, "request").mockResolvedValue({
-      ok: true,
-      result: { extensionDecisionPresentation: "auto" },
-    } as never);
-    render(<SettingsPage initialSection="general" />);
-
-    const select = screen.getByLabelText("Extension prompt presentation");
-    expect(select).toHaveValue("legacy-modal");
-
-    await user.selectOptions(select, "auto");
-    await waitFor(() =>
-      expect(useAppStore.getState().desktopSettings?.extensionDecisionPresentation).toBe("auto"),
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      1,
-      "extensionUi.configure",
-      { expectedHostInstanceId: CONNECTED_HOST.hostInstanceId },
-      { extensionDecisionPresentation: "auto" },
-    );
-    expect(select).toHaveValue("auto");
-
-    await user.selectOptions(select, "legacy-modal");
-    await waitFor(() =>
-      expect(useAppStore.getState().desktopSettings?.extensionDecisionPresentation).toBe(
-        "legacy-modal",
-      ),
-    );
-    expect(request).toHaveBeenNthCalledWith(
-      2,
-      "extensionUi.configure",
-      { expectedHostInstanceId: CONNECTED_HOST.hostInstanceId },
-      { extensionDecisionPresentation: "legacy-modal" },
-    );
-    expect(select).toHaveValue("legacy-modal");
   });
 
   it("keeps the previous setting and reports a rejected desktop patch", async () => {

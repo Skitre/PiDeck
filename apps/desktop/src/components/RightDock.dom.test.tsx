@@ -34,6 +34,7 @@ vi.mock("../features/dock/ChangesPanel", () => ({
   ),
 }));
 
+import { resetExtensionDeckV1GateForTests } from "../lib/extension-deck-gate";
 import { RightDock } from "./RightDock";
 import { ChatHeader } from "../features/chat/ChatHeader";
 
@@ -62,6 +63,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  resetExtensionDeckV1GateForTests();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   clearPendingTreePanelForTest();
@@ -73,6 +75,17 @@ async function openAddMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("RightDock pages", () => {
+  it("keeps the new-page control after the tab list and reserves Windows caption space", () => {
+    render(<RightDock />);
+    const header = document.querySelector("[data-dock-header]");
+    const tabList = document.querySelector("[data-dock-tab-list]");
+    const controls = document.querySelector("[data-dock-tab-controls]");
+    expect(header).toHaveClass("pr-[140px]");
+    expect(tabList).not.toHaveClass("flex-1");
+    expect(tabList?.nextElementSibling).toBe(controls);
+    expect(controls).toContainElement(screen.getByRole("button", { name: "New dock page" }));
+  });
+
   it("starts without an active page", () => {
     render(<RightDock />);
 

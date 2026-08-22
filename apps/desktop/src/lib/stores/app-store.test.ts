@@ -84,7 +84,7 @@ describe("app-store epoch wiring", () => {
       extensionStatuses: {},
       extensionWidgets: {},
       collapsedExtensionWidgetKeys: {},
-      extensionWidgetsOpen: false,
+      extensionStatusOrigins: {},
       lastExtensionWidgetAttentionRunId: null,
       packageProgress: null,
       packageRetry: null,
@@ -345,8 +345,6 @@ describe("app-store epoch wiring", () => {
     expect(useAppStore.getState().extensionWidgets.summary?.placement).toBe("belowEditor");
     useAppStore.getState().toggleExtensionWidgetCollapsed("summary");
     expect(useAppStore.getState().collapsedExtensionWidgetKeys).toEqual({ summary: true });
-    useAppStore.getState().setExtensionWidgetsOpen(true);
-    useAppStore.getState().setExtensionWidgetsOpen(false);
     expect(useAppStore.getState().collapsedExtensionWidgetKeys).toEqual({ summary: true });
     useAppStore.getState().setExtensionWidget({
       ...useAppStore.getState().extensionWidgets.summary!,
@@ -354,13 +352,13 @@ describe("app-store epoch wiring", () => {
     });
     expect(useAppStore.getState().collapsedExtensionWidgetKeys).toEqual({ summary: true });
     useAppStore.getState().requestExtensionWidgetAttention("run-before-switch", "summary");
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(true);
+    expect(useAppStore.getState().lastExtensionWidgetAttentionRunId).toBe("run-before-switch");
     expect(useAppStore.getState().collapsedExtensionWidgetKeys).toEqual({ summary: true });
 
     useAppStore.getState().applySessionSnapshot(session("s2"));
     expect(useAppStore.getState().extensionWidgets).toEqual({});
     expect(useAppStore.getState().collapsedExtensionWidgetKeys).toEqual({});
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+    expect(useAppStore.getState().extensionStatusOrigins).toEqual({});
     expect(useAppStore.getState().lastExtensionWidgetAttentionRunId).toBeNull();
   });
 
@@ -391,7 +389,7 @@ describe("app-store epoch wiring", () => {
     expect(useAppStore.getState().collapsedExtensionWidgetKeys).toEqual({});
   });
 
-  it("opens once per widget attention run and closes on navigation or final clear", () => {
+  it("records widget attention once per run without opening a popover", () => {
     const widget = {
       key: "brainstorm",
       widget: ["active"],
@@ -403,30 +401,16 @@ describe("app-store epoch wiring", () => {
     };
 
     useAppStore.getState().setExtensionWidget(widget);
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+    expect(useAppStore.getState().lastExtensionWidgetAttentionRunId).toBeNull();
 
     useAppStore.getState().requestExtensionWidgetAttention("run-1", "brainstorm");
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(true);
+    expect(useAppStore.getState().lastExtensionWidgetAttentionRunId).toBe("run-1");
 
-    useAppStore.getState().setExtensionWidgetsOpen(false);
     useAppStore.getState().requestExtensionWidgetAttention("run-1", "brainstorm");
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+    expect(useAppStore.getState().lastExtensionWidgetAttentionRunId).toBe("run-1");
 
     useAppStore.getState().requestExtensionWidgetAttention("run-2", "brainstorm");
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(true);
-
-    useAppStore.getState().setPage("settings");
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
-    useAppStore.getState().requestExtensionWidgetAttention("run-3", "brainstorm");
-    useAppStore.getState().setPage("chat");
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
-
-    useAppStore.getState().requestExtensionWidgetAttention("run-missing", "missing");
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
-
-    useAppStore.getState().setExtensionWidgetsOpen(true);
-    useAppStore.getState().setExtensionWidget({ ...widget, widget: null });
-    expect(useAppStore.getState().extensionWidgetsOpen).toBe(false);
+    expect(useAppStore.getState().lastExtensionWidgetAttentionRunId).toBe("run-2");
   });
 
   it("keeps extension statuses by key and clears them independently", () => {

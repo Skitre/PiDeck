@@ -126,9 +126,7 @@ describe("extension UI real loader + bindExtensions path", () => {
       const deadline = Date.now() + 40_000;
       while (!stopRespond && Date.now() < deadline) {
         const req = events.find((x) => x.e === "extensionUi.request" && !x.done);
-        const custom = events.find(
-          (x) => x.e === "extensionUi.customStarted" && !x.done,
-        );
+        const custom = events.find((x) => x.e === "extensionUi.customStarted" && !x.done);
         if (!req && !custom) {
           await new Promise((r) => setTimeout(r, 20));
           continue;
@@ -177,13 +175,15 @@ describe("extension UI real loader + bindExtensions path", () => {
     expect(firstRequests).toHaveLength(3);
     const firstOrigins = firstRequests.map(
       (event) =>
-        (event.p as {
-          origin: {
-            invocationKind: string;
-            extensionId: string;
-            eventType: string;
-          };
-        }).origin,
+        (
+          event.p as {
+            origin: {
+              invocationKind: string;
+              extensionId: string;
+              eventType: string;
+            };
+          }
+        ).origin,
     );
     for (const origin of firstOrigins) {
       expect(origin).toMatchObject({
@@ -200,13 +200,15 @@ describe("extension UI real loader + bindExtensions path", () => {
     expect(allRequests).toHaveLength(6);
     const reloadOrigins = allRequests.slice(3).map(
       (event) =>
-        (event.p as {
-          origin: {
-            invocationKind: string;
-            extensionId: string;
-            eventType: string;
-          };
-        }).origin,
+        (
+          event.p as {
+            origin: {
+              invocationKind: string;
+              extensionId: string;
+              eventType: string;
+            };
+          }
+        ).origin,
     );
     expect(reloadOrigins).toHaveLength(3);
     for (const origin of reloadOrigins) {
@@ -218,10 +220,7 @@ describe("extension UI real loader + bindExtensions path", () => {
     }
 
     stopRespond = true;
-    await Promise.race([
-      respondLoop,
-      new Promise((r) => setTimeout(r, 200)),
-    ]);
+    await Promise.race([respondLoop, new Promise((r) => setTimeout(r, 200))]);
 
     expect(existsSync(marker)).toBe(true);
     const body = readFileSync(marker, "utf8");
@@ -290,7 +289,7 @@ describe("extension UI real loader + bindExtensions path", () => {
         "    }",
         "    if (registered) return;",
         '    ctx.ui.setWidget("todo-like", () => ({',
-        '      render: () => [`todos:${sessionId}`],',
+        "      render: () => [`todos:${sessionId}`],",
         "      invalidate: () => {},",
         "    }));",
         "    registered = true;",
@@ -358,36 +357,18 @@ describe("extension UI real loader + bindExtensions path", () => {
       const first = await createSessionWithLoader();
       const firstSessionId = first.sessionId;
       const firstEvents: Array<{ e: HostEventName; p: unknown }> = [];
-      const firstBinding = await bindAndPublish(
-        first,
-        identityFor(firstSessionId, 1),
-        firstEvents,
-      );
-      expect(firstEvents.some((event) => event.e === "extensionUi.widgetChanged")).toBe(
-        true,
-      );
+      const firstBinding = await bindAndPublish(first, identityFor(firstSessionId, 1), firstEvents);
+      expect(firstEvents.some((event) => event.e === "extensionUi.widgetChanged")).toBe(true);
       firstBinding.cleanup();
 
       const second = await createSessionWithLoader();
       const secondEvents: Array<{ e: HostEventName; p: unknown }> = [];
-      await bindAndPublish(
-        second,
-        identityFor(second.sessionId, 2),
-        secondEvents,
-      );
-      expect(secondEvents.some((event) => event.e === "extensionUi.widgetChanged")).toBe(
-        true,
-      );
+      await bindAndPublish(second, identityFor(second.sessionId, 2), secondEvents);
+      expect(secondEvents.some((event) => event.e === "extensionUi.widgetChanged")).toBe(true);
 
       const staleEvents: Array<{ e: HostEventName; p: unknown }> = [];
-      const staleBinding = await bindAndPublish(
-        first,
-        identityFor(firstSessionId, 3),
-        staleEvents,
-      );
-      expect(staleEvents.some((event) => event.e === "extensionUi.widgetChanged")).toBe(
-        false,
-      );
+      const staleBinding = await bindAndPublish(first, identityFor(firstSessionId, 3), staleEvents);
+      expect(staleEvents.some((event) => event.e === "extensionUi.widgetChanged")).toBe(false);
       staleBinding.cleanup();
 
       const restoredEvents: Array<{ e: HostEventName; p: unknown }> = [];
@@ -404,7 +385,7 @@ describe("extension UI real loader + bindExtensions path", () => {
       const restoredWidget = restoredEvents.find(
         (event) => event.e === "extensionUi.widgetChanged",
       )?.p;
-      expect(restoredWidget).toEqual({
+      expect(restoredWidget).toMatchObject({
         key: "todo-like",
         widget: [`todos:${firstSessionId}`],
       });

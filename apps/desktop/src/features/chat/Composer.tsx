@@ -7,7 +7,6 @@ import {
   LoaderCircle,
   MessageCircleQuestion,
   Plus,
-  Puzzle,
   RefreshCw,
   Send,
   Square,
@@ -33,7 +32,10 @@ import {
 import { buildAttachedFileBlock } from "./transcript-model";
 import { ContextUsageRing, ModelControls } from "./ModelControls";
 import { QueuePanel } from "./QueuePanel";
-import { ExtensionWidgetsPopover, ExtensionWidgetsButton } from "./ExtensionWidgets";
+import {
+  ExtensionAnchorSlots,
+  ExtensionStatusChipRail,
+} from "../extensions/ExtensionPresentationMounts";
 import { PiMark } from "../../components/PiMark";
 import {
   activeSessionContext,
@@ -72,25 +74,6 @@ import {
 
 const MAX_FILES = 4;
 const MAX_FILE_BYTES = 256 * 1024;
-
-function ExtensionStatusStrip() {
-  const statuses = useAppStore((state) => state.extensionStatuses);
-  const entries = Object.entries(statuses);
-  if (entries.length === 0) return null;
-  return (
-    <div className="mb-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-2 text-[10px] text-muted">
-      {entries.map(([key, text]) => (
-        <span key={key} className="flex min-w-0 items-center gap-1.5" title={text}>
-          <Puzzle size={11} className="shrink-0 text-accent" />
-          <span className="max-w-[18rem] truncate">
-            {key !== "default" && <span className="mr-1 text-foreground/70">{key}</span>}
-            {text}
-          </span>
-        </span>
-      ))}
-    </div>
-  );
-}
 
 type PendingImage = SerializableImage & { id: string };
 type PendingFile = { id: string; name: string; size: number; text: string };
@@ -290,8 +273,6 @@ export function Composer({
   const draftTarget = draftTargetFor(workspace, session);
   const draftKey = draftTarget ? draftKeyForTarget(draftTarget) : null;
   const text = useAppStore((s) => (draftKey ? (s.draftTexts[draftKey] ?? "") : ""));
-  const extensionWidgetsOpen = useAppStore((s) => s.extensionWidgetsOpen);
-  const setExtensionWidgetsOpen = useAppStore((s) => s.setExtensionWidgetsOpen);
   const setSession = useAppStore((s) => s.applySessionSnapshot);
   const pushNotification = useAppStore((s) => s.pushNotification);
   const openSettingsSection = useAppStore((s) => s.openSettingsSection);
@@ -315,7 +296,6 @@ export function Composer({
     async () => undefined,
   );
   const decisionHintId = useId();
-  const extensionWidgetAnchorRef = useRef<HTMLDivElement>(null);
   const templatesRef = useRef<{ key: string; items: CompletionItem[] } | null>(null);
   const fileSnapshotRef = useRef<{
     query: string;
@@ -476,14 +456,6 @@ export function Composer({
       unlisten?.();
     };
   }, [disabled, sessionId]);
-
-  function closeExtensionWidgets() {
-    setExtensionWidgetsOpen(false);
-  }
-
-  function toggleExtensionWidgets() {
-    setExtensionWidgetsOpen(!extensionWidgetsOpen);
-  }
 
   async function loadCommandItems(): Promise<{
     cacheKey: string | null;
@@ -1299,15 +1271,16 @@ export function Composer({
       )}
       <QueuePanel />
       <div
-        ref={extensionWidgetAnchorRef}
         className="conversation-content-width relative mx-auto w-full"
         data-extension-widget-anchor
       >
-        <ExtensionStatusStrip />
+        <ExtensionAnchorSlots slot="aboveComposer" />
+        <ExtensionStatusChipRail />
         <div
           className={`chat-composer-surface rounded-xl border bg-surface-raised p-2 shadow-sm transition-colors ${
             dragOver ? "border-accent" : "border-border"
           }`}
+          data-composer-surface
           onDragOver={(event) => {
             if (disabled) return;
             if ([...event.dataTransfer.items].some((item) => item.kind === "file")) {
@@ -1627,10 +1600,6 @@ export function Composer({
             </button>
             <ModelControls />
             <div className="ml-auto flex items-center gap-1.5">
-              <ExtensionWidgetsButton
-                open={extensionWidgetsOpen}
-                onToggle={toggleExtensionWidgets}
-              />
               <ContextUsageRing />
               {busy ? (
                 canSend ? (
@@ -1671,11 +1640,7 @@ export function Composer({
             </div>
           </div>
         </div>
-        <ExtensionWidgetsPopover
-          anchorRef={extensionWidgetAnchorRef}
-          open={extensionWidgetsOpen}
-          onClose={closeExtensionWidgets}
-        />
+        <ExtensionAnchorSlots slot="belowComposer" />
         <SessionStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
         <ForkModal open={forkOpen} onClose={() => setForkOpen(false)} />
       </div>

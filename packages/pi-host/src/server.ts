@@ -15,6 +15,8 @@ import {
   type ModelConfigHealth,
   type HostCapabilities,
   type ExtensionDecisionPresentation,
+  type ExtensionDialogPresentationOverrides,
+  isExtensionDialogPresentationOverrides,
 } from "@pideck/protocol";
 import { IdentityState } from "./identity.js";
 import { TryMutex } from "./locks.js";
@@ -85,7 +87,8 @@ export class PiHostServer {
   private readonly shutdownController = new AbortController();
   private sequence = 0;
   private phase: HostPhase = "booting";
-  private extensionDecisionPresentation: ExtensionDecisionPresentation = "auto";
+  private extensionDecisionPresentation: ExtensionDecisionPresentation = "legacy-modal";
+  private extensionDialogPresentationOverrides: ExtensionDialogPresentationOverrides = {};
   private shuttingDown = false;
   private lastError?: HostError;
   private fatalError?: HostError;
@@ -115,8 +118,33 @@ export class PiHostServer {
     return this.extensionDecisionPresentation;
   }
 
+  getExtensionDialogPresentationOverrides(): ExtensionDialogPresentationOverrides {
+    return this.extensionDialogPresentationOverrides;
+  }
+
   setExtensionDecisionPresentation(mode: ExtensionDecisionPresentation): void {
     this.extensionDecisionPresentation = mode;
+  }
+
+  setExtensionDialogPresentationOverrides(overrides: ExtensionDialogPresentationOverrides): void {
+    this.extensionDialogPresentationOverrides = overrides;
+  }
+
+  applyExtensionUiConfigure(params: {
+    extensionDecisionPresentation: ExtensionDecisionPresentation;
+    extensionDialogPresentationOverrides?: ExtensionDialogPresentationOverrides;
+  }): {
+    extensionDecisionPresentation: ExtensionDecisionPresentation;
+    extensionDialogPresentationOverrides: ExtensionDialogPresentationOverrides;
+  } {
+    this.extensionDecisionPresentation = params.extensionDecisionPresentation;
+    if (params.extensionDialogPresentationOverrides !== undefined) {
+      this.extensionDialogPresentationOverrides = params.extensionDialogPresentationOverrides;
+    }
+    return {
+      extensionDecisionPresentation: this.extensionDecisionPresentation,
+      extensionDialogPresentationOverrides: this.extensionDialogPresentationOverrides,
+    };
   }
 
   setPhase(phase: HostPhase): void {
@@ -373,12 +401,30 @@ export class PiHostServer {
 
     // Built-in system handlers
     if (method === "system.hello") {
-      const requestedMode = (
-        params as {
-          extensionDecisionPresentation?: ExtensionDecisionPresentation;
+      const helloParams = params as {
+        extensionDecisionPresentation?: ExtensionDecisionPresentation;
+        extensionDialogPresentationOverrides?: ExtensionDialogPresentationOverrides;
+      };
+      if (helloParams.extensionDecisionPresentation) {
+        this.extensionDecisionPresentation = helloParams.extensionDecisionPresentation;
+      }
+      if (helloParams.extensionDialogPresentationOverrides !== undefined) {
+        if (
+          !isExtensionDialogPresentationOverrides(helloParams.extensionDialogPresentationOverrides)
+        ) {
+          this.writeResponse(
+            createFailureResponse(
+              this.identity.snapshot(),
+              id,
+              method,
+              createHostError("INVALID_REQUEST", "invalid extensionDialogPresentationOverrides"),
+            ),
+          );
+          return;
         }
-      ).extensionDecisionPresentation;
-      if (requestedMode) this.setExtensionDecisionPresentation(requestedMode);
+        this.extensionDialogPresentationOverrides =
+          helloParams.extensionDialogPresentationOverrides;
+      }
       this.writeResponse(
         createSuccessResponse(this.identity.snapshot(), id, method, this.buildStatus()),
       );

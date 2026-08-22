@@ -9,4 +9,5 @@ export * from "./contracts.js";
 export * from "./envelopes.js";
 export * from "./validate.js";
 export * from "./extension-presentation.js";
+export * from "./extension-ui-settings.js";
 export * from "./attachment-references.js";

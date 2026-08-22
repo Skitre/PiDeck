@@ -3,7 +3,12 @@ import "@testing-library/jest-dom/vitest";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HostStatusSnapshot, SessionSnapshot, WorkspaceSnapshot } from "@pideck/protocol";
+import {
+  DEFAULT_EXTENSION_UI_SETTINGS,
+  type HostStatusSnapshot,
+  type SessionSnapshot,
+  type WorkspaceSnapshot,
+} from "@pideck/protocol";
 import { hostClient } from "../../lib/bridge/host-client";
 import { useAppStore } from "../../lib/stores/app-store";
 import type { ExtensionUiRequestState } from "../../lib/stores/extension-ui-state";
@@ -674,6 +679,74 @@ describe("Extension presentation surfaces", () => {
     await waitFor(() => expect(composer).toHaveFocus());
     expect(composer).toHaveValue("Keep this draft");
     expect(screen.getByRole("button", { name: "Send" })).toBeEnabled();
+  });
+
+  it("does not remount a published Host-final request when Settings later prefers Modal", () => {
+    act(() => {
+      useAppStore.getState().setExtensionUiRequest(extensionRequest({ presentation: "inline" }));
+    });
+    renderRequestSurfaces();
+    expect(screen.getByRole("region", { name: "Choose how to continue" })).toBeVisible();
+
+    act(() => {
+      const current = useAppStore.getState().desktopSettings;
+      useAppStore.getState().setDesktopSettings({
+        theme: "system",
+        language: "en",
+        restoreLastSession: true,
+        autoRestartHostOnce: true,
+        extensionDecisionPresentation: "auto",
+        terminalProfile: "auto",
+        ...current,
+        extensionUi: {
+          ...DEFAULT_EXTENSION_UI_SETTINGS,
+          presentations: {
+            ext_review: { blockingDialog: { home: { kind: "modal" } } },
+          },
+        },
+      });
+    });
+
+    expect(screen.getByRole("region", { name: "Choose how to continue" })).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useAppStore.getState().extensionUiRequest?.presentation).toBe("inline");
+  });
+
+  it("parks a published request when switching sessions without changing the global profile", () => {
+    act(() => {
+      useAppStore.getState().setDesktopSettings({
+        theme: "system",
+        language: "en",
+        restoreLastSession: true,
+        autoRestartHostOnce: true,
+        extensionDecisionPresentation: "auto",
+        terminalProfile: "auto",
+        extensionUi: {
+          ...DEFAULT_EXTENSION_UI_SETTINGS,
+          presentations: {
+            ext_review: { blockingDialog: { home: { kind: "inline" } } },
+          },
+        },
+      });
+      useAppStore.getState().setExtensionUiRequest(extensionRequest({ presentation: "inline" }));
+    });
+    renderRequestSurfaces();
+    expect(screen.getByRole("region")).toBeVisible();
+
+    act(() => {
+      useAppStore.getState().applySessionSnapshot({
+        ...sessionSnapshot(),
+        sessionId: "55555555-5555-4555-8555-555555555555",
+        revision: 1,
+      });
+    });
+
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      useAppStore.getState().desktopSettings?.extensionUi?.presentations.ext_review?.blockingDialog
+        ?.home,
+    ).toEqual({ kind: "inline" });
   });
 });
 

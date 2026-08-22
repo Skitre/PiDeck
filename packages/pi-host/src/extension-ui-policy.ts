@@ -1,11 +1,14 @@
 import type {
   ExtensionDecisionPresentation,
+  ExtensionDialogPresentationOverrides,
+  ExtensionDialogPresentationPreference,
   ExtensionUiOrigin,
   ExtensionUiPresentation,
   ExtensionUiRisk,
   ExtensionUiRouteReason,
   HostIdentity,
 } from "@pideck/protocol";
+import { isTrustedExtensionUiOrigin } from "@pideck/protocol";
 
 export type ExtensionUiOwnerSessionState = "active" | "background" | "candidate" | "stale";
 
@@ -20,6 +23,7 @@ export type DecisionRouteInput = {
   hasDestructiveOption: boolean;
   ownerSessionState: ExtensionUiOwnerSessionState;
   inlineSurfaceAvailable: boolean;
+  extensionPreference?: ExtensionDialogPresentationPreference;
 };
 
 export type DecisionRoute =
@@ -76,6 +80,17 @@ function resolveDecisionRisk(input: DecisionRouteInput): ExtensionUiRisk {
     : "normal";
 }
 
+export function resolveExtensionDialogPreference(
+  origin: ExtensionUiOrigin,
+  overrides: ExtensionDialogPresentationOverrides,
+): ExtensionDialogPresentationPreference | undefined {
+  if (!isTrustedExtensionUiOrigin(origin)) return undefined;
+  const preference = overrides[origin.extensionId];
+  return preference === "followHost" || preference === "inline" || preference === "modal"
+    ? preference
+    : undefined;
+}
+
 function resolveDecisionPresentation(
   input: DecisionRouteInput,
   risk: ExtensionUiRisk,
@@ -92,17 +107,23 @@ function resolveDecisionPresentation(
           : "high-risk";
     return { presentation: "modal", reason };
   }
-  if (input.mode === "legacy-modal") {
-    return { presentation: "modal", reason: "explicit-modal" };
-  }
   if (isSessionLifecycle(input.origin)) {
     return { presentation: "modal", reason: "session-lifecycle" };
   }
-  if (input.presentationHint === "modal") {
-    return { presentation: "modal", reason: "explicit-modal" };
-  }
   if (input.ownerSessionState === "candidate" || !input.inlineSurfaceAvailable) {
     return { presentation: "modal", reason: "inline-unavailable" };
+  }
+  if (isTrustedExtensionUiOrigin(input.origin) && input.extensionPreference === "modal") {
+    return { presentation: "modal", reason: "user-extension-modal" };
+  }
+  if (isTrustedExtensionUiOrigin(input.origin) && input.extensionPreference === "inline") {
+    return { presentation: "inline", reason: "user-extension-inline" };
+  }
+  if (input.mode === "legacy-modal") {
+    return { presentation: "modal", reason: "explicit-modal" };
+  }
+  if (input.presentationHint === "modal") {
+    return { presentation: "modal", reason: "explicit-modal" };
   }
   if (input.presentationHint === "inline") {
     return { presentation: "inline", reason: "explicit-inline" };

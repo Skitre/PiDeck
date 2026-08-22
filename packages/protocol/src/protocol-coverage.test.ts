@@ -921,6 +921,12 @@ describe("protocol coverage — response discrimination", () => {
         extensionDecisionPresentation: "automatic",
       }).ok,
     ).toBe(false);
+    expect(
+      validateSuccessResult("extensionUi.configure", {
+        extensionDecisionPresentation: "auto",
+        extensionDialogPresentationOverrides: { ext_review: "modal" },
+      }).ok,
+    ).toBe(true);
   });
   it("session.usageReport validates the complete report shape", () => {
     const usage = {

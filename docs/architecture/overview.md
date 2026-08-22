@@ -49,6 +49,7 @@ eviction dispose and rebuild the graph under `serviceGraphLock`.
 | Workspace selection policy | Pi Host (`projectTrusted: false`; user/global packages only) |
 | Desktop theme, agentDir bootstrap | Rust DesktopSettingsStore |
 | Protocol validation | packages/protocol |
+| Extension UI verbs / widgets / custom frames | Pi Host `extension-ui-bridge` |
 
 ## Data flow (chat)
 

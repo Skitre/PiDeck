@@ -39,6 +39,8 @@ import type {
   ExtensionUiRequest,
   ExtensionMessageRenderSnapshot,
   ExtensionDecisionPresentation,
+  ExtensionDialogPresentationOverrides,
+  ExtensionUiOrigin,
   SerializableSessionEntry,
   SerializableSessionTreeNode,
   SerializableCompactionResult,
@@ -168,6 +170,7 @@ export type HostRequestParams = {
     clientVersion: string;
     protocolVersion: 1;
     extensionDecisionPresentation?: ExtensionDecisionPresentation;
+    extensionDialogPresentationOverrides?: ExtensionDialogPresentationOverrides;
   };
   "system.getStatus": null;
   "system.rehydrate": null;
@@ -293,6 +296,7 @@ export type HostRequestParams = {
   "resource.setPreferences": { updates: ResourcePreferenceUpdate[] };
   "extensionUi.configure": {
     extensionDecisionPresentation: ExtensionDecisionPresentation;
+    extensionDialogPresentationOverrides?: ExtensionDialogPresentationOverrides;
   };
   "extensionUi.respond": {
     requestId: string;
@@ -444,6 +448,7 @@ export type HostResultMap = {
   "resource.setPreferences": PackageMutationResult;
   "extensionUi.configure": {
     extensionDecisionPresentation: ExtensionDecisionPresentation;
+    extensionDialogPresentationOverrides?: ExtensionDialogPresentationOverrides;
   };
   "extensionUi.respond": { accepted: true };
   "extensionUi.customInput": { accepted: true };
@@ -513,11 +518,12 @@ export type HostEventPayloadMap = {
   "extensionUi.request": ExtensionUiRequest;
   "extensionUi.closed": ExtensionUiClosed;
   "extensionUi.groupClosed": ExtensionUiGroupClosed;
-  "extensionUi.statusChanged": { key?: string; text: string };
+  "extensionUi.statusChanged": { key?: string; text: string; origin?: ExtensionUiOrigin };
   "extensionUi.widgetChanged": {
     key?: string;
     widget: JsonValue;
     placement?: "aboveEditor" | "belowEditor";
+    origin?: ExtensionUiOrigin;
   };
   "extensionUi.widgetAttentionRequested": {
     key: string;
@@ -534,6 +540,8 @@ export type HostEventPayloadMap = {
     title?: string;
     cols: number;
     rows: number;
+    origin?: ExtensionUiOrigin;
+    overlay?: boolean;
   };
   "extensionUi.customFrame": { requestId: string; data: string };
   "extensionUi.customClosed": { requestId: string };

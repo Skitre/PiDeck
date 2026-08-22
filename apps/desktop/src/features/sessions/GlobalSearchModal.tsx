@@ -8,6 +8,7 @@ import {
   SESSION_OPEN_TIMEOUT_MS,
 } from "../../lib/bridge/session-open-request";
 import { subscribeGlobalSearchOpen } from "../../lib/commands/events";
+import { useBrowserOcclusion } from "../../lib/browser-occlusion";
 import { useT } from "../../lib/i18n/use-t";
 import { useAppStore } from "../../lib/stores/app-store";
 import { workspaceDisplayName } from "../workspaces/WorkspacePicker";
@@ -55,6 +56,7 @@ export function GlobalSearchHost() {
 
 export function GlobalSearchModal({ onClose }: { onClose: () => void }) {
   const t = useT();
+  useBrowserOcclusion("global-search");
   const hostInstanceId = useAppStore((s) => s.host?.hostInstanceId ?? null);
   const currentCwd = useAppStore((s) => s.workspace?.canonicalCwd ?? null);
   const [query, setQuery] = useState("");

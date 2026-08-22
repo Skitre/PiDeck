@@ -3,6 +3,7 @@ import type {
   DesktopSettings,
   ExtensionMessageRenderSnapshot,
   ExtensionUiGroupStatus,
+  ExtensionUiOrigin,
   HostStatusSnapshot,
   PackageMutationResult,
   PackageSnapshot,
@@ -15,6 +16,9 @@ import type {
   ProviderLoginPrompt,
   SessionSummary,
 } from "@pideck/protocol";
+import { sanitizeExtensionUiSettings, trustedExtensionId } from "@pideck/protocol";
+import { isExtensionDeckV1Enabled } from "../extension-deck-gate";
+import { resolveExtensionPresentation } from "../extension-ui-resolver";
 import {
   applyPackageSnapshot as epochApplyPackages,
   applySessionSnapshot as epochApplySession,
@@ -99,6 +103,7 @@ type ExtensionWidgetState = {
   key: string;
   widget: JsonValue;
   placement?: "aboveEditor" | "belowEditor";
+  origin?: ExtensionUiOrigin;
   hostInstanceId: string;
   workspaceId: string | null;
   workspaceRevision: number;
@@ -106,12 +111,14 @@ type ExtensionWidgetState = {
   sessionRevision: number;
 };
 
-/** Live ui.custom() panel rendered in the right dock's terminal tab. */
+/** Live ui.custom() panel. Transport stays request-scoped; shell home is resolved separately. */
 export type ExtensionTerminalState = {
   requestId: string;
   title?: string;
   cols: number;
   rows: number;
+  origin?: ExtensionUiOrigin;
+  overlay?: boolean;
   context: SessionTargetContext;
 };
 
@@ -141,6 +148,17 @@ type AppUpdatePhase =
  * Close the extension terminal panel, restoring the dock to its pre-panel
  * state unless the user toggled the dock manually while the panel was open.
  */
+function clearedExtensionLiveContent() {
+  return {
+    extensionStatus: null as string | null,
+    extensionStatuses: {} as Record<string, string>,
+    extensionStatusOrigins: {} as Record<string, ExtensionUiOrigin>,
+    extensionWidgets: {} as Record<string, ExtensionWidgetState>,
+    collapsedExtensionWidgetKeys: {} as Record<string, true>,
+    lastExtensionWidgetAttentionRunId: null as string | null,
+  };
+}
+
 function resetExtensionTerminal(state: {
   extensionTerminal: ExtensionTerminalState | null;
   dockOpen: boolean;
@@ -160,7 +178,14 @@ function resetExtensionTerminal(state: {
 }
 
 export type SettingsSection =
-  "general" | "appearance" | "shortcuts" | "providers" | "packages" | "usage" | "host";
+  | "general"
+  | "appearance"
+  | "extensionUi"
+  | "shortcuts"
+  | "providers"
+  | "packages"
+  | "usage"
+  | "host";
 
 export type AppState = EpochState & {
   page: NavPage;
@@ -178,9 +203,9 @@ export type AppState = EpochState & {
   extensionDecisionGroups: Record<string, ExtensionDecisionGroupState>;
   extensionStatus: string | null;
   extensionStatuses: Record<string, string>;
+  extensionStatusOrigins: Record<string, ExtensionUiOrigin>;
   extensionWidgets: Record<string, ExtensionWidgetState>;
   collapsedExtensionWidgetKeys: Record<string, true>;
-  extensionWidgetsOpen: boolean;
   lastExtensionWidgetAttentionRunId: string | null;
   extensionTerminal: ExtensionTerminalState | null;
   /** Right dock visibility. Auto-opens for extension panels; manual toggles persist. */
@@ -240,14 +265,17 @@ export type AppState = EpochState & {
   openExtensionTerminal: (t: ExtensionTerminalState) => void;
   closeExtensionTerminal: (requestId: string) => void;
   setDockOpen: (open: boolean) => void;
-  setExtensionStatus: (key: string | undefined, text: string | null) => void;
+  setExtensionStatus: (
+    key: string | undefined,
+    text: string | null,
+    origin?: ExtensionUiOrigin,
+  ) => void;
   setExtensionMessageRender: (
     entryId: string,
     render: ExtensionMessageRenderSnapshot | null,
   ) => void;
   setExtensionWidget: (widget: ExtensionWidgetState) => void;
   toggleExtensionWidgetCollapsed: (key: string) => void;
-  setExtensionWidgetsOpen: (open: boolean) => void;
   requestExtensionWidgetAttention: (runId: string, key: string) => void;
   setPackageProgress: (progress: PackageProgressState | null) => void;
   setPackageRetry: (retry: PackageRetryState | null) => void;
@@ -327,9 +355,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   extensionDecisionGroups: {},
   extensionStatus: null,
   extensionStatuses: {},
+  extensionStatusOrigins: {},
   extensionWidgets: {},
   collapsedExtensionWidgetKeys: {},
-  extensionWidgetsOpen: false,
   lastExtensionWidgetAttentionRunId: null,
   extensionTerminal: null,
   dockOpen: sidebarPref("pideck.dock.open"),
@@ -429,15 +457,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
   clearProviderLogin: () => set({ providerLogin: null }),
   setPage: (page) =>
-    set((state) => ({
+    set({
       page,
-      ...(page !== state.page ? { extensionWidgetsOpen: false } : {}),
       // Closing Settings (back to chat) drops the section request so the next
       // open lands on the default section again.
       ...(page === "chat" ? { settingsSection: null } : {}),
-    })),
-  openSettingsSection: (section) =>
-    set({ page: "settings", settingsSection: section, extensionWidgetsOpen: false }),
+    }),
+  openSettingsSection: (section) => set({ page: "settings", settingsSection: section }),
   setAuthBlocked: (authBlocked) => set({ authBlocked }),
   setProvidersDirty: (dirty) => set({ providersDirty: dirty }),
 
@@ -448,12 +474,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionDecisionGroups: {},
-      extensionStatus: null,
-      extensionStatuses: {},
-      extensionWidgets: {},
-      collapsedExtensionWidgetKeys: {},
-      extensionWidgetsOpen: false,
-      lastExtensionWidgetAttentionRunId: null,
+      ...clearedExtensionLiveContent(),
       ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,
@@ -503,12 +524,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionUiRequest: null,
             extensionUiQueue: [],
             extensionDecisionGroups: {},
-            extensionStatus: null,
-            extensionStatuses: {},
-            extensionWidgets: {},
-            collapsedExtensionWidgetKeys: {},
-            extensionWidgetsOpen: false,
-            lastExtensionWidgetAttentionRunId: null,
+            ...clearedExtensionLiveContent(),
             ...resetExtensionTerminal(current),
             packageProgress: null,
             packageRetry: null,
@@ -527,12 +543,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionDecisionGroups: {},
-      extensionStatus: null,
-      extensionStatuses: {},
-      extensionWidgets: {},
-      collapsedExtensionWidgetKeys: {},
-      extensionWidgetsOpen: false,
-      lastExtensionWidgetAttentionRunId: null,
+      ...clearedExtensionLiveContent(),
       ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,
@@ -605,12 +616,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...extensionUi,
       ...(generationChanged
         ? {
-            extensionStatus: null,
-            extensionStatuses: {},
-            extensionWidgets: {},
-            collapsedExtensionWidgetKeys: {},
-            extensionWidgetsOpen: false,
-            lastExtensionWidgetAttentionRunId: null,
+            ...clearedExtensionLiveContent(),
             ...resetExtensionTerminal(current),
             packageProgress: null,
             packageRetry: null,
@@ -740,12 +746,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             extensionUiRequest: null,
             extensionUiQueue: [],
             extensionDecisionGroups: {},
-            extensionStatus: null,
-            extensionStatuses: {},
-            extensionWidgets: {},
-            collapsedExtensionWidgetKeys: {},
-            extensionWidgetsOpen: false,
-            lastExtensionWidgetAttentionRunId: null,
+            ...clearedExtensionLiveContent(),
             ...resetExtensionTerminal(previous),
             packageProgress: null,
             packageRetry: null,
@@ -762,7 +763,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setTools: (tools) => set({ tools }),
-  setDesktopSettings: (desktopSettings) => set({ desktopSettings }),
+  setDesktopSettings: (desktopSettings) =>
+    set({
+      desktopSettings: desktopSettings
+        ? {
+            ...desktopSettings,
+            extensionUi: sanitizeExtensionUiSettings(desktopSettings.extensionUi),
+          }
+        : null,
+    }),
   setExtensionUiRequest: (request) =>
     set((state) => {
       const now = Date.now();
@@ -926,14 +935,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       };
     }),
   openExtensionTerminal: (panel) =>
-    set((state) => ({
-      extensionTerminal: panel,
-      dockOpen: true,
-      // Keep the original pre-panel dock state if one panel replaces another.
-      dockRestoreOnPanelClose: state.extensionTerminal
-        ? state.dockRestoreOnPanelClose
-        : state.dockOpen,
-    })),
+    set((state) => {
+      const { home } = resolveExtensionPresentation({
+        family: "custom",
+        settings: sanitizeExtensionUiSettings(state.desktopSettings?.extensionUi),
+        extensionId: trustedExtensionId(panel.origin),
+        hint: { overlay: panel.overlay },
+      });
+      const dockCustom = !isExtensionDeckV1Enabled() || home.kind === "dock";
+      return {
+        extensionTerminal: panel,
+        ...(dockCustom
+          ? {
+              dockOpen: true,
+              dockRestoreOnPanelClose: state.extensionTerminal
+                ? state.dockRestoreOnPanelClose
+                : state.dockOpen,
+            }
+          : {}),
+      };
+    }),
   closeExtensionTerminal: (requestId) =>
     set((state) => {
       if (state.extensionTerminal?.requestId !== requestId) return {};
@@ -945,15 +966,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Manual toggle takes over — the panel close no longer restores.
       dockRestoreOnPanelClose: null,
     }),
-  setExtensionStatus: (key, text) =>
+  setExtensionStatus: (key, text, origin) =>
     set((state) => {
       const statusKey = key || "default";
       const extensionStatuses = { ...state.extensionStatuses };
-      if (text?.trim()) extensionStatuses[statusKey] = text;
-      else delete extensionStatuses[statusKey];
+      const extensionStatusOrigins = { ...state.extensionStatusOrigins };
+      if (text?.trim()) {
+        extensionStatuses[statusKey] = text;
+        if (origin) extensionStatusOrigins[statusKey] = origin;
+      } else {
+        delete extensionStatuses[statusKey];
+        delete extensionStatusOrigins[statusKey];
+      }
       const values = Object.values(extensionStatuses);
       return {
         extensionStatuses,
+        extensionStatusOrigins,
         extensionStatus: values.length > 0 ? values[values.length - 1] : null,
       };
     }),
@@ -985,7 +1013,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         return {
           extensionWidgets,
           collapsedExtensionWidgetKeys,
-          ...(Object.keys(extensionWidgets).length === 0 ? { extensionWidgetsOpen: false } : {}),
         };
       }
       return {
@@ -1003,16 +1030,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       else collapsedExtensionWidgetKeys[key] = true;
       return { collapsedExtensionWidgetKeys };
     }),
-  setExtensionWidgetsOpen: (extensionWidgetsOpen) => set({ extensionWidgetsOpen }),
-  requestExtensionWidgetAttention: (runId, key) =>
+  requestExtensionWidgetAttention: (runId, _key) =>
     set((state) => {
       if (state.lastExtensionWidgetAttentionRunId === runId) return {};
-      return {
-        lastExtensionWidgetAttentionRunId: runId,
-        ...(state.page === "chat" && state.extensionWidgets[key]
-          ? { extensionWidgetsOpen: true }
-          : {}),
-      };
+      return { lastExtensionWidgetAttentionRunId: runId };
     }),
   setPackageProgress: (packageProgress) => set({ packageProgress }),
   setPackageRetry: (packageRetry) => set({ packageRetry }),
@@ -1169,12 +1190,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionDecisionGroups: {},
-      extensionStatus: null,
-      extensionStatuses: {},
-      extensionWidgets: {},
-      collapsedExtensionWidgetKeys: {},
-      extensionWidgetsOpen: false,
-      lastExtensionWidgetAttentionRunId: null,
+      ...clearedExtensionLiveContent(),
       ...resetExtensionTerminal(current),
       packageProgress: null,
       packageRetry: null,
@@ -1187,12 +1203,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       extensionUiRequest: null,
       extensionUiQueue: [],
       extensionDecisionGroups: {},
-      extensionStatus: null,
-      extensionStatuses: {},
-      extensionWidgets: {},
-      collapsedExtensionWidgetKeys: {},
-      extensionWidgetsOpen: false,
-      lastExtensionWidgetAttentionRunId: null,
+      ...clearedExtensionLiveContent(),
       ...resetExtensionTerminal(get()),
       packageProgress: null,
       packageRetry: null,

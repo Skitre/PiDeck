@@ -1,5 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { AlertTriangle, PackageOpen, type LucideIcon } from "lucide-react";
+import { useBrowserOcclusion } from "../lib/browser-occlusion";
 import { useT } from "../lib/i18n/use-t";
 
 const buttonBase =
@@ -41,6 +42,8 @@ export function Dialog({
   onConfirm: () => void;
 }) {
   const t = useT();
+  const occlusionOwner = `app-dialog:${useId()}`;
+  useBrowserOcclusion(occlusionOwner);
   const ref = useRef<HTMLDivElement>(null);
   // Callers pass inline handlers; route through a ref so the effect stays
   // mount-stable and parent re-renders cannot re-run the initial focus().

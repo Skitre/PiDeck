@@ -1,6 +1,13 @@
+import { DEFAULT_EXTENSION_UI_SETTINGS } from "@pideck/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "./stores/app-store";
-import { persistDesktopSettings, recentDesktopLocationPatch } from "./desktop-settings";
+import {
+  canonicalExtensionUiSettings,
+  persistDesktopSettings,
+  persistExtensionUiSettings,
+  recentDesktopLocationPatch,
+  resetNativeExtensionUiCompatForTests,
+} from "./desktop-settings";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -19,11 +26,13 @@ const initialSettings = {
   autoRestartHostOnce: true,
   extensionDecisionPresentation: "legacy-modal" as const,
   terminalProfile: "auto" as const,
+  extensionUi: DEFAULT_EXTENSION_UI_SETTINGS,
 };
 
 beforeEach(() => {
   mocks.invoke.mockReset();
   mocks.isTauri.mockReset();
+  resetNativeExtensionUiCompatForTests();
   useAppStore.getState().setDesktopSettings(initialSettings);
 });
 
@@ -162,5 +171,92 @@ describe("persistDesktopSettings", () => {
       ...initialSettings,
       theme: "light",
     });
+  });
+
+  it("hydrates missing extensionUi to V1 defaults and rejects invalid snapshots", async () => {
+    mocks.isTauri.mockReturnValue(false);
+    useAppStore.getState().setDesktopSettings({
+      theme: "dark",
+      restoreLastSession: true,
+      autoRestartHostOnce: true,
+      extensionDecisionPresentation: "auto",
+      terminalProfile: "auto",
+    });
+    expect(canonicalExtensionUiSettings(useAppStore.getState().desktopSettings)).toEqual(
+      DEFAULT_EXTENSION_UI_SETTINGS,
+    );
+    expect(useAppStore.getState().desktopSettings?.extensionUi).toEqual(
+      DEFAULT_EXTENSION_UI_SETTINGS,
+    );
+
+    await expect(
+      persistDesktopSettings({
+        extensionUi: { version: 2, presentations: {}, dock: {}, observedCapabilities: {} },
+      } as never),
+    ).rejects.toThrow("Invalid extensionUi settings");
+    await expect(
+      persistDesktopSettings({
+        extensionUi: {
+          version: 1,
+          presentations: {
+            ext_a: {
+              status: { home: { kind: "float", rect: { x: 0, y: 0, width: 1, height: 1 } } },
+            },
+          },
+          dock: { direction: "row", secondaryEnabled: false },
+          observedCapabilities: {},
+        },
+      }),
+    ).rejects.toThrow("Invalid extensionUi settings");
+  });
+
+  it("writes one complete validated extensionUi snapshot and no-ops equal updates", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    const next = {
+      version: 1 as const,
+      presentations: {
+        ext_review: {
+          blockingDialog: { home: { kind: "inline" as const } },
+        },
+      },
+      dock: { direction: "row" as const, secondaryEnabled: false },
+      observedCapabilities: {
+        ext_review: { families: ["blockingDialog" as const], lastSeenAt: 10 },
+      },
+    };
+    mocks.invoke.mockResolvedValue({ ...initialSettings, extensionUi: next });
+
+    await persistExtensionUiSettings(() => next);
+    expect(mocks.invoke).toHaveBeenCalledWith("desktop_settings_patch", {
+      patch: { extensionUi: next },
+    });
+    expect(useAppStore.getState().desktopSettings?.extensionUi).toEqual(next);
+
+    mocks.invoke.mockClear();
+    await persistExtensionUiSettings((current) => current);
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("keeps extensionUi locally when the native shell rejects the new field", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    mocks.invoke.mockRejectedValue(new Error("unknown desktop settings field: extensionUi"));
+    const next = {
+      ...DEFAULT_EXTENSION_UI_SETTINGS,
+      observedCapabilities: {
+        ext_review: { families: ["widget" as const], lastSeenAt: 10 },
+      },
+    };
+
+    await persistExtensionUiSettings(() => next);
+    expect(useAppStore.getState().desktopSettings?.extensionUi).toEqual(next);
+
+    mocks.invoke.mockReset();
+    mocks.invoke.mockResolvedValue({ ...initialSettings, theme: "light" });
+    await persistDesktopSettings({ theme: "light" });
+    expect(mocks.invoke).toHaveBeenCalledWith("desktop_settings_patch", {
+      patch: { theme: "light" },
+    });
+    expect(useAppStore.getState().desktopSettings?.theme).toBe("light");
+    expect(useAppStore.getState().desktopSettings?.extensionUi).toEqual(next);
   });
 });

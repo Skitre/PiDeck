@@ -727,7 +727,85 @@ export type ExtensionUiRouteReason =
   | "active-command"
   | "background-session"
   | "inline-unavailable"
-  | "unknown-origin";
+  | "unknown-origin"
+  | "user-extension-inline"
+  | "user-extension-modal";
+
+export const EXTENSION_UI_ROUTE_REASONS = [
+  "stale-owner",
+  "explicit-modal",
+  "explicit-inline",
+  "high-risk",
+  "destructive-option",
+  "project-trust",
+  "session-lifecycle",
+  "active-tool",
+  "active-command",
+  "background-session",
+  "inline-unavailable",
+  "unknown-origin",
+  "user-extension-inline",
+  "user-extension-modal",
+] as const;
+
+export type ExtensionDialogPresentationPreference = "followHost" | "inline" | "modal";
+
+export type ExtensionDialogPresentationOverrides = Record<
+  string,
+  ExtensionDialogPresentationPreference
+>;
+
+export const EXTENSION_SURFACE_FAMILIES = ["widget", "status", "custom", "blockingDialog"] as const;
+export type ExtensionSurfaceFamily = (typeof EXTENSION_SURFACE_FAMILIES)[number];
+
+export type ObservedExtensionUiCapabilities = Record<
+  string,
+  {
+    families: ExtensionSurfaceFamily[];
+    lastSeenAt: number;
+    displayName?: string;
+  }
+>;
+
+export type NormalizedFloatRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type DockGroupId = "primary" | "secondary";
+
+export type PresentationHome =
+  | { kind: "followExtension" }
+  | { kind: "followHost" }
+  | { kind: "anchor"; slot: "aboveComposer" | "belowComposer" }
+  | { kind: "dock"; group: DockGroupId; order: number }
+  | { kind: "float"; rect: NormalizedFloatRect; pinned?: boolean }
+  | { kind: "inline" }
+  | { kind: "modal" }
+  | { kind: "hidden" };
+
+export type PresentationPreference = {
+  home: PresentationHome;
+};
+
+export type ExtensionPresentationProfile = Partial<
+  Record<ExtensionSurfaceFamily, PresentationPreference>
+>;
+
+export type ExtensionDockSettings = {
+  direction: "row" | "column";
+  secondaryEnabled: boolean;
+  sizes?: [number, number];
+};
+
+export type ExtensionUiSettings = {
+  version: 1;
+  presentations: Record<string, ExtensionPresentationProfile>;
+  dock: ExtensionDockSettings;
+  observedCapabilities: ObservedExtensionUiCapabilities;
+};
 
 export type ExtensionUiRequest = {
   requestId: string;
@@ -748,6 +826,8 @@ export type ExtensionUiRequest = {
   allowFreeform?: boolean;
   origin?: ExtensionUiOrigin;
 };
+
+export type ExtensionUiEventOrigin = NonNullable<ExtensionUiRequest["origin"]>;
 
 export type SerializableSessionEntry = {
   id: string;
@@ -954,6 +1034,8 @@ export type DesktopSettings = {
   knownWorkspaces?: string[];
   /** Per-command shortcut overrides. null explicitly disables a command binding. */
   shortcutOverrides?: Record<string, string | null>;
+  /** Global Extension Deck presentation profiles. Missing legacy field uses V1 defaults. */
+  extensionUi?: ExtensionUiSettings;
 };
 
 export type DesktopSettingsPatch = Partial<DesktopSettings>;

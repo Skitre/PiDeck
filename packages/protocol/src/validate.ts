@@ -25,6 +25,7 @@ import {
   validateEventPayloadShape,
   validateMethodResultShape,
 } from "./dto-validate.js";
+import { isExtensionDialogPresentationOverrides } from "./extension-ui-settings.js";
 import { createHostError, type HostError, type JsonValue } from "./errors.js";
 import { isHostEventName, type HostEventName } from "./events.js";
 import type { HostEventEnvelope, HostResponseEnvelope } from "./envelopes.js";
@@ -286,7 +287,7 @@ export function validateRequestParams<M extends HostMethod>(
       return exactObject(
         params,
         ["clientName", "clientVersion", "protocolVersion"],
-        ["extensionDecisionPresentation"],
+        ["extensionDecisionPresentation", "extensionDialogPresentationOverrides"],
       ) &&
         isNonEmptyString(params.clientName) &&
         isNonEmptyString(params.clientVersion) &&
@@ -294,7 +295,9 @@ export function validateRequestParams<M extends HostMethod>(
         (params.extensionDecisionPresentation === undefined ||
           ["legacy-modal", "auto", "inline-first"].includes(
             String(params.extensionDecisionPresentation),
-          ))
+          )) &&
+        (params.extensionDialogPresentationOverrides === undefined ||
+          isExtensionDialogPresentationOverrides(params.extensionDialogPresentationOverrides))
         ? ok(params)
         : fail("invalid system.hello params", { method });
     case "system.getStatus":
@@ -684,10 +687,16 @@ export function validateRequestParams<M extends HostMethod>(
         ? ok(params)
         : fail("invalid resource.setPreferences params", { method });
     case "extensionUi.configure":
-      return exactObject(params, ["extensionDecisionPresentation"]) &&
+      return exactObject(
+        params,
+        ["extensionDecisionPresentation"],
+        ["extensionDialogPresentationOverrides"],
+      ) &&
         ["legacy-modal", "auto", "inline-first"].includes(
           String(params.extensionDecisionPresentation),
-        )
+        ) &&
+        (params.extensionDialogPresentationOverrides === undefined ||
+          isExtensionDialogPresentationOverrides(params.extensionDialogPresentationOverrides))
         ? ok(params)
         : fail("invalid extensionUi.configure params", { method });
     case "extensionUi.respond":

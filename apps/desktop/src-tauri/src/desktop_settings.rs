@@ -1,3 +1,4 @@
+use crate::extension_ui_settings::{deserialize_extension_ui_settings, ExtensionUiSettings};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -121,6 +122,8 @@ pub struct DesktopSettings {
     pub known_workspaces: Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub shortcut_overrides: BTreeMap<String, Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_extension_ui_settings")]
+    pub extension_ui: ExtensionUiSettings,
 }
 
 impl Default for DesktopSettings {
@@ -144,6 +147,7 @@ impl Default for DesktopSettings {
             code_font_size: DEFAULT_CODE_FONT_SIZE,
             known_workspaces: Vec::new(),
             shortcut_overrides: BTreeMap::new(),
+            extension_ui: ExtensionUiSettings::default(),
         }
     }
 }
@@ -411,6 +415,7 @@ impl DesktopSettingsStore {
                     | "codeFontSize"
                     | "knownWorkspaces"
                     | "shortcutOverrides"
+                    | "extensionUi"
             ) {
                 return Err(format!("unknown desktop settings field: {key}"));
             }
@@ -418,6 +423,11 @@ impl DesktopSettingsStore {
         let current_object = current
             .as_object_mut()
             .ok_or_else(|| "desktop settings must serialize as an object".to_string())?;
+        if let Some(extension_ui) = patch_object.get("extensionUi") {
+            if !extension_ui.is_object() && !extension_ui.is_null() {
+                return Err("extensionUi must be an object".into());
+            }
+        }
         for (key, value) in patch_object {
             current_object.insert(key.clone(), value.clone());
         }
@@ -886,5 +896,119 @@ mod tests {
             assert!(!agent_dir.join("pideck").join("DefaultProject").exists());
             fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    #[test]
+    fn loads_legacy_settings_without_extension_ui_as_v1_defaults() {
+        let dir = test_dir("legacy-extension-ui");
+        fs::write(
+            dir.join(SETTINGS_FILE_NAME),
+            r#"{"schemaVersion":1,"settings":{"theme":"light","restoreLastSession":true}}"#,
+        )
+        .unwrap();
+
+        let loaded = DesktopSettingsStore::load_from_dir(&dir).unwrap();
+        assert_eq!(loaded.settings.theme, DesktopTheme::Light);
+        assert_eq!(loaded.settings.extension_ui, ExtensionUiSettings::default());
+        assert!(loaded.snapshot().warning.is_none());
+        assert!(loaded.snapshot().recovered_from.is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unknown_extension_ui_version_resets_only_the_nested_field() {
+        let dir = test_dir("unknown-extension-ui-version");
+        fs::write(
+            dir.join(SETTINGS_FILE_NAME),
+            r#"{"schemaVersion":1,"settings":{"theme":"dark","extensionUi":{"version":2,"presentations":{"ext_a":{"widget":{"home":{"kind":"hidden"}}}}}}}"#,
+        )
+        .unwrap();
+
+        let loaded = DesktopSettingsStore::load_from_dir(&dir).unwrap();
+        assert_eq!(loaded.settings.theme, DesktopTheme::Dark);
+        assert_eq!(loaded.settings.extension_ui, ExtensionUiSettings::default());
+        assert!(loaded.snapshot().recovered_from.is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn drops_illegal_extension_ui_entries_without_quarantine() {
+        let dir = test_dir("illegal-extension-ui-entry");
+        fs::write(
+            dir.join(SETTINGS_FILE_NAME),
+            r#"{"schemaVersion":1,"settings":{"theme":"light","extensionUi":{"version":1,"presentations":{"ext_a":{"widget":{"home":{"kind":"hidden"}},"status":{"home":{"kind":"float","rect":{"x":0,"y":0,"width":1,"height":1}}}},"":{"widget":{"home":{"kind":"hidden"}}}},"dock":{"direction":"row","secondaryEnabled":false},"observedCapabilities":{"ext_a":{"families":["widget"],"lastSeenAt":10}}}}}"#,
+        )
+        .unwrap();
+
+        let loaded = DesktopSettingsStore::load_from_dir(&dir).unwrap();
+        assert_eq!(loaded.settings.theme, DesktopTheme::Light);
+        assert!(loaded.settings.extension_ui.presentations["ext_a"]
+            .widget
+            .is_some());
+        assert!(loaded.settings.extension_ui.presentations["ext_a"]
+            .status
+            .is_none());
+        assert!(!loaded.settings.extension_ui.presentations.contains_key(""));
+        assert!(loaded.snapshot().recovered_from.is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn non_object_extension_ui_on_disk_uses_defaults_without_corrupt_recovery() {
+        let dir = test_dir("non-object-extension-ui");
+        fs::write(
+            dir.join(SETTINGS_FILE_NAME),
+            r#"{"schemaVersion":1,"settings":{"theme":"dark","extensionUi":"oops"}}"#,
+        )
+        .unwrap();
+
+        let loaded = DesktopSettingsStore::load_from_dir(&dir).unwrap();
+        assert_eq!(loaded.settings.theme, DesktopTheme::Dark);
+        assert_eq!(loaded.settings.extension_ui, ExtensionUiSettings::default());
+        assert!(loaded.snapshot().recovered_from.is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn patches_a_complete_extension_ui_snapshot_and_rejects_non_objects() {
+        let dir = test_dir("patch-extension-ui");
+        let mut store = DesktopSettingsStore::load_from_dir(&dir).unwrap();
+        let snapshot = serde_json::json!({
+            "version": 1,
+            "presentations": {
+                "ext_review": {
+                    "blockingDialog": { "home": { "kind": "inline" } }
+                }
+            },
+            "dock": { "direction": "row", "secondaryEnabled": false },
+            "observedCapabilities": {
+                "ext_review": { "families": ["blockingDialog"], "lastSeenAt": 10 }
+            }
+        });
+        store
+            .patch(serde_json::json!({ "extensionUi": snapshot }))
+            .unwrap();
+        assert_eq!(
+            store.settings.extension_ui.observed_capabilities["ext_review"].families,
+            vec!["blockingDialog"]
+        );
+
+        let reloaded = DesktopSettingsStore::load_from_dir(&dir).unwrap();
+        assert_eq!(
+            reloaded.settings.extension_ui.presentations["ext_review"]
+                .blocking_dialog
+                .as_ref()
+                .map(|preference| &preference.home),
+            Some(&crate::extension_ui_settings::PresentationHome::Inline)
+        );
+
+        let mut invalid = reloaded;
+        let before = serde_json::to_value(&invalid.settings).unwrap();
+        assert!(invalid
+            .patch(serde_json::json!({ "extensionUi": "oops" }))
+            .unwrap_err()
+            .contains("must be an object"));
+        assert_eq!(serde_json::to_value(&invalid.settings).unwrap(), before);
+        fs::remove_dir_all(dir).unwrap();
     }
 }

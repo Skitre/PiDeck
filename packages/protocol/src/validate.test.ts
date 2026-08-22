@@ -225,6 +225,75 @@ describe("parseHostRequest", () => {
         params: { extensionDecisionPresentation: "auto" },
       }).ok,
     ).toBe(true);
+    expect(
+      parseHostRequest({
+        protocolVersion: 1,
+        id: REQUEST_ID,
+        method: "extensionUi.configure",
+        context: { expectedHostInstanceId: HOST_ID },
+        params: {
+          extensionDecisionPresentation: "auto",
+          extensionDialogPresentationOverrides: { ext_review: "inline" },
+        },
+      }).ok,
+    ).toBe(true);
+    expect(
+      parseHostRequest({
+        protocolVersion: 1,
+        id: REQUEST_ID,
+        method: "extensionUi.configure",
+        context: { expectedHostInstanceId: HOST_ID },
+        params: {
+          extensionDecisionPresentation: "auto",
+          extensionDialogPresentationOverrides: { "": "inline" },
+        },
+      }).ok,
+    ).toBe(false);
+    expect(
+      parseHostRequest({
+        protocolVersion: 1,
+        id: REQUEST_ID,
+        method: "extensionUi.configure",
+        context: { expectedHostInstanceId: HOST_ID },
+        params: {
+          extensionDecisionPresentation: "auto",
+          extensionDialogPresentationOverrides: { ext_review: "dock" },
+        },
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("accepts optional hello dialog overrides and rejects invalid maps", () => {
+    const request = {
+      protocolVersion: 1 as const,
+      id: REQUEST_ID,
+      method: "system.hello" as const,
+      context: {},
+      params: {
+        clientName: "test",
+        clientVersion: "0.1.0",
+        protocolVersion: 1 as const,
+        extensionDecisionPresentation: "auto" as const,
+      },
+    };
+    expect(
+      parseHostRequest({
+        ...request,
+        params: {
+          ...request.params,
+          extensionDialogPresentationOverrides: { ext_review: "followHost" },
+        },
+      }).ok,
+    ).toBe(true);
+    expect(
+      parseHostRequest({
+        ...request,
+        params: {
+          ...request.params,
+          extensionDialogPresentationOverrides: { ext_review: "float" },
+        },
+      }).ok,
+    ).toBe(false);
   });
 
   it("rejects unknown method", () => {
@@ -1088,7 +1157,7 @@ describe("deep result/event validation (C3)", () => {
     expect(
       request({
         invocationKind: "command",
-        extensionId: "x".repeat(129),
+        extensionId: "x".repeat(257),
         extensionDisplayName: "Ask User",
         sourceKind: "package",
         commandName: "review",

@@ -129,6 +129,50 @@ describe("HostClient hello configuration", () => {
     });
     client.detach("test cleanup");
   });
+
+  it("sends the bounded dialog override projection when provided", async () => {
+    const client = new HostClient();
+    const transport = attachTestTransport(client);
+    const pending = client.hello("pideck", "1.2.3", "auto", { ext_review: "inline" });
+
+    expect(transport.sent[0]).toMatchObject({
+      method: "system.hello",
+      params: {
+        extensionDecisionPresentation: "auto",
+        extensionDialogPresentationOverrides: { ext_review: "inline" },
+      },
+    });
+    transport.emit({
+      protocolVersion: 1,
+      ...RESPONSE_IDENTITY,
+      id: transport.sent[0]!.id,
+      method: "system.hello",
+      ok: true,
+      result: {
+        protocolVersion: 1,
+        ...RESPONSE_IDENTITY,
+        sdkVersion: "0.84.2",
+        nodeVersion: "v24.18.0",
+        agentDir: "/agent",
+        phase: "waitingForWorkspace",
+        capabilities: {
+          packageUpdateCheck: false,
+          extensionUi: true,
+          sessionExport: true,
+        },
+        modelConfigHealth: {
+          state: "ok",
+          source: "ModelRegistry.getError",
+        },
+        extensionDecisionPresentation: "auto",
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      extensionDecisionPresentation: "auto",
+    });
+    client.detach("test cleanup");
+  });
 });
 
 describe("HostClient response settlement", () => {

@@ -173,12 +173,13 @@ describe("PiHostServer.emitForIdentity", () => {
 });
 
 describe("PiHostServer Extension UI presentation handshake", () => {
-  it("defaults to auto and applies the optional hello mode", async () => {
+  it("defaults to legacy-modal and applies the optional hello mode", async () => {
     const host = server();
     const writeResponse = vi.spyOn(host, "writeResponse").mockImplementation(() => {});
 
-    expect(host.getExtensionDecisionPresentation()).toBe("auto");
-    expect(host.buildStatus().extensionDecisionPresentation).toBe("auto");
+    expect(host.getExtensionDecisionPresentation()).toBe("legacy-modal");
+    expect(host.buildStatus().extensionDecisionPresentation).toBe("legacy-modal");
+    expect(host.getExtensionDialogPresentationOverrides()).toEqual({});
 
     await host.handleLine(
       JSON.stringify({
@@ -204,6 +205,58 @@ describe("PiHostServer Extension UI presentation handshake", () => {
         }),
       }),
     );
+    expect(host.getExtensionDialogPresentationOverrides()).toEqual({});
+  });
+
+  it("applies hello dialog overrides atomically and rejects illegal maps", async () => {
+    const host = server();
+    const writeResponse = vi.spyOn(host, "writeResponse").mockImplementation(() => {});
+
+    await host.handleLine(
+      JSON.stringify({
+        protocolVersion: 1,
+        id: "55555555-5555-4555-8555-555555555552",
+        method: "system.hello",
+        context: {},
+        params: {
+          clientName: "pideck",
+          clientVersion: "0.1.0",
+          protocolVersion: 1,
+          extensionDecisionPresentation: "inline-first",
+          extensionDialogPresentationOverrides: { ext_review: "inline" },
+        },
+      }),
+    );
+
+    expect(host.getExtensionDecisionPresentation()).toBe("inline-first");
+    expect(host.getExtensionDialogPresentationOverrides()).toEqual({
+      ext_review: "inline",
+    });
+    expect(host.buildStatus()).not.toHaveProperty("extensionDialogPresentationOverrides");
+
+    await host.handleLine(
+      JSON.stringify({
+        protocolVersion: 1,
+        id: "55555555-5555-4555-8555-555555555553",
+        method: "system.hello",
+        context: {},
+        params: {
+          clientName: "pideck",
+          clientVersion: "0.1.0",
+          protocolVersion: 1,
+          extensionDialogPresentationOverrides: { ext_review: "dock" },
+        },
+      }),
+    );
+
+    expect(writeResponse).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ok: false,
+      }),
+    );
+    expect(host.getExtensionDialogPresentationOverrides()).toEqual({
+      ext_review: "inline",
+    });
   });
 });
 
