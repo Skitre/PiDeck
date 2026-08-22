@@ -1,6 +1,7 @@
 import { DEFAULT_EXTENSION_UI_SETTINGS } from "@pideck/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "./stores/app-store";
+import { persistExtensionUiSettings } from "./desktop-settings";
 import {
   clearExtensionUiUndo,
   commitExtensionPresentationHome,
@@ -77,6 +78,50 @@ describe("extension UI profile writes", () => {
       DEFAULT_EXTENSION_UI_SETTINGS,
     );
     expect(getExtensionUiUndo()).toBeNull();
+  });
+
+  it("merges a queued profile commit with an observation and preserves it through Undo", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    const desktopBefore = useAppStore.getState().desktopSettings!;
+    const observed = {
+      ...DEFAULT_EXTENSION_UI_SETTINGS,
+      observedCapabilities: {
+        "pi-review": { families: ["status" as const], lastSeenAt: 10 },
+      },
+    };
+    let resolveFirst!: (value: typeof desktopBefore) => void;
+    const firstWrite = new Promise<typeof desktopBefore>((resolve) => {
+      resolveFirst = resolve;
+    });
+    mocks.invoke
+      .mockImplementationOnce(() => firstWrite)
+      .mockImplementation(async (_command, args: { patch: Record<string, unknown> }) => ({
+        ...useAppStore.getState().desktopSettings!,
+        ...args.patch,
+      }));
+
+    const observation = persistExtensionUiSettings(() => observed);
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
+    const move = commitExtensionPresentationHome({
+      extensionId: "pi-subagents",
+      family: "widget",
+      home: { kind: "dock", group: "primary", order: 0 },
+      message: "pi-subagents Widget now opens in Extensions Dock",
+    });
+    resolveFirst({ ...desktopBefore, extensionUi: observed });
+    await Promise.all([observation, move]);
+
+    expect(useAppStore.getState().desktopSettings?.extensionUi).toMatchObject({
+      observedCapabilities: observed.observedCapabilities,
+      presentations: {
+        "pi-subagents": {
+          widget: { home: { kind: "dock", group: "primary", order: 0 } },
+        },
+      },
+    });
+
+    await undoExtensionUiSettings();
+    expect(useAppStore.getState().desktopSettings?.extensionUi).toEqual(observed);
   });
 
   it("forgets one Extension profile and its observed capability row", () => {

@@ -20,6 +20,7 @@ import {
 import {
   commitExtensionUiSettings,
   forgetExtensionUiIdentity,
+  withFamilyHome,
 } from "../../lib/extension-ui-profile";
 import { liveExtensionPresentationSlots } from "../../lib/extension-ui-live-slots";
 import { countLiveFloatMounts } from "../../lib/extension-ui-slots";
@@ -125,8 +126,7 @@ export function ExtensionUiSettingsSection() {
         configuredHost = true;
       }
       await commitExtensionUiSettings({
-        next,
-        previous: current,
+        update: (latest) => withFamilyHome(latest, extensionId, family, nextHome),
         message: t(extensionUiHomeMessageKey(nextHome ?? { kind: "followExtension" }), {
           name: observedExtensionDisplayName(extensionId),
           family: t(FAMILY_LABELS[family]),
@@ -174,8 +174,12 @@ export function ExtensionUiSettingsSection() {
         configuredHost = true;
       }
       await commitExtensionUiSettings({
-        next,
-        previous: current,
+        update: (latest) => ({
+          ...latest,
+          presentations: Object.fromEntries(
+            Object.entries(latest.presentations).filter(([id]) => id !== extensionId),
+          ),
+        }),
         message: t("extensionUiChangedHome", {
           name: observedExtensionDisplayName(extensionId),
           family: t("extensionUiSettingsGroup"),
@@ -218,8 +222,7 @@ export function ExtensionUiSettingsSection() {
         configuredHost = true;
       }
       await commitExtensionUiSettings({
-        next,
-        previous: current,
+        update: (latest) => forgetExtensionUiIdentity(latest, extensionId),
         message: t("extensionUiChangedHome", {
           name: observedExtensionDisplayName(extensionId),
           family: t("extensionUiSettingsGroup"),

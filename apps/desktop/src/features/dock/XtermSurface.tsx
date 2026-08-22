@@ -82,6 +82,8 @@ export function XtermSurface({
   const containerRef = useRef<HTMLDivElement>(null);
   const fitRef = useRef<(() => void) | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
   const connectRef = useRef(connect);
   connectRef.current = connect;
 
@@ -155,7 +157,7 @@ export function XtermSurface({
             if (typeof cleanup === "function") await cleanup();
           } else {
             if (typeof cleanup === "function") connectionCleanup = cleanup;
-            terminal.focus();
+            if (visibleRef.current) terminal.focus();
           }
         } catch (error) {
           if (!cancelled) {

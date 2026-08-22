@@ -5,7 +5,6 @@ import {
   type PresentationHome,
 } from "@pideck/protocol";
 import { persistExtensionUiSettings } from "./desktop-settings";
-import { useAppStore } from "./stores/app-store";
 
 export type ExtensionUiUndoEntry = {
   previous: ExtensionUiSettings;
@@ -52,15 +51,15 @@ export function withFamilyHome(
 }
 
 export async function commitExtensionUiSettings(input: {
-  next: ExtensionUiSettings;
+  update: (current: ExtensionUiSettings) => ExtensionUiSettings;
   message: string;
-  previous?: ExtensionUiSettings;
 }): Promise<ExtensionUiSettings> {
-  const previous =
-    input.previous ??
-    sanitizeExtensionUiSettings(useAppStore.getState().desktopSettings?.extensionUi ?? input.next);
-  const next = await persistExtensionUiSettings(() => input.next);
-  if (JSON.stringify(previous) !== JSON.stringify(next)) {
+  let previous: ExtensionUiSettings | null = null;
+  const next = await persistExtensionUiSettings((current) => {
+    previous = current;
+    return input.update(current);
+  });
+  if (previous && JSON.stringify(previous) !== JSON.stringify(next)) {
     undoEntry = { previous, message: input.message };
     emitUndo();
   }
@@ -73,10 +72,10 @@ export async function commitExtensionPresentationHome(input: {
   home: PresentationHome | undefined;
   message: string;
 }): Promise<ExtensionUiSettings | null> {
-  const current = sanitizeExtensionUiSettings(useAppStore.getState().desktopSettings?.extensionUi);
-  const next = withFamilyHome(current, input.extensionId, input.family, input.home);
-  if (JSON.stringify(next) === JSON.stringify(current)) return current;
-  return commitExtensionUiSettings({ next, message: input.message, previous: current });
+  return commitExtensionUiSettings({
+    update: (current) => withFamilyHome(current, input.extensionId, input.family, input.home),
+    message: input.message,
+  });
 }
 
 export function forgetExtensionUiIdentity(

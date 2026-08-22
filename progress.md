@@ -655,3 +655,62 @@
   - Registered Extension surface commands (float focus, legal move, dock tabs/groups/split, family reset)
   - Acceptance criteria 1–18 audited against current tests/source
   - Did not commit or push
+
+## Session: 2026-08-22 Extension UI review fixes
+
+### Phase 1: Review handoff and repair plan
+- **Status:** in progress
+- Actions taken:
+  - Reproduced/confirmed seven review findings across close semantics, Xterm
+    lifecycle, settings serialization, Dock activation/selection, and Float
+    geometry/drop handling.
+  - Targeted Extension UI tests passed (39 tests) after building protocol.
+  - Desktop typecheck passed.
+  - Root `pnpm test` was blocked before Pi Host collection because the local
+    install lacks `packages/pi-host/node_modules/cross-spawn`.
+
+### Phase 2: Lifecycle and state repairs
+- **Status:** complete
+- Actions taken:
+  - Unified custom-terminal close handling behind an Escape/grace-period/forced-settle helper.
+  - Removed terminal-buffer clearing from temporary React cleanup and kept Dock/Float terminals mounted while hidden.
+  - Guarded initial Xterm focus by surface visibility.
+  - Repaired stale Dock group selection and activated Extensions when a custom request newly docks.
+  - Serialized functional extension UI updates against the latest committed settings snapshot.
+  - Synced Float geometry from profile/viewport changes and hit-tested below the dragged shell.
+- Errors:
+  - First source patch was rejected because one file was targeted twice; no source changes were applied by that attempt.
+  - A later combined patch used the wrong planning heading casing; source and planning edits were separated.
+
+### Phase 3: Regression coverage and final verification
+- **Status:** complete
+- Coverage added for:
+  - Escape grace period and forced custom-request settlement.
+  - Custom-close confirmation without an unnecessary force request.
+  - Hidden Xterm focus, Dock activation/selection/terminal retention, queued settings mutations.
+  - Float profile synchronization, under-shell drop hit testing, and Settings-page hiding without unmount.
+- Verification:
+  - Desktop typecheck passed.
+  - Desktop lint passed.
+  - Desktop suite passed: 134 files, 900 tests.
+  - Frozen-lockfile install restored the missing Pi Host dependency.
+  - Root suite passed: Protocol 534, Pi Host 761, Desktop 900 tests.
+
+### Phase 4: Second-review follow-up
+- **Status:** complete
+- Confirmed three remaining gaps: fixed-snapshot profile commits, hidden Float
+  focus ownership, and non-coalesced/no-feedback Dock/Float close actions.
+- UI/UX review rules prioritize keyboard focus correctness and visible feedback
+  for async actions; the implementation will cover both rather than only
+  suppressing duplicate requests.
+- Implemented queue-time profile transformations and queue-time Undo snapshots
+  across profile, settings, Dock resize, and command callers.
+- Float custom focus now follows visibility and only restores focus it owns;
+  hidden surfaces blur instead of focusing behind Settings.
+- Close operations are coalesced by requestId; Dock and Float buttons expose
+  disabled spinner/`aria-busy` feedback and report Host errors without the
+  desktop-settings prefix.
+- Added regression tests for all three paths; focused set passes 46 tests.
+- Final verification passed: Desktop typecheck and lint; root `pnpm test`
+  (Protocol 534, Pi Host 761, Desktop 905); post-polish Dock/Float focused set
+  25 tests; `git diff --check` clean.

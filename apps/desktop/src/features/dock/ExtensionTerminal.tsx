@@ -1,10 +1,7 @@
 import { useAppStore, type ExtensionTerminalState } from "../../lib/stores/app-store";
 import { hostClient } from "../../lib/bridge/host-client";
 import { latestSessionTargetContext } from "../../lib/bridge/host-context";
-import {
-  clearExtensionTerminal,
-  subscribeExtensionTerminal,
-} from "../../lib/chat/extension-terminal-bus";
+import { subscribeExtensionTerminal } from "../../lib/chat/extension-terminal-bus";
 import { tCurrent, useT } from "../../lib/i18n/use-t";
 import { XtermSurface } from "./XtermSurface";
 
@@ -56,6 +53,78 @@ export async function forceCloseExtensionTerminal(
   } catch (error) {
     return error instanceof Error ? error.message : tCurrent("dockExtensionCloseFailed");
   }
+}
+
+export const EXTENSION_TERMINAL_CLOSE_GRACE_MS = 1_500;
+const extensionTerminalCloseRequests = new Map<string, Promise<string | null>>();
+
+function isExtensionTerminalOpen(requestId: string): boolean {
+  return useAppStore.getState().extensionTerminal?.requestId === requestId;
+}
+
+function waitForExtensionTerminalClose(requestId: string, timeoutMs: number): Promise<boolean> {
+  if (!isExtensionTerminalOpen(requestId)) return Promise.resolve(true);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let unsubscribe = () => {};
+    const finish = (closed: boolean) => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timer);
+      unsubscribe();
+      resolve(closed);
+    };
+    unsubscribe = useAppStore.subscribe((state) => {
+      if (state.extensionTerminal?.requestId !== requestId) finish(true);
+    });
+    const timer = globalThis.setTimeout(() => finish(false), timeoutMs);
+
+    // Cover a close that raced with subscription setup.
+    if (!isExtensionTerminalOpen(requestId)) finish(true);
+  });
+}
+
+/**
+ * Give the component a chance to handle Escape and run its own cleanup. If it
+ * remains open, settle the host request so every custom-UI surface has the
+ * same deterministic close behaviour.
+ */
+async function performExtensionTerminalClose(
+  panel: ExtensionTerminalState,
+  graceMs: number,
+): Promise<string | null> {
+  if (!isExtensionTerminalOpen(panel.requestId)) return null;
+
+  const cancelError = await cancelExtensionTerminal(panel);
+  if (!isExtensionTerminalOpen(panel.requestId)) return null;
+
+  if (!cancelError && (await waitForExtensionTerminalClose(panel.requestId, graceMs))) {
+    return null;
+  }
+  if (!isExtensionTerminalOpen(panel.requestId)) return null;
+
+  const forceError = await forceCloseExtensionTerminal(panel);
+  if (forceError) return forceError;
+
+  useAppStore.getState().closeExtensionTerminal(panel.requestId);
+  return null;
+}
+
+export function closeExtensionTerminalWithFallback(
+  panel: ExtensionTerminalState,
+  graceMs = EXTENSION_TERMINAL_CLOSE_GRACE_MS,
+): Promise<string | null> {
+  const existing = extensionTerminalCloseRequests.get(panel.requestId);
+  if (existing) return existing;
+
+  const closing = performExtensionTerminalClose(panel, graceMs).finally(() => {
+    if (extensionTerminalCloseRequests.get(panel.requestId) === closing) {
+      extensionTerminalCloseRequests.delete(panel.requestId);
+    }
+  });
+  extensionTerminalCloseRequests.set(panel.requestId, closing);
+  return closing;
 }
 
 export function ExtensionTerminal({ visible = true }: { visible?: boolean }) {
@@ -111,7 +180,6 @@ function TerminalView({ panel, visible }: { panel: ExtensionTerminalState; visib
           dataSub.dispose();
           resizeSub.dispose();
           unsubscribeFrames();
-          clearExtensionTerminal(panel.requestId);
         };
       }}
     />

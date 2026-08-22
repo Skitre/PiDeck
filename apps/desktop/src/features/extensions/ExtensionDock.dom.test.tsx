@@ -29,8 +29,7 @@ vi.mock("../../features/dock/ExtensionTerminal", () => ({
   ExtensionTerminal: ({ visible = true }: { visible?: boolean }) => (
     <div data-testid="extension-terminal" hidden={!visible} />
   ),
-  cancelExtensionTerminal: vi.fn(async () => null),
-  forceCloseExtensionTerminal: vi.fn(async () => null),
+  closeExtensionTerminalWithFallback: vi.fn(async () => null),
 }));
 
 vi.mock("../../features/dock/ShellTerminal", () => ({
@@ -109,14 +108,122 @@ describe("RightDock extension-deck-v1", () => {
 
   it("closes a docked custom terminal from its slot tab", async () => {
     resetExtensionDeckV1GateForTests(true);
-    const { cancelExtensionTerminal } = await import("../dock/ExtensionTerminal");
+    const { closeExtensionTerminalWithFallback } = await import("../dock/ExtensionTerminal");
     act(() => startCustom(false));
     render(<RightDock />);
 
     await userEvent.click(screen.getByRole("button", { name: "Close pi-subagents Custom UI" }));
-    expect(cancelExtensionTerminal).toHaveBeenCalledWith(
+    expect(closeExtensionTerminalWithFallback).toHaveBeenCalledWith(
       expect.objectContaining({ requestId: "req-1" }),
     );
+  });
+
+  it("disables a docked custom close button while closing", async () => {
+    resetExtensionDeckV1GateForTests(true);
+    const { closeExtensionTerminalWithFallback } = await import("../dock/ExtensionTerminal");
+    const close = vi.mocked(closeExtensionTerminalWithFallback);
+    close.mockClear();
+    let finish!: (value: string | null) => void;
+    close.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    act(() => startCustom(false));
+    render(<RightDock />);
+
+    const button = screen.getByRole("button", { name: "Close pi-subagents Custom UI" });
+    await userEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(close).toHaveBeenCalledTimes(1);
+
+    finish(null);
+    await waitFor(() => expect(button).not.toBeDisabled());
+  });
+
+  it("activates Extensions when custom content docks beside existing dock content", async () => {
+    resetExtensionDeckV1GateForTests(true);
+    act(() => {
+      useAppStore.getState().setDesktopSettings({
+        ...useAppStore.getState().desktopSettings!,
+        extensionUi: {
+          ...DEFAULT_EXTENSION_UI_SETTINGS,
+          presentations: {
+            "pi-subagents": {
+              widget: { home: { kind: "dock", group: "primary", order: 0 } },
+              custom: { home: { kind: "dock", group: "primary", order: 1 } },
+            },
+          },
+        },
+      });
+      useAppStore.getState().setExtensionWidget({
+        key: "fleet",
+        widget: ["ready"],
+        origin: trusted,
+        hostInstanceId: "h1",
+        workspaceId: "w1",
+        workspaceRevision: 1,
+        sessionId: "s1",
+        sessionRevision: 1,
+      });
+    });
+    render(<RightDock />);
+    await userEvent.click(screen.getByRole("button", { name: "New dock page" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Files" }));
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true");
+
+    act(() => startCustom(false));
+
+    expect(screen.getByRole("tab", { name: "Extensions" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByTestId("extension-terminal")).not.toHaveAttribute("hidden");
+  });
+
+  it("keeps hidden terminals mounted and falls back when the selected slot closes", async () => {
+    resetExtensionDeckV1GateForTests(true);
+    act(() => {
+      useAppStore.getState().setDesktopSettings({
+        ...useAppStore.getState().desktopSettings!,
+        extensionUi: {
+          ...DEFAULT_EXTENSION_UI_SETTINGS,
+          presentations: {
+            "pi-subagents": {
+              widget: { home: { kind: "dock", group: "primary", order: 0 } },
+              custom: { home: { kind: "dock", group: "primary", order: 1 } },
+            },
+          },
+        },
+      });
+      useAppStore.getState().setExtensionWidget({
+        key: "fleet",
+        widget: ["ready"],
+        origin: trusted,
+        hostInstanceId: "h1",
+        workspaceId: "w1",
+        workspaceRevision: 1,
+        sessionId: "s1",
+        sessionRevision: 1,
+      });
+      startCustom(false);
+    });
+    render(<RightDock />);
+    await userEvent.click(screen.getByRole("tab", { name: "pi-subagents Custom UI" }));
+    act(() => useAppStore.getState().closeExtensionTerminal("req-1"));
+
+    expect(screen.getByRole("tab", { name: "pi-subagents Widget" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    act(() => startCustom(false));
+    await userEvent.click(screen.getByRole("button", { name: "New dock page" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Files" }));
+    expect(screen.getByTestId("extension-terminal")).toBeInTheDocument();
+    expect(screen.getByTestId("extension-terminal")).toHaveAttribute("hidden");
   });
 
   it("keeps legacy per-request tabs when the gate is off and ignores saved profiles", () => {

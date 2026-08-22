@@ -5,7 +5,7 @@ import {
   useSyncExternalStore,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Pin, X } from "lucide-react";
+import { LoaderCircle, Pin, X } from "lucide-react";
 import type { PresentationHome } from "@pideck/protocol";
 import { observedExtensionDisplayName } from "../../lib/extension-ui-observation";
 import {
@@ -38,8 +38,10 @@ import {
 import { useAppStore } from "../../lib/stores/app-store";
 import { useT } from "../../lib/i18n/use-t";
 import { notifyDesktopSettingsSaveFailure } from "../../lib/desktop-settings";
-import { cancelExtensionTerminal, forceCloseExtensionTerminal } from "../dock/ExtensionTerminal";
-import { ExtensionTerminal } from "../dock/ExtensionTerminal";
+import {
+  closeExtensionTerminalWithFallback,
+  ExtensionTerminal,
+} from "../dock/ExtensionTerminal";
 import { statusChipText } from "../../lib/extension-ui-status-text";
 import { ExtensionStatusRows, ExtensionWidgetRows } from "./ExtensionWidgetContent";
 
@@ -65,10 +67,10 @@ async function persistHome(
   }
 }
 
-function SlotBody({ mount }: { mount: PresentationSlotMount }) {
+function SlotBody({ mount, visible = true }: { mount: PresentationSlotMount; visible?: boolean }) {
   if (mount.widgets?.length) return <ExtensionWidgetRows widgets={mount.widgets} />;
   if (mount.statuses?.length) return <ExtensionStatusRows statuses={mount.statuses} />;
-  if (mount.custom) return <ExtensionTerminal visible />;
+  if (mount.custom) return <ExtensionTerminal visible={visible} />;
   return null;
 }
 
@@ -185,11 +187,19 @@ export function ExtensionFloatLayer() {
   const page = useAppStore((state) => state.page);
   const slots = usePresentationSlots();
   const floats = mountsForHome(slots, (home) => home.kind === "float");
-  if (page !== "chat" || floats.length === 0) return null;
+  if (floats.length === 0) return null;
   return (
-    <div className="pointer-events-none fixed inset-0 z-30" data-extension-float-layer>
+    <div
+      className={`${page === "chat" ? "fixed" : "hidden"} pointer-events-none inset-0 z-30`}
+      data-extension-float-layer
+    >
       {floats.map(({ slot, mount }) => (
-        <ExtensionFloatShell key={slot.slotId} slot={slot} mount={mount} />
+        <ExtensionFloatShell
+          key={slot.slotId}
+          slot={slot}
+          mount={mount}
+          visible={page === "chat"}
+        />
       ))}
     </div>
   );
@@ -255,12 +265,18 @@ function homeFromDropTarget(target: EventTarget | null): PresentationHome | null
 function ExtensionFloatShell({
   slot,
   mount,
+  visible,
 }: {
   slot: ExtensionPresentationSlot;
   mount: PresentationSlotMount;
+  visible: boolean;
 }) {
   const t = useT();
   const home = mount.home.kind === "float" ? mount.home : null;
+  const homeRectX = home?.rect.x;
+  const homeRectY = home?.rect.y;
+  const homeRectWidth = home?.rect.width;
+  const homeRectHeight = home?.rect.height;
   const name = slot.extensionId ? observedExtensionDisplayName(slot.extensionId) : slot.slotId;
   const family = t(extensionUiFamilyMessageKey(slot.family));
   const label = t("extensionUiFloatLabel", { name, family });
@@ -276,6 +292,7 @@ function ExtensionFloatShell({
       readBrowserExclusionRect(),
     ),
   );
+  const [closingCustom, setClosingCustom] = useState(false);
   const pixelRef = useRef(pixel);
   pixelRef.current = pixel;
   const drag = useRef<{
@@ -287,18 +304,64 @@ function ExtensionFloatShell({
     edge: FloatResizeEdge;
   } | null>(null);
   const documentDrag = useRef<(() => void) | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const restore = restoreFocus.current;
-    if (slot.family === "custom") {
-      const dialog = document.querySelector<HTMLElement>(`[data-extension-float="${slot.slotId}"]`);
-      dialog?.focus();
+    const shell = shellRef.current;
+    if (!visible) {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && shell?.contains(active)) active.blur();
+      return;
     }
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && !shell?.contains(active)) {
+      restoreFocus.current = active;
+    }
+    if (slot.family === "custom") shell?.focus();
+  }, [slot.family, visible]);
+
+  useEffect(() => {
+    const shell = shellRef.current;
     return () => {
       documentDrag.current?.();
-      restore?.focus?.();
+      if (shell?.contains(document.activeElement)) restoreFocus.current?.focus?.();
     };
-  }, [slot.family, slot.slotId]);
+  }, []);
+
+  useEffect(() => {
+    if (
+      homeRectX === undefined ||
+      homeRectY === undefined ||
+      homeRectWidth === undefined ||
+      homeRectHeight === undefined ||
+      drag.current
+    ) {
+      return;
+    }
+    const syncFromHome = () => {
+      if (drag.current) return;
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const next = clampAndSnapFloatRect(
+        floatRectToPixels(
+          {
+            x: homeRectX,
+            y: homeRectY,
+            width: homeRectWidth,
+            height: homeRectHeight,
+          },
+          viewport,
+        ),
+        viewport,
+        readBrowserExclusionRect(),
+      );
+      if (samePixelRect(pixelRef.current, next)) return;
+      pixelRef.current = next;
+      setPixel(next);
+    };
+    syncFromHome();
+    window.addEventListener("resize", syncFromHome);
+    return () => window.removeEventListener("resize", syncFromHome);
+  }, [homeRectHeight, homeRectWidth, homeRectX, homeRectY]);
 
   if (!home) return null;
 
@@ -348,7 +411,16 @@ function ExtensionFloatShell({
     documentDrag.current = null;
     const current = pixelRef.current;
     if (session.mode === "move") {
-      const drop = homeFromDropTarget(document.elementFromPoint?.(clientX, clientY) ?? target);
+      const shell = shellRef.current;
+      const previousPointerEvents = shell?.style.pointerEvents ?? "";
+      let hit: EventTarget | null = target;
+      try {
+        if (shell) shell.style.pointerEvents = "none";
+        hit = document.elementFromPoint?.(clientX, clientY) ?? target;
+      } finally {
+        if (shell) shell.style.pointerEvents = previousPointerEvents;
+      }
+      const drop = homeFromDropTarget(hit);
       if (drop && (slot.family === "widget" || (slot.family === "custom" && drop.kind === "dock"))) {
         void persistRect(current, drop);
         return;
@@ -400,6 +472,7 @@ function ExtensionFloatShell({
 
   return (
     <div
+      ref={shellRef}
       role="dialog"
       aria-modal="false"
       aria-label={label}
@@ -472,15 +545,26 @@ function ExtensionFloatShell({
         <button
           type="button"
           aria-label={t("extensionUiFloatClose", { name, family })}
-          className="relative z-40 flex size-6 items-center justify-center rounded text-muted hover:text-foreground"
+          aria-busy={closingCustom}
+          disabled={closingCustom}
+          className="relative z-40 flex size-6 items-center justify-center rounded text-muted hover:text-foreground disabled:opacity-60"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => {
             if (slot.family === "custom" && mount.custom) {
               const panel = useAppStore.getState().extensionTerminal;
               if (panel) {
-                void cancelExtensionTerminal(panel).then((error) => {
-                  if (error) void forceCloseExtensionTerminal(panel);
-                });
+                const requestId = panel.requestId;
+                setClosingCustom(true);
+                void closeExtensionTerminalWithFallback(panel)
+                  .then((error) => {
+                    if (
+                      error &&
+                      useAppStore.getState().extensionTerminal?.requestId === requestId
+                    ) {
+                      useAppStore.getState().pushNotification(error, "error");
+                    }
+                  })
+                  .finally(() => setClosingCustom(false));
               }
               return;
             }
@@ -491,11 +575,15 @@ function ExtensionFloatShell({
             );
           }}
         >
-          <X size={13} />
+          {closingCustom ? (
+            <LoaderCircle size={13} className="animate-spin motion-reduce:animate-none" />
+          ) : (
+            <X size={13} />
+          )}
         </button>
       </div>
       <div className="relative z-0 min-h-0 flex-1 overflow-auto px-3 py-2">
-        <SlotBody mount={mount} />
+        <SlotBody mount={mount} visible={visible} />
       </div>
       {FLOAT_RESIZE_HANDLES.map(({ edge, className }) => (
         <div

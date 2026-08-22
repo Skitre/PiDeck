@@ -345,3 +345,37 @@ Batch 3/4 leftovers (not product-scope cuts):
 | 16 | pass | `FAMILY_PRESENTATION_CHOICES.blockingDialog` is followHost/inline/modal |
 | 17 | pass | Status choices are above-composer / Dock / hidden |
 | 18 | pass | Observation maps only widget/status/custom/request |
+
+## Extension UI review fixes (2026-08-22)
+
+Review of commit `40e1bad` found seven implementation gaps behind the accepted design:
+
+- New Dock/Float custom close buttons only deliver Escape; unlike the legacy
+  RightDock path, they never force-settle a component that ignores Escape.
+- `ExtensionDockArea` and `ExtensionFloatLayer` temporarily unmount live Xterm
+  surfaces. Xterm cleanup clears the frame bus while Host continues emitting
+  differential frames, so remount can lose/corrupt the screen.
+- `persistExtensionUiSettings` evaluates its functional updater before the
+  global write queue. Concurrent observations/profile edits can derive from
+  the same snapshot and overwrite one another with whole-setting writes.
+- A docked `custom()` opens RightDock but does not reliably activate the
+  Extensions page, especially when another docked family already exists.
+- Dock group selection keeps removed/moved slot IDs and can leave every panel
+  hidden.
+- Float pixel geometry is initialized once, so Undo/profile updates and
+  viewport resizing do not rehome/clamp the live shell.
+- Float drop hit-testing sees the dragged shell itself, preventing drops onto
+  composer anchors beneath it.
+
+## Extension UI second review (2026-08-22)
+
+- The serialized `persistExtensionUiSettings` updater can still be bypassed by
+  `commitExtensionUiSettings(() => input.next)`, because profile/layout callers
+  precompute a whole snapshot before their turn reaches the queue.
+- Keeping Float custom terminals mounted while Settings is open means the
+  existing mount-only focus effect can retain focus inside a hidden Xterm or
+  focus a hidden dialog when a request starts behind Settings.
+- Dock and Float close buttons have no pending state; repeated clicks can start
+  duplicate Escape/force flows and surface a stale-response error after another
+  flow already closed the request. Their error path also mislabels Host close
+  failures as desktop-settings save failures.

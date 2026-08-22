@@ -14,6 +14,17 @@ import {
 } from "../../lib/extension-ui-profile";
 import { EXTENSION_UI_UNDO_TOAST_MS } from "./ExtensionPresentationMounts";
 
+const terminalMocks = vi.hoisted(() => ({
+  close: vi.fn(async () => null as string | null),
+}));
+
+vi.mock("../dock/ExtensionTerminal", () => ({
+  ExtensionTerminal: ({ visible = true }: { visible?: boolean }) => (
+    <div data-testid="float-extension-terminal" hidden={!visible} />
+  ),
+  closeExtensionTerminalWithFallback: terminalMocks.close,
+}));
+
 const trusted = {
   invocationKind: "command" as const,
   extensionId: "pi-subagents",
@@ -31,6 +42,38 @@ const BASE_SETTINGS = {
   terminalProfile: "auto" as const,
   extensionUi: DEFAULT_EXTENSION_UI_SETTINGS,
 };
+
+const CUSTOM_CONTEXT = {
+  expectedHostInstanceId: "h1",
+  expectedWorkspaceId: "w",
+  expectedWorkspaceRevision: 1,
+  expectedSessionId: "s1",
+  expectedSessionRevision: 1,
+};
+
+function mountCustomFloat() {
+  useAppStore.getState().setDesktopSettings({
+    ...BASE_SETTINGS,
+    extensionUi: {
+      ...DEFAULT_EXTENSION_UI_SETTINGS,
+      presentations: {
+        "pi-subagents": {
+          custom: {
+            home: { kind: "float", rect: { x: 0.2, y: 0.2, width: 300, height: 180 } },
+          },
+        },
+      },
+    },
+  });
+  useAppStore.getState().openExtensionTerminal({
+    requestId: "req-custom",
+    title: "Inspector",
+    cols: 80,
+    rows: 24,
+    origin: trusted,
+    context: CUSTOM_CONTEXT,
+  });
+}
 
 function session(id: string, revision = 1) {
   return {
@@ -77,6 +120,8 @@ beforeEach(() => {
   vi.stubGlobal("innerWidth", 1200);
   vi.stubGlobal("innerHeight", 800);
   clearExtensionUiUndo();
+  terminalMocks.close.mockReset();
+  terminalMocks.close.mockResolvedValue(null);
   useAppStore.getState().setWorkspace({
     id: "22222222-2222-4222-8222-222222222222",
     cwd: "/workspace",
@@ -230,6 +275,13 @@ describe("Extension presentation mounts", () => {
       kind: "float",
       rect: { x: 0.2, y: 0.2 },
     });
+    fireEvent.pointerUp(dialog, { pointerId: 1, clientX: 460, clientY: 240 });
+    await waitFor(() =>
+      expect(
+        useAppStore.getState().desktopSettings?.extensionUi?.presentations["pi-subagents"]?.widget
+          ?.home,
+      ).toMatchObject({ kind: "float", rect: { x: 0.25, y: 0.25 } }),
+    );
     await userEvent.click(screen.getByRole("button", { name: "Pin pi-subagents Widget" }));
 
     await waitFor(() =>
@@ -244,7 +296,7 @@ describe("Extension presentation mounts", () => {
       expect(
         useAppStore.getState().desktopSettings?.extensionUi?.presentations["pi-subagents"]?.widget
           ?.home,
-      ).toMatchObject({ kind: "float", rect: { x: 0.2, y: 0.2, width: 300, height: 180 } }),
+      ).toMatchObject({ kind: "float", rect: { x: 0.25, y: 0.25, width: 300, height: 180 } }),
     );
     expect(
       useAppStore.getState().desktopSettings?.extensionUi?.presentations["pi-subagents"]?.widget
@@ -289,6 +341,80 @@ describe("Extension presentation mounts", () => {
         useAppStore.getState().desktopSettings?.extensionUi?.presentations["pi-subagents"]?.widget
           ?.home,
       ).toMatchObject({ kind: "float", rect: { width: 360, height: 220 } }),
+    );
+  });
+
+  it("syncs float pixels when the saved profile changes", async () => {
+    useAppStore.getState().setDesktopSettings({
+      ...BASE_SETTINGS,
+      extensionUi: {
+        ...DEFAULT_EXTENSION_UI_SETTINGS,
+        presentations: {
+          "pi-subagents": {
+            widget: {
+              home: { kind: "float", rect: { x: 0.2, y: 0.2, width: 300, height: 180 } },
+            },
+          },
+        },
+      },
+    });
+    mountWidget();
+    render(<ChatPage />);
+    const dialog = screen.getByRole("dialog", { name: "pi-subagents Widget" });
+    expect(dialog).toHaveStyle({ left: "240px" });
+
+    act(() => {
+      useAppStore.getState().setDesktopSettings({
+        ...BASE_SETTINGS,
+        extensionUi: {
+          ...DEFAULT_EXTENSION_UI_SETTINGS,
+          presentations: {
+            "pi-subagents": {
+              widget: {
+                home: { kind: "float", rect: { x: 0.5, y: 0.2, width: 300, height: 180 } },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    await waitFor(() => expect(dialog).toHaveStyle({ left: "600px" }));
+  });
+
+  it("hit-tests beneath the dragged float when dropping onto a composer anchor", async () => {
+    useAppStore.getState().setDesktopSettings({
+      ...BASE_SETTINGS,
+      extensionUi: {
+        ...DEFAULT_EXTENSION_UI_SETTINGS,
+        presentations: {
+          "pi-subagents": {
+            widget: {
+              home: { kind: "float", rect: { x: 0.2, y: 0.2, width: 300, height: 180 } },
+            },
+          },
+        },
+      },
+    });
+    mountWidget();
+    render(<ChatPage />);
+
+    const dialog = screen.getByRole("dialog", { name: "pi-subagents Widget" });
+    const anchor = document.createElement("div");
+    anchor.dataset.extensionDrop = "belowComposer";
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: () => (dialog.style.pointerEvents === "none" ? anchor : dialog),
+    });
+    const title = dialog.querySelector(".cursor-grab")!;
+    fireEvent.pointerDown(title, { pointerId: 3, clientX: 400, clientY: 200 });
+    fireEvent.pointerUp(dialog, { pointerId: 3, clientX: 420, clientY: 220 });
+
+    await waitFor(() =>
+      expect(
+        useAppStore.getState().desktopSettings?.extensionUi?.presentations["pi-subagents"]?.widget
+          ?.home,
+      ).toEqual({ kind: "anchor", slot: "belowComposer" }),
     );
   });
 
@@ -381,7 +507,47 @@ describe("Extension presentation mounts", () => {
     act(() => {
       useAppStore.getState().setPage("settings");
     });
-    expect(document.querySelector("[data-extension-float-layer]")).toBeNull();
+    expect(document.querySelector("[data-extension-float-layer]")).toHaveClass("hidden");
+    expect(screen.getByRole("dialog", { name: "pi-subagents Widget", hidden: true })).toBeInTheDocument();
+  });
+
+  it("releases custom Float focus when hidden and never focuses it behind Settings", async () => {
+    mountCustomFloat();
+    render(<ChatPage />);
+    const dialog = screen.getByRole("dialog", { name: "pi-subagents Custom UI" });
+    await waitFor(() => expect(dialog).toHaveFocus());
+
+    act(() => useAppStore.getState().setPage("settings"));
+    expect(dialog.contains(document.activeElement)).toBe(false);
+
+    cleanup();
+    const settingsControl = document.createElement("button");
+    document.body.appendChild(settingsControl);
+    settingsControl.focus();
+    render(<ChatPage />);
+    expect(settingsControl).toHaveFocus();
+    settingsControl.remove();
+  });
+
+  it("shows pending feedback while a custom Float closes", async () => {
+    let finish!: (value: string | null) => void;
+    terminalMocks.close.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    mountCustomFloat();
+    render(<ChatPage />);
+    const button = screen.getByRole("button", { name: "Close pi-subagents Custom UI" });
+
+    await userEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(button.querySelector(".animate-spin")).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(terminalMocks.close).toHaveBeenCalledTimes(1);
+
+    finish(null);
+    await waitFor(() => expect(button).not.toBeDisabled());
   });
 
   it("does not remount builtin chat chrome when only Extension content changes", () => {

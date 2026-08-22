@@ -305,11 +305,19 @@ async function writeDesktopSettings(patch: DesktopSettingsUpdate): Promise<void>
   }
 }
 
+function enqueueSettingsWrite<T>(task: () => Promise<T>): Promise<T> {
+  const run = settingsWriteQueue.catch(() => undefined).then(task);
+  // The caller observes `run`; keep the internal tail fulfilled so a handled
+  // write failure does not also surface as an unhandled rejection.
+  settingsWriteQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 export function persistDesktopSettings(patch: DesktopSettingsUpdate): Promise<void> {
-  settingsWriteQueue = settingsWriteQueue
-    .catch(() => undefined)
-    .then(() => writeDesktopSettings(patch));
-  return settingsWriteQueue;
+  return enqueueSettingsWrite(() => writeDesktopSettings(patch));
 }
 
 export function persistRecentDesktopLocation(
@@ -340,15 +348,19 @@ export function extensionUiHostConfigureParams(
   };
 }
 
-export async function persistExtensionUiSettings(
+export function persistExtensionUiSettings(
   update: (current: ExtensionUiSettings) => ExtensionUiSettings,
 ): Promise<ExtensionUiSettings> {
-  const current = canonicalExtensionUiSettings(useAppStore.getState().desktopSettings);
-  const next = sanitizeExtensionUiSettings(update(current));
-  if (!isExtensionUiSettings(next)) {
-    throw new Error("Invalid extensionUi settings");
-  }
-  if (JSON.stringify(next) === JSON.stringify(current)) return current;
-  await persistDesktopSettings({ extensionUi: next });
-  return canonicalExtensionUiSettings(useAppStore.getState().desktopSettings);
+  return enqueueSettingsWrite(async () => {
+    // Apply the updater only after earlier writes settle, so concurrent
+    // observations cannot derive from the same stale settings snapshot.
+    const current = canonicalExtensionUiSettings(useAppStore.getState().desktopSettings);
+    const next = sanitizeExtensionUiSettings(update(current));
+    if (!isExtensionUiSettings(next)) {
+      throw new Error("Invalid extensionUi settings");
+    }
+    if (JSON.stringify(next) === JSON.stringify(current)) return current;
+    await writeDesktopSettings({ extensionUi: next });
+    return canonicalExtensionUiSettings(useAppStore.getState().desktopSettings);
+  });
 }

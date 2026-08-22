@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hostClient } from "../../lib/bridge/host-client";
 import { useAppStore, type ExtensionTerminalState } from "../../lib/stores/app-store";
-import { cancelExtensionTerminal, forceCloseExtensionTerminal } from "./ExtensionTerminal";
+import {
+  cancelExtensionTerminal,
+  closeExtensionTerminalWithFallback,
+  forceCloseExtensionTerminal,
+} from "./ExtensionTerminal";
 
 const panel: ExtensionTerminalState = {
   requestId: "00000000-0000-4000-8000-000000000001",
@@ -18,6 +22,8 @@ const panel: ExtensionTerminalState = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
+  useAppStore.setState({ extensionTerminal: null });
   vi.restoreAllMocks();
 });
 
@@ -86,5 +92,63 @@ describe("forceCloseExtensionTerminal", () => {
     vi.spyOn(hostClient, "request").mockRejectedValue(new Error("Host unavailable"));
 
     await expect(forceCloseExtensionTerminal(panel)).resolves.toBe("Host unavailable");
+  });
+});
+
+describe("closeExtensionTerminalWithFallback", () => {
+  it("force-settles a custom request that does not close after Escape", async () => {
+    vi.useFakeTimers();
+    useAppStore.setState({ extensionTerminal: panel });
+    const request = vi.spyOn(hostClient, "request").mockResolvedValue({
+      ok: true,
+      result: { accepted: true },
+    } as never);
+
+    const closing = closeExtensionTerminalWithFallback(panel, 50);
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(closing).resolves.toBeNull();
+    expect(request).toHaveBeenNthCalledWith(1, "extensionUi.customInput", panel.context, {
+      requestId: panel.requestId,
+      data: "\u001b",
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "extensionUi.respond", panel.context, {
+      requestId: panel.requestId,
+      status: "cancelled",
+    });
+    expect(useAppStore.getState().extensionTerminal).toBeNull();
+  });
+
+  it("does not force-settle after customClosed clears the request", async () => {
+    vi.useFakeTimers();
+    useAppStore.setState({ extensionTerminal: panel });
+    const request = vi.spyOn(hostClient, "request").mockResolvedValue({
+      ok: true,
+      result: { accepted: true },
+    } as never);
+
+    const closing = closeExtensionTerminalWithFallback(panel, 50);
+    await Promise.resolve();
+    useAppStore.getState().closeExtensionTerminal(panel.requestId);
+
+    await expect(closing).resolves.toBeNull();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces concurrent close attempts for the same request", async () => {
+    vi.useFakeTimers();
+    useAppStore.setState({ extensionTerminal: panel });
+    const request = vi.spyOn(hostClient, "request").mockResolvedValue({
+      ok: true,
+      result: { accepted: true },
+    } as never);
+
+    const first = closeExtensionTerminalWithFallback(panel, 50);
+    const second = closeExtensionTerminalWithFallback(panel, 50);
+    expect(second).toBe(first);
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(Promise.all([first, second])).resolves.toEqual([null, null]);
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

@@ -18,9 +18,8 @@ import { setSidebarPref } from "../lib/sidebar-prefs";
 import { PiMark } from "./PiMark";
 import { SIDEBAR_WIDTH } from "./Sidebar";
 import {
+  closeExtensionTerminalWithFallback,
   ExtensionTerminal,
-  cancelExtensionTerminal,
-  forceCloseExtensionTerminal,
 } from "../features/dock/ExtensionTerminal";
 import {
   ShellTerminal,
@@ -150,6 +149,10 @@ export function RightDock() {
   const deckV1 = isExtensionDeckV1Enabled();
   const presentationSlots = useLiveExtensionPresentationSlots();
   const hasDockedExtensions = hasLiveDockedExtensionContent(presentationSlots);
+  const dockedCustomRequestId =
+    presentationSlots
+      .flatMap((slot) => slot.mounts)
+      .find((mount) => mount.home.kind === "dock" && mount.custom)?.custom?.requestId ?? null;
   const dockPanel = deckV1 ? null : panel;
   const workspaceCwd = useAppStore((state) => state.workspace?.canonicalCwd ?? null);
   const terminalProfile = useAppStore((state) => state.desktopSettings?.terminalProfile ?? "auto");
@@ -178,6 +181,7 @@ export function RightDock() {
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const dockWidthRef = useRef(dockWidth);
   const visibleTabIdsRef = useRef<DockTabId[]>([]);
+  const previousDockedCustomRequestId = useRef<string | null>(null);
   dockWidthRef.current = dockWidth;
   browserTabsRef.current = browserTabs;
 
@@ -203,6 +207,10 @@ export function RightDock() {
   const panelRequestId = dockPanel?.requestId ?? null;
   useEffect(() => {
     if (deckV1) {
+      const customJustDocked =
+        dockedCustomRequestId !== null &&
+        dockedCustomRequestId !== previousDockedCustomRequestId.current;
+      previousDockedCustomRequestId.current = dockedCustomRequestId;
       setExtensionClosing(null);
       setTabOrder((current) => {
         const withoutLegacy = current.filter((tabId) => !String(tabId).startsWith("extension:"));
@@ -215,6 +223,7 @@ export function RightDock() {
       });
       setActiveTab((active) => {
         if (hasDockedExtensions) {
+          if (customJustDocked) return "extensions";
           if (active?.startsWith("extension:")) return "extensions";
           return active ?? "extensions";
         }
@@ -241,7 +250,7 @@ export function RightDock() {
       );
       return next;
     });
-  }, [deckV1, hasDockedExtensions, panelRequestId]);
+  }, [deckV1, dockedCustomRequestId, hasDockedExtensions, panelRequestId]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -418,27 +427,11 @@ export function RightDock() {
     if (!panel || extensionClosing === panel.requestId) return;
     const requestId = panel.requestId;
     setExtensionClosing(requestId);
-    const error = await cancelExtensionTerminal(panel);
-    if (error) {
-      setExtensionClosing((current) => (current === requestId ? null : current));
+    const error = await closeExtensionTerminalWithFallback(panel);
+    setExtensionClosing((current) => (current === requestId ? null : current));
+    if (error && useAppStore.getState().extensionTerminal?.requestId === requestId) {
       pushNotification(error, "error");
-      return;
     }
-    window.setTimeout(() => {
-      void (async () => {
-        if (useAppStore.getState().extensionTerminal?.requestId !== requestId) return;
-        // Escape didn't land — settle the ui.custom() request host-side.
-        const forceError = await forceCloseExtensionTerminal(panel);
-        setExtensionClosing((current) => (current === requestId ? null : current));
-        if (!forceError) {
-          // customClosed will confirm; clear now so the tab close is deterministic.
-          useAppStore.getState().closeExtensionTerminal(requestId);
-          return;
-        }
-        if (useAppStore.getState().extensionTerminal?.requestId !== requestId) return;
-        pushNotification(t("dockExtensionCloseTimeout"), "warning");
-      })();
-    }, 1_500);
   };
 
   const closeTab = (tabId: DockTabId) => {

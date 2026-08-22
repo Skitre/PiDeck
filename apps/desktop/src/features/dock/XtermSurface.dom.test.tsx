@@ -172,6 +172,23 @@ describe("XtermSurface font readiness", () => {
     expect(mocks.terminal.open).toHaveBeenCalledTimes(1);
   });
 
+  it("does not steal focus while its surface is hidden", async () => {
+    setFontLoader(vi.fn().mockResolvedValue([]));
+
+    const view = renderSurface();
+    await waitFor(() => expect(mocks.constructTerminal).toHaveBeenCalledTimes(1));
+    expect(mocks.terminal.focus).not.toHaveBeenCalled();
+
+    view.rerender(
+      <XtermSurface
+        sessionKey="terminal-test"
+        visible
+        connect={vi.fn(async () => undefined)}
+      />,
+    );
+    await waitFor(() => expect(mocks.terminal.focus).toHaveBeenCalledTimes(1));
+  });
+
   it("recolors an open terminal when only the theme family changes", async () => {
     setFontLoader(vi.fn().mockResolvedValue([]));
     const root = document.documentElement;

@@ -1,11 +1,12 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { X } from "lucide-react";
+import { LoaderCircle, X } from "lucide-react";
 import type { DockGroupId, PresentationHome } from "@pideck/protocol";
 import { MIN_EXTENSION_UI_DOCK_SIZE } from "@pideck/protocol";
 import {
@@ -31,9 +32,8 @@ import { useAppStore } from "../../lib/stores/app-store";
 import { useT } from "../../lib/i18n/use-t";
 import { ExtensionStatusRows, ExtensionWidgetRows } from "./ExtensionWidgetContent";
 import {
-  cancelExtensionTerminal,
+  closeExtensionTerminalWithFallback,
   ExtensionTerminal,
-  forceCloseExtensionTerminal,
 } from "../dock/ExtensionTerminal";
 
 function slotLabel(item: DockedPresentationSlot, translate: ReturnType<typeof useT>): string {
@@ -79,10 +79,16 @@ export function ExtensionDockArea({ visible }: { visible: boolean }) {
   const direction = settings.dock.direction === "column" ? "column" : "row";
   const sizes = settings.dock.sizes ?? [0.5, 0.5];
   const [active, setActive] = useState<Partial<Record<DockGroupId, string>>>({});
+  const [closingCustomId, setClosingCustomId] = useState<string | null>(null);
   const [liveSizes, setLiveSizes] = useState<[number, number] | null>(null);
   const liveSizesRef = useRef<[number, number] | null>(null);
   const resize = useRef<{ pointerId: number; start: number; size: number } | null>(null);
+  const previousCustomRequestId = useRef<string | null>(null);
   const displaySizes = liveSizes ?? sizes;
+  const dockedCustom = [...primary, ...secondary].find((item) => item.mount.custom);
+  const dockedCustomRequestId = dockedCustom?.mount.custom?.requestId ?? null;
+  const dockedCustomGroup = dockedCustom?.group;
+  const dockedCustomSlotId = dockedCustom?.slotId;
 
   const groups = useMemo(
     () => [
@@ -92,7 +98,16 @@ export function ExtensionDockArea({ visible }: { visible: boolean }) {
     [primary, secondary],
   );
 
-  if (!visible || docked.length === 0) return null;
+  useEffect(() => {
+    const isNewRequest =
+      dockedCustomRequestId !== null &&
+      dockedCustomRequestId !== previousCustomRequestId.current;
+    previousCustomRequestId.current = dockedCustomRequestId;
+    if (!isNewRequest || !dockedCustomGroup || !dockedCustomSlotId) return;
+    setActive((current) => ({ ...current, [dockedCustomGroup]: dockedCustomSlotId }));
+  }, [dockedCustomGroup, dockedCustomRequestId, dockedCustomSlotId]);
+
+  if (docked.length === 0) return null;
 
   const dropSlot = (event: ReactDragEvent, home: PresentationHome) => {
     event.preventDefault();
@@ -115,11 +130,10 @@ export function ExtensionDockArea({ visible }: { visible: boolean }) {
   const persistSizes = async (next: [number, number]) => {
     try {
       await commitExtensionUiSettings({
-        next: {
-          ...settings,
-          dock: { ...settings.dock, secondaryEnabled: true, sizes: next },
-        },
-        previous: settings,
+        update: (current) => ({
+          ...current,
+          dock: { ...current.dock, secondaryEnabled: true, sizes: next },
+        }),
         message: t("extensionUiChangedHome", {
           name: t("extensionUiDockArea"),
           family: t("extensionUiSettingsGroup"),
@@ -132,13 +146,16 @@ export function ExtensionDockArea({ visible }: { visible: boolean }) {
 
   return (
     <div
-      className={`flex min-h-0 flex-1 ${direction === "column" ? "flex-col" : "flex-row"}`}
+      className={`${visible ? "flex" : "hidden"} min-h-0 flex-1 ${direction === "column" ? "flex-col" : "flex-row"}`}
       data-extension-dock-area
       data-extension-drop="dock-primary"
       aria-label={t("extensionUiDockArea")}
     >
       {groups.map((group, index) => {
-        const selected = active[group.id] ?? group.items[0]?.slotId;
+        const remembered = active[group.id];
+        const selected = group.items.some((item) => item.slotId === remembered)
+          ? remembered
+          : group.items[0]?.slotId;
         return (
           <div
             key={group.id}
@@ -269,16 +286,35 @@ export function ExtensionDockArea({ visible }: { visible: boolean }) {
                         type="button"
                         title={t("extensionUiFloatClose", { name, family })}
                         aria-label={t("extensionUiFloatClose", { name, family })}
-                        className="mr-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted hover:text-foreground"
+                        aria-busy={closingCustomId === item.mount.custom?.requestId}
+                        disabled={closingCustomId === item.mount.custom?.requestId}
+                        className="mr-0.5 flex size-5 shrink-0 items-center justify-center rounded text-muted hover:text-foreground disabled:opacity-60"
                         onClick={() => {
                           const panel = useAppStore.getState().extensionTerminal;
                           if (!panel) return;
-                          void cancelExtensionTerminal(panel).then((error) => {
-                            if (error) void forceCloseExtensionTerminal(panel);
-                          });
+                          const requestId = panel.requestId;
+                          setClosingCustomId(requestId);
+                          void closeExtensionTerminalWithFallback(panel)
+                            .then((error) => {
+                              if (
+                                error &&
+                                useAppStore.getState().extensionTerminal?.requestId === requestId
+                              ) {
+                                useAppStore.getState().pushNotification(error, "error");
+                              }
+                            })
+                            .finally(() => {
+                              setClosingCustomId((current) =>
+                                current === requestId ? null : current,
+                              );
+                            });
                         }}
                       >
-                        <X size={11} />
+                        {closingCustomId === item.mount.custom?.requestId ? (
+                          <LoaderCircle size={11} className="animate-spin motion-reduce:animate-none" />
+                        ) : (
+                          <X size={11} />
+                        )}
                       </button>
                     )}
                   </div>

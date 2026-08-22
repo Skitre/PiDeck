@@ -176,11 +176,21 @@ export async function resizeExtensionDockSplit(delta: number): Promise<boolean> 
   if (next[0] === current) return false;
   try {
     await commitExtensionUiSettings({
-      next: {
-        ...settings,
-        dock: { ...settings.dock, secondaryEnabled: true, sizes: next },
+      update: (latest) => {
+        const latestPrimary = latest.dock.sizes?.[0] ?? 0.5;
+        const updatedPrimary = Math.min(
+          0.8,
+          Math.max(MIN_EXTENSION_UI_DOCK_SIZE, latestPrimary + delta),
+        );
+        return {
+          ...latest,
+          dock: {
+            ...latest.dock,
+            secondaryEnabled: true,
+            sizes: [updatedPrimary, 1 - updatedPrimary],
+          },
+        };
       },
-      previous: settings,
       message: tCurrent("extensionUiChangedHome", {
         name: tCurrent("extensionUiDockArea"),
         family: tCurrent("extensionUiSettingsGroup"),

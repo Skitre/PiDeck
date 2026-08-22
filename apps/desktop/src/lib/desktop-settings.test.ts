@@ -237,6 +237,32 @@ describe("persistDesktopSettings", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
+  it("applies concurrent functional extensionUi updates to the latest queued snapshot", async () => {
+    mocks.isTauri.mockReturnValue(false);
+
+    await Promise.all([
+      persistExtensionUiSettings((current) => ({
+        ...current,
+        observedCapabilities: {
+          ...current.observedCapabilities,
+          ext_a: { families: ["widget"], lastSeenAt: 1 },
+        },
+      })),
+      persistExtensionUiSettings((current) => ({
+        ...current,
+        observedCapabilities: {
+          ...current.observedCapabilities,
+          ext_b: { families: ["status"], lastSeenAt: 2 },
+        },
+      })),
+    ]);
+
+    expect(useAppStore.getState().desktopSettings?.extensionUi?.observedCapabilities).toEqual({
+      ext_a: { families: ["widget"], lastSeenAt: 1 },
+      ext_b: { families: ["status"], lastSeenAt: 2 },
+    });
+  });
+
   it("keeps extensionUi locally when the native shell rejects the new field", async () => {
     mocks.isTauri.mockReturnValue(true);
     mocks.invoke.mockRejectedValue(new Error("unknown desktop settings field: extensionUi"));
