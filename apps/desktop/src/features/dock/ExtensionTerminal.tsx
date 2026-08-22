@@ -55,7 +55,7 @@ export async function forceCloseExtensionTerminal(
   }
 }
 
-export const EXTENSION_TERMINAL_CLOSE_GRACE_MS = 1_500;
+const EXTENSION_TERMINAL_CLOSE_GRACE_MS = 1_500;
 const extensionTerminalCloseRequests = new Map<string, Promise<string | null>>();
 
 function isExtensionTerminalOpen(requestId: string): boolean {

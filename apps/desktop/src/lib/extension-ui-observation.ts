@@ -36,7 +36,7 @@ export function forgetObservedExtensionDisplayName(extensionId: string): void {
   displayNames.delete(extensionId);
 }
 
-export function rememberExtensionDisplayName(origin: ExtensionUiOrigin | undefined): void {
+function rememberExtensionDisplayName(origin: ExtensionUiOrigin | undefined): void {
   if (!isTrustedExtensionUiOrigin(origin)) return;
   const name = sanitizeExtensionDisplayName(origin.extensionDisplayName);
   if (name) displayNames.set(origin.extensionId, name);
